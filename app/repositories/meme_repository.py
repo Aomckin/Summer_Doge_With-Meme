@@ -1,3 +1,4 @@
+# Repository 层只关心“怎样读写数据库”，不理解 HTTP，也不保存图片。
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, select
@@ -9,11 +10,14 @@ from app.models.tag import MemeTag, Tag
 
 class MemeRepository:
     def __init__(self, session: Session) -> None:
+        # Session 由外部传入，使 Service 能控制整次业务操作的提交和回滚。
         self.session = session
 
     def create(self, meme: Meme) -> Meme:
         self.session.add(meme)
+        # flush 把 SQL 发给数据库但不提交事务，因此出错时仍能统一 rollback。
         self.session.flush()
+        # refresh 重新读取数据库生成的 id、时间等字段。
         self.session.refresh(meme)
         return meme
 
@@ -28,8 +32,11 @@ class MemeRepository:
         tags: Sequence[str] | None = None,
     ) -> list[Meme]:
         statement = select(Meme)
+        # 先规范化并去重，避免 tags=["cat", "CAT"] 被当作两个筛选条件。
         normalized_tags = list(dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip()))
         if normalized_tags:
+            # where 找到含任一指定标签的行；group_by + having 再要求匹配数量
+            # 等于标签总数，于是最终语义是“同时拥有全部指定标签”。
             statement = (
                 statement.join(MemeTag)
                 .join(Tag)
@@ -41,6 +48,7 @@ class MemeRepository:
         return list(self.session.scalars(statement))
 
     def update(self, meme: Meme, changes: Mapping[str, object]) -> Meme:
+        # Repository 不决定哪些字段允许修改；这条业务规则由 Service 负责。
         for field, value in changes.items():
             setattr(meme, field, value)
 
@@ -54,6 +62,7 @@ class MemeRepository:
             dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip())
         )
         if normalized_tags:
+            # 随机范围和列表筛选使用相同的“全部标签”规则。
             statement = (
                 statement.join(MemeTag)
                 .join(Tag)
@@ -61,9 +70,11 @@ class MemeRepository:
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
+        # SQLite 的 random() 为候选行生成随机顺序，只取第一条。
         statement = statement.order_by(func.random()).limit(1)
         return self.session.scalar(statement)
 
     def delete(self, meme: Meme) -> None:
         self.session.delete(meme)
+        # 此处仍不 commit，让 Service 决定整个业务流程是否成功。
         self.session.flush()

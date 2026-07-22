@@ -1,9 +1,11 @@
+# Pydantic Schema 负责 API 边界的数据校验与序列化，不直接执行数据库操作。
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TagResponse(BaseModel):
+    # from_attributes=True 允许直接从 SQLAlchemy ORM 对象读取同名属性。
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -14,12 +16,14 @@ class TagResponse(BaseModel):
 
 
 class MemeCreate(BaseModel):
+    # 创建请求只包含用户填写的元数据；文件尺寸、哈希等由后端计算。
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
     source: str | None = Field(default=None, max_length=500)
 
 
 class MemeUpdate(BaseModel):
+    # PATCH 是“部分修改”，所以每个字段默认都可以不传。
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     source: str | None = Field(default=None, max_length=500)
@@ -27,6 +31,7 @@ class MemeUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_changes(self) -> "MemeUpdate":
+        # model_fields_set 能区分“客户端没传字段”和“客户端明确传了 null”。
         if not self.model_fields_set:
             raise ValueError("At least one field must be provided")
         if "title" in self.model_fields_set and self.title is None:
@@ -35,6 +40,7 @@ class MemeUpdate(BaseModel):
 
 
 class MemeResponse(MemeCreate):
+    # 响应在用户元数据之外，还返回系统生成的文件与数据库信息。
     model_config = ConfigDict(from_attributes=True)
 
     id: int

@@ -101,9 +101,24 @@ def test_delete_original_and_thumbnail(tmp_path: Path) -> None:
     assert not result.thumbnail_path.exists()
 
 
-def test_delete_rejects_paths_outside_storage(tmp_path: Path) -> None:
+def test_delete_does_not_touch_paths_outside_storage(tmp_path: Path) -> None:
     module = load_storage_module()
     storage = module.ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
+    outside = tmp_path / "other.png"
+    outside.write_bytes(make_image_bytes("PNG"))
 
-    with pytest.raises(ValueError, match="outside configured storage"):
-        storage.delete(tmp_path / "other.png", None)
+    storage.delete(outside, None)
+
+    assert outside.is_file()
+
+
+def test_legacy_windows_path_falls_back_to_current_storage(tmp_path: Path) -> None:
+    module = load_storage_module()
+    storage = module.ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
+    current_file = storage.images_dir / "legacy.png"
+    current_file.write_bytes(make_image_bytes("PNG"))
+
+    assert storage.exists(r"C:\old-project\data\images\legacy.png", None)
+
+    storage.delete(r"C:\old-project\data\images\legacy.png", None)
+    assert not current_file.exists()

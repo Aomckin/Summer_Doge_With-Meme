@@ -70,20 +70,20 @@ def test_meme_record_can_be_written_and_read() -> None:
 
 
 def test_meme_schemas_validate_input_and_orm_output() -> None:
-    model_module, schema_module, _ = load_meme_components()
+    _, schema_module, _ = load_meme_components()
     now = datetime.now(UTC)
     create_data = schema_module.MemeCreate(
         title="Schema 测试",
         description="请求数据",
         source="test",
     )
-    meme = model_module.Meme(
+    response = schema_module.MemeResponse(
         id=1,
         **create_data.model_dump(),
         original_filename="original.webp",
         stored_filename="stored.webp",
-        file_path="data/images/stored.webp",
-        thumbnail_path=None,
+        image_url="/media/images/stored.webp",
+        thumbnail_url=None,
         mime_type="image/webp",
         file_size=2048,
         width=800,
@@ -93,9 +93,7 @@ def test_meme_schemas_validate_input_and_orm_output() -> None:
         updated_at=now,
     )
 
-    response = schema_module.MemeResponse.model_validate(meme)
-
     assert response.id == 1
     assert response.title == "Schema 测试"
-    assert response.thumbnail_path is None
+    assert response.thumbnail_url is None
     assert response.created_at is not None

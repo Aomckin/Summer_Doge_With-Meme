@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
@@ -162,10 +162,30 @@ class ImageStorage:
             thumbnail.save(thumbnail_path, format="PNG")
 
     @staticmethod
-    def _path_inside(path: str | Path, root: Path) -> Path:
-        resolved = Path(path).resolve()
+    def filename_from_reference(reference: str | Path) -> str:
+        # 旧数据库可能保存 Windows 路径；先统一分隔符，才能跨平台提取文件名。
+        normalized = str(reference).replace("\\", "/")
+        filename = PurePosixPath(normalized).name
+        if not filename:
+            raise ValueError("File reference does not contain a filename")
+        return filename
+
+    @classmethod
+    def _path_inside(cls, path: str | Path, root: Path) -> Path:
+        candidate = Path(path)
+        if candidate.is_absolute():
+            resolved_candidate = candidate.resolve()
+            try:
+                # 当前存储目录内的绝对路径仍可直接使用，兼容尚未迁移的旧记录。
+                resolved_candidate.relative_to(root)
+            except ValueError:
+                pass
+            else:
+                return resolved_candidate
+
+        # 项目移动后，旧绝对路径已失效；只取文件名并在当前目录重新定位。
+        resolved = (root / cls.filename_from_reference(path)).resolve()
         try:
-            # relative_to() 成功意味着 resolved 确实位于允许的根目录内。
             resolved.relative_to(root)
         except ValueError as error:
             raise ValueError("Path is outside configured storage") from error

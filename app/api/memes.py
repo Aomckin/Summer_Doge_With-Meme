@@ -14,8 +14,10 @@ from fastapi import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import IMAGES_URL_PREFIX, THUMBNAILS_URL_PREFIX
 from app.database import get_db
-from app.schemas.meme import MemeResponse, MemeUpdate
+from app.models.meme import Meme
+from app.schemas.meme import MemeResponse, MemeUpdate, TagResponse
 from app.services.meme_service import (
     MemeFileMissingError,
     MemeNotFoundError,
@@ -53,6 +55,38 @@ def _parse_tags(value: str | None) -> list[str]:
     return [tag.strip() for tag in value.split(",") if tag.strip()]
 
 
+def _to_meme_response(meme: Meme) -> MemeResponse:
+    """把内部 ORM 对象统一转换为不会泄露服务器路径的公开响应。"""
+    image_name = ImageStorage.filename_from_reference(meme.file_path)
+    thumbnail_name = (
+        ImageStorage.filename_from_reference(meme.thumbnail_path)
+        if meme.thumbnail_path is not None
+        else None
+    )
+    return MemeResponse(
+        id=meme.id,
+        title=meme.title,
+        description=meme.description,
+        source=meme.source,
+        original_filename=meme.original_filename,
+        stored_filename=meme.stored_filename,
+        image_url=f"{IMAGES_URL_PREFIX}/{image_name}",
+        thumbnail_url=(
+            f"{THUMBNAILS_URL_PREFIX}/{thumbnail_name}"
+            if thumbnail_name is not None
+            else None
+        ),
+        mime_type=meme.mime_type,
+        file_size=meme.file_size,
+        width=meme.width,
+        height=meme.height,
+        file_hash=meme.file_hash,
+        created_at=meme.created_at,
+        updated_at=meme.updated_at,
+        tags=[TagResponse.model_validate(tag) for tag in meme.tags],
+    )
+
+
 @router.post("", response_model=MemeResponse, status_code=201)
 async def upload_meme(
     service: ServiceDependency,
@@ -81,8 +115,7 @@ async def upload_meme(
     except IntegrityError as error:
         raise HTTPException(status_code=409, detail="Image already exists") from error
 
-    # model_validate() 按响应 Schema 从 ORM 对象取值，避免直接泄露内部字段。
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.get("", response_model=list[MemeResponse])
@@ -94,7 +127,7 @@ def list_memes(
 ) -> list[MemeResponse]:
     # offset/limit 控制分页；同名 tags 查询参数可重复出现并组合筛选。
     return [
-        MemeResponse.model_validate(meme)
+        _to_meme_response(meme)
         for meme in service.list_memes(offset=offset, limit=limit, tags=tags)
     ]
 
@@ -112,7 +145,7 @@ def get_random_meme(
     except MemeFileMissingError as error:
         # 410 表示记录曾存在，但其对应文件已经不可用。
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.get("/{meme_id}", response_model=MemeResponse)
@@ -123,7 +156,7 @@ def get_meme(meme_id: int, service: ServiceDependency) -> MemeResponse:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except MemeFileMissingError as error:
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.patch("/{meme_id}", response_model=MemeResponse)
@@ -144,7 +177,7 @@ def update_meme(
         raise HTTPException(status_code=410, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.delete("/{meme_id}", status_code=204)

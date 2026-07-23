@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
+from app.models.meme import Meme
 from app.storage.image_storage import ImageStorage
 
 
@@ -162,6 +163,36 @@ def test_upload_duplicate_image_returns_conflict(api_context) -> None:
     assert second.status_code == 409
     assert len(list(storage.images_dir.iterdir())) == 1
     assert len(list(storage.thumbnails_dir.iterdir())) == 1
+
+
+def test_upload_returns_browser_media_urls_without_local_paths(api_context) -> None:
+    app, session, _ = api_context
+    content = make_image_bytes()
+
+    response = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("url-test.png", content, "image/png")},
+        data={"title": "URL test"},
+    )
+
+    body = response.json()
+    stored = session.get(Meme, body["id"])
+
+    assert response.status_code == 201
+    assert "file_path" not in body
+    assert "thumbnail_path" not in body
+    assert body["image_url"].startswith("/media/images/")
+    assert body["thumbnail_url"].startswith("/media/thumbnails/")
+    assert request(app, "GET", body["image_url"]).content == content
+    assert (
+        request(app, "GET", body["thumbnail_url"]).headers["content-type"]
+        == "image/png"
+    )
+    assert stored is not None
+    assert stored.file_path == stored.stored_filename
+    assert stored.thumbnail_path == body["thumbnail_url"].rsplit("/", 1)[-1]
 
 
 def test_unknown_meme_returns_not_found(api_context) -> None:

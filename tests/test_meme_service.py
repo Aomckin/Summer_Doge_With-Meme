@@ -48,7 +48,7 @@ def create_service(tmp_path: Path):
 
 
 def test_create_meme_saves_files_and_database_record(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, storage = create_service(tmp_path)
 
     try:
         meme = service.create_meme(
@@ -60,8 +60,14 @@ def test_create_meme_saves_files_and_database_record(tmp_path: Path) -> None:
         )
 
         assert meme.id is not None
-        assert Path(meme.file_path).is_file()
-        assert Path(meme.thumbnail_path).is_file()
+        assert meme.file_path == meme.stored_filename
+        assert "/" not in meme.file_path
+        assert "\\" not in meme.file_path
+        assert meme.thumbnail_path is not None
+        assert "/" not in meme.thumbnail_path
+        assert "\\" not in meme.thumbnail_path
+        assert (storage.images_dir / meme.file_path).is_file()
+        assert (storage.thumbnails_dir / meme.thumbnail_path).is_file()
         assert session.get(Meme, meme.id) is meme
     finally:
         session.close()
@@ -92,13 +98,13 @@ def test_query_list_and_update_meme(tmp_path: Path) -> None:
 
 
 def test_delete_meme_removes_record_and_files(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, storage = create_service(tmp_path)
 
     try:
         meme = service.create_meme("delete.png", make_image_bytes(), title="删除测试")
         meme_id = meme.id
-        file_path = Path(meme.file_path)
-        thumbnail_path = Path(meme.thumbnail_path)
+        file_path = storage.images_dir / meme.file_path
+        thumbnail_path = storage.thumbnails_dir / meme.thumbnail_path
 
         service.delete_meme(meme_id)
 

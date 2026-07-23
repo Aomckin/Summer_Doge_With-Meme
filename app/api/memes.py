@@ -1,18 +1,30 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import IMAGES_URL_PREFIX, THUMBNAILS_URL_PREFIX
 from app.database import get_db
-from app.schemas.meme import MemeResponse, MemeUpdate
+from app.models.meme import Meme
+from app.schemas.meme import MemeResponse, MemeUpdate, TagResponse
 from app.services.meme_service import (
     MemeFileMissingError,
     MemeNotFoundError,
     MemeService,
     NoMemesAvailableError,
 )
-from app.storage.image_storage import ImageTooLargeError, InvalidImageError
+from app.storage.image_storage import ImageStorage, ImageTooLargeError, InvalidImageError
 
 
 # API 层只处理 HTTP 输入输出：解析请求、调用 Service、转换异常和响应。
@@ -20,9 +32,16 @@ from app.storage.image_storage import ImageTooLargeError, InvalidImageError
 router = APIRouter(prefix="/api/memes", tags=["memes"])
 
 
-def get_meme_service(session: Annotated[Session, Depends(get_db)]) -> MemeService:
+def get_meme_service(
+    request: Request,
+    session: Annotated[Session, Depends(get_db)],
+) -> MemeService:
     # FastAPI 先通过 get_db 提供一次请求专用的 Session，再组装 Service。
-    return MemeService(session)
+    storage = ImageStorage(
+        request.app.state.images_dir,
+        request.app.state.thumbnails_dir,
+    )
+    return MemeService(session, storage)
 
 
 # 把较长的依赖声明起别名，下面每个接口都能直接写 service: ServiceDependency。
@@ -34,6 +53,38 @@ def _parse_tags(value: str | None) -> list[str]:
     if value is None:
         return []
     return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+
+def _to_meme_response(meme: Meme) -> MemeResponse:
+    """把内部 ORM 对象统一转换为不会泄露服务器路径的公开响应。"""
+    image_name = ImageStorage.filename_from_reference(meme.file_path)
+    thumbnail_name = (
+        ImageStorage.filename_from_reference(meme.thumbnail_path)
+        if meme.thumbnail_path is not None
+        else None
+    )
+    return MemeResponse(
+        id=meme.id,
+        title=meme.title,
+        description=meme.description,
+        source=meme.source,
+        original_filename=meme.original_filename,
+        stored_filename=meme.stored_filename,
+        image_url=f"{IMAGES_URL_PREFIX}/{image_name}",
+        thumbnail_url=(
+            f"{THUMBNAILS_URL_PREFIX}/{thumbnail_name}"
+            if thumbnail_name is not None
+            else None
+        ),
+        mime_type=meme.mime_type,
+        file_size=meme.file_size,
+        width=meme.width,
+        height=meme.height,
+        file_hash=meme.file_hash,
+        created_at=meme.created_at,
+        updated_at=meme.updated_at,
+        tags=[TagResponse.model_validate(tag) for tag in meme.tags],
+    )
 
 
 @router.post("", response_model=MemeResponse, status_code=201)
@@ -64,8 +115,7 @@ async def upload_meme(
     except IntegrityError as error:
         raise HTTPException(status_code=409, detail="Image already exists") from error
 
-    # model_validate() 按响应 Schema 从 ORM 对象取值，避免直接泄露内部字段。
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.get("", response_model=list[MemeResponse])
@@ -74,11 +124,12 @@ def list_memes(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     tags: Annotated[list[str] | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
 ) -> list[MemeResponse]:
-    # offset/limit 控制分页；同名 tags 查询参数可重复出现并组合筛选。
+    # q 搜标题和描述；同名 tags 可重复，并与 q、分页组合使用。
     return [
-        MemeResponse.model_validate(meme)
-        for meme in service.list_memes(offset=offset, limit=limit, tags=tags)
+        _to_meme_response(meme)
+        for meme in service.list_memes(offset=offset, limit=limit, tags=tags, q=q)
     ]
 
 
@@ -95,7 +146,7 @@ def get_random_meme(
     except MemeFileMissingError as error:
         # 410 表示记录曾存在，但其对应文件已经不可用。
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.get("/{meme_id}", response_model=MemeResponse)
@@ -106,7 +157,7 @@ def get_meme(meme_id: int, service: ServiceDependency) -> MemeResponse:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except MemeFileMissingError as error:
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.patch("/{meme_id}", response_model=MemeResponse)
@@ -127,7 +178,7 @@ def update_meme(
         raise HTTPException(status_code=410, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return MemeResponse.model_validate(meme)
+    return _to_meme_response(meme)
 
 
 @router.delete("/{meme_id}", status_code=204)
@@ -136,7 +187,5 @@ def delete_meme(meme_id: int, service: ServiceDependency) -> Response:
         service.delete_meme(meme_id)
     except MemeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except MemeFileMissingError as error:
-        raise HTTPException(status_code=410, detail=str(error)) from error
     # 204 的含义是操作成功且响应体为空。
     return Response(status_code=204)

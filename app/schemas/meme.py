@@ -46,8 +46,8 @@ class MemeResponse(MemeCreate):
     id: int
     original_filename: str
     stored_filename: str
-    file_path: str
-    thumbnail_path: str | None
+    image_url: str
+    thumbnail_url: str | None
     mime_type: str
     file_size: int
     width: int

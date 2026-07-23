@@ -1,6 +1,6 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v0.1 提供图片上传、元数据管理、标签筛选和随机 Meme API；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.1.1，提供图片上传、元数据管理、关键词检索、标签筛选和随机 Meme API；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -53,6 +53,8 @@ python -m uvicorn app.main:app --reload
 python -m pytest -v
 ```
 
+Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录已被 Git 忽略。
+
 ## 数据库配置
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
@@ -64,25 +66,29 @@ python -m pytest -v
 ## 图片存储
 
 - 原图保存到 `data/images/`，缩略图保存到 `data/thumbnails/`。
+- 浏览器可通过 `/media/images/<文件名>` 访问原图，通过 `/media/thumbnails/<文件名>` 访问缩略图。
 - 支持 JPEG、PNG、WEBP 和 GIF，默认文件大小上限为 10 MiB。
 - 存储文件使用随机 UUID 命名，缩略图统一保存为 PNG，最大尺寸为 400×400。
-- 图片内容使用 SHA-256 计算哈希；原图和缩略图路径均不会提交到 Git。
+- 新数据库记录只保存文件名，不绑定项目绝对路径；读取旧记录时也兼容原先保存的 Windows 或其他绝对路径。
+- 图片内容使用 SHA-256 计算哈希；原图和缩略图文件均不会提交到 Git。
 
 ## 业务服务
 
-所有 Meme 创建、查询、列表、修改和删除操作统一通过 `MemeService`。Service 负责协调 Repository 与 ImageStorage，并控制数据库事务：数据库写入失败时回滚事务并删除已保存文件；记录存在但图片缺失时返回明确的业务异常。
+所有 Meme 创建、查询、列表、修改和删除操作统一通过 `MemeService`。Service 负责协调 Repository 与 ImageStorage，并控制数据库事务：数据库写入失败时回滚事务并删除已保存文件；读取记录时会报告图片缺失，但 DELETE 仍能清理这类残留数据库记录。
 
 ## Meme API
 
 所有接口均以 `/api` 开头，可在 <http://127.0.0.1:8000/docs> 使用 Swagger 操作：
 
 - `POST /api/memes`：使用 multipart 表单上传图片及标题、描述、来源和逗号分隔的标签。
-- `GET /api/memes`：获取列表，支持 `offset`、`limit` 和重复的 `tags` 参数。
+- `GET /api/memes`：获取列表，支持搜索标题和描述的 `q`、分页参数 `offset`/`limit`，以及可重复的 `tags` 参数。
 - `GET /api/memes/random`：随机获取 Meme，可使用重复的 `tags` 参数限定范围。
 - `GET /api/memes/{meme_id}`：获取详情。
 - `PATCH /api/memes/{meme_id}`：修改标题、描述、来源或标签数组。
 - `DELETE /api/memes/{meme_id}`：删除记录、原图和缩略图。
 - `GET /api/tags`：按名称排序获取标签列表。
+
+Meme 响应使用 `image_url` 和可为 `null` 的 `thumbnail_url` 提供浏览器可访问地址，不会返回服务器本地的 `file_path` 或 `thumbnail_path`。
 
 如需使用其他数据库地址，可在启动应用前设置 `DATABASE_URL` 环境变量：
 
@@ -113,6 +119,7 @@ meme-vault/
 ├── tests/                   # Pytest 测试
 ├── .env.example
 ├── .gitignore
+├── pytest.ini              # Pytest 默认临时目录配置
 ├── requirements.txt
 └── README.md
 ```

@@ -56,8 +56,8 @@ class MemeService:
             description=description,
             original_filename=stored.original_filename,
             stored_filename=stored.stored_filename,
-            file_path=str(stored.file_path),
-            thumbnail_path=str(stored.thumbnail_path),
+            file_path=stored.file_path.name,
+            thumbnail_path=stored.thumbnail_path.name,
             mime_type=stored.mime_type,
             file_size=stored.file_size,
             width=stored.width,
@@ -94,9 +94,10 @@ class MemeService:
         offset: int = 0,
         limit: int = 100,
         tags: Sequence[str] | None = None,
+        q: str | None = None,
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
-        return self.repository.list(offset=offset, limit=limit, tags=tags)
+        return self.repository.list(offset=offset, limit=limit, tags=tags, q=q)
 
     def update_meme(
         self,
@@ -138,7 +139,10 @@ class MemeService:
         return meme
 
     def delete_meme(self, meme_id: int) -> None:
-        meme = self.get_meme(meme_id)
+        # 删除的目标是清理记录；即使磁盘文件已丢失，也不能阻止数据库删除。
+        meme = self.repository.get_by_id(meme_id)
+        if meme is None:
+            raise MemeNotFoundError(f"Meme {meme_id} does not exist")
         # ORM 对象删除后不应再依赖它取路径，所以提前保存普通字符串。
         file_path = meme.file_path
         thumbnail_path = meme.thumbnail_path

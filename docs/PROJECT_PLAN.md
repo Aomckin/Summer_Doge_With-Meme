@@ -83,7 +83,7 @@ meme-vault/
 
 字段：`id`、`title`、`description`、`original_filename`、`stored_filename`、`file_path`、`thumbnail_path`、`mime_type`、`file_size`、`width`、`height`、`file_hash`、`source`、`created_at`、`updated_at`。
 
-其中 `file_hash` 用于重复检测；路径字段分别指向原图和缩略图；原始文件名与系统安全存储名分开记录。
+其中 `file_hash` 用于重复检测；路径字段优先保存原图和缩略图的文件名或相对引用，并兼容读取旧绝对路径；原始文件名与系统安全存储名分开记录。
 
 ### Tag
 
@@ -216,6 +216,18 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 - [x] 创建 Git 版本提交
 - [x] 标记 v0.1 完成
 
+### v0.1.1：后端媒体访问与检索收尾（已完成）
+
+- [x] 原图和缩略图提供同源 HTTP URL
+- [x] API 不再返回服务器本地路径
+- [x] 新记录保存可迁移文件名，并兼容旧数据库路径引用
+- [x] DELETE 可清理图片已缺失的 Meme 记录
+- [x] Meme 列表支持在标题和描述中进行关键词搜索
+- [x] Pytest 使用并忽略 `.pytest_tmp/`
+- [x] 补充行为测试、README 和项目计划
+
+验收：媒体 URL 可由浏览器访问；公开响应不含本地路径；`q` 可与标签和分页组合；缺图记录可删除；全部测试通过。
+
 ### v0.2：TypeScript 前端
 
 - [ ] 创建前端基础目录并配置 TypeScript
@@ -309,7 +321,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.1 后端基础与 Meme 存储已完成
+当前状态：v0.1.1 后端媒体访问与检索收尾已完成
 后端：Python + FastAPI
 前端：TypeScript
 数据库：SQLite

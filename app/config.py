@@ -7,6 +7,10 @@ from pathlib import Path
 # 使用绝对路径后，无论从哪个目录启动程序，data 都会指向同一个位置。
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+IMAGES_DIR = DATA_DIR / "images"
+THUMBNAILS_DIR = DATA_DIR / "thumbnails"
+IMAGES_URL_PREFIX = "/media/images"
+THUMBNAILS_URL_PREFIX = "/media/thumbnails"
 DATABASE_PATH = DATA_DIR / "meme_vault.db"
 
 # 部署时可以用环境变量替换数据库；本地开发则自动使用 SQLite 文件。

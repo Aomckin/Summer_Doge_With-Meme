@@ -10,8 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base
-from app.services.meme_service import MemeService
+from app.database import Base, get_db
 from app.storage.image_storage import ImageStorage
 
 
@@ -31,7 +30,7 @@ def make_image_bytes() -> bytes:
 
 @pytest.fixture
 def api_context(tmp_path: Path):
-    api_module, main_module = load_api_components()
+    _, main_module = load_api_components()
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -39,13 +38,15 @@ def api_context(tmp_path: Path):
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
-    storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
-    service = MemeService(session, storage)
-    main_module.app.dependency_overrides[api_module.get_meme_service] = lambda: service
+    images_dir = tmp_path / "images"
+    thumbnails_dir = tmp_path / "thumbnails"
+    app = main_module.create_app(images_dir, thumbnails_dir)
+    storage = ImageStorage(images_dir, thumbnails_dir)
+    app.dependency_overrides[get_db] = lambda: session
 
-    yield main_module.app, session, storage
+    yield app, session, storage
 
-    main_module.app.dependency_overrides.clear()
+    app.dependency_overrides.clear()
     session.close()
 
 
@@ -63,6 +64,26 @@ def test_meme_router_exists() -> None:
 
     assert hasattr(api_module, "router"), "Meme Router is missing"
     assert hasattr(api_module, "get_meme_service"), "Service dependency is missing"
+
+
+def test_create_app_creates_and_shares_media_directories(tmp_path: Path) -> None:
+    main_module = import_module("app.main")
+    images_dir = tmp_path / "nested" / "images"
+    thumbnails_dir = tmp_path / "nested" / "thumbnails"
+
+    app = main_module.create_app(images_dir, thumbnails_dir)
+    mounts = {
+        route.path: route.app
+        for route in app.routes
+        if getattr(route, "path", "").startswith("/media/")
+    }
+
+    assert images_dir.is_dir()
+    assert thumbnails_dir.is_dir()
+    assert app.state.images_dir == images_dir.resolve()
+    assert app.state.thumbnails_dir == thumbnails_dir.resolve()
+    assert Path(mounts["/media/images"].directory) == app.state.images_dir
+    assert Path(mounts["/media/thumbnails"].directory) == app.state.thumbnails_dir
 
 
 def test_meme_routes_are_registered_in_openapi(api_context) -> None:

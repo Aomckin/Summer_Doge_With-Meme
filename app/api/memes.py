@@ -1,6 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,7 +22,7 @@ from app.services.meme_service import (
     MemeService,
     NoMemesAvailableError,
 )
-from app.storage.image_storage import ImageTooLargeError, InvalidImageError
+from app.storage.image_storage import ImageStorage, ImageTooLargeError, InvalidImageError
 
 
 # API 层只处理 HTTP 输入输出：解析请求、调用 Service、转换异常和响应。
@@ -20,9 +30,16 @@ from app.storage.image_storage import ImageTooLargeError, InvalidImageError
 router = APIRouter(prefix="/api/memes", tags=["memes"])
 
 
-def get_meme_service(session: Annotated[Session, Depends(get_db)]) -> MemeService:
+def get_meme_service(
+    request: Request,
+    session: Annotated[Session, Depends(get_db)],
+) -> MemeService:
     # FastAPI 先通过 get_db 提供一次请求专用的 Session，再组装 Service。
-    return MemeService(session)
+    storage = ImageStorage(
+        request.app.state.images_dir,
+        request.app.state.thumbnails_dir,
+    )
+    return MemeService(session, storage)
 
 
 # 把较长的依赖声明起别名，下面每个接口都能直接写 service: ServiceDependency。

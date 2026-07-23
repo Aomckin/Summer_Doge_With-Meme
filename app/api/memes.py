@@ -187,7 +187,5 @@ def delete_meme(meme_id: int, service: ServiceDependency) -> Response:
         service.delete_meme(meme_id)
     except MemeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except MemeFileMissingError as error:
-        raise HTTPException(status_code=410, detail=str(error)) from error
     # 204 的含义是操作成功且响应体为空。
     return Response(status_code=204)

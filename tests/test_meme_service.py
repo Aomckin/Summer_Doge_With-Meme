@@ -115,6 +115,25 @@ def test_delete_meme_removes_record_and_files(tmp_path: Path) -> None:
         session.close()
 
 
+def test_delete_meme_removes_record_when_files_are_missing(tmp_path: Path) -> None:
+    _, service, session, _ = create_service(tmp_path)
+
+    try:
+        meme = service.create_meme(
+            "missing.png",
+            make_image_bytes(),
+            title="缺图删除",
+        )
+        meme_id = meme.id
+        service.storage.delete(meme.file_path, meme.thumbnail_path)
+
+        service.delete_meme(meme_id)
+
+        assert session.get(Meme, meme_id) is None
+    finally:
+        session.close()
+
+
 def test_create_meme_removes_saved_files_when_database_write_fails(
     tmp_path: Path,
 ) -> None:

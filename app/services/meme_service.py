@@ -139,7 +139,10 @@ class MemeService:
         return meme
 
     def delete_meme(self, meme_id: int) -> None:
-        meme = self.get_meme(meme_id)
+        # 删除的目标是清理记录；即使磁盘文件已丢失，也不能阻止数据库删除。
+        meme = self.repository.get_by_id(meme_id)
+        if meme is None:
+            raise MemeNotFoundError(f"Meme {meme_id} does not exist")
         # ORM 对象删除后不应再依赖它取路径，所以提前保存普通字符串。
         file_path = meme.file_path
         thumbnail_path = meme.thumbnail_path

@@ -230,6 +230,26 @@ def test_list_memes_combines_keyword_tags_and_pagination(api_context) -> None:
     assert [tag["name"] for tag in result["tags"]] == ["funny"]
 
 
+def test_delete_removes_database_record_when_media_is_missing(api_context) -> None:
+    app, session, storage = api_context
+    uploaded = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("missing.png", make_image_bytes(), "image/png")},
+        data={"title": "缺图删除"},
+    ).json()
+    meme = session.get(Meme, uploaded["id"])
+    assert meme is not None
+    meme_id = meme.id
+    storage.delete(meme.file_path, meme.thumbnail_path)
+
+    deletion = request(app, "DELETE", f"/api/memes/{meme_id}")
+
+    assert deletion.status_code == 204
+    assert session.get(Meme, meme_id) is None
+
+
 def test_unknown_meme_returns_not_found(api_context) -> None:
     app, _, _ = api_context
 

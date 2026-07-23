@@ -124,11 +124,12 @@ def list_memes(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     tags: Annotated[list[str] | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
 ) -> list[MemeResponse]:
-    # offset/limit 控制分页；同名 tags 查询参数可重复出现并组合筛选。
+    # q 搜标题和描述；同名 tags 可重复，并与 q、分页组合使用。
     return [
         _to_meme_response(meme)
-        for meme in service.list_memes(offset=offset, limit=limit, tags=tags)
+        for meme in service.list_memes(offset=offset, limit=limit, tags=tags, q=q)
     ]
 
 

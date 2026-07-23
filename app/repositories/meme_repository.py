@@ -1,7 +1,7 @@
 # Repository 层只关心“怎样读写数据库”，不理解 HTTP，也不保存图片。
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.meme import Meme
@@ -30,10 +30,25 @@ class MemeRepository:
         offset: int = 0,
         limit: int = 100,
         tags: Sequence[str] | None = None,
+        q: str | None = None,
     ) -> list[Meme]:
         statement = select(Meme)
+        search = (q or "").strip().lower()
+        if search:
+            # coalesce 把空描述视为空字符串；autoescape 让 %、_ 按普通字符搜索。
+            statement = statement.where(
+                or_(
+                    func.lower(Meme.title).contains(search, autoescape=True),
+                    func.lower(func.coalesce(Meme.description, "")).contains(
+                        search,
+                        autoescape=True,
+                    ),
+                )
+            )
         # 先规范化并去重，避免 tags=["cat", "CAT"] 被当作两个筛选条件。
-        normalized_tags = list(dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip()))
+        normalized_tags = list(
+            dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip())
+        )
         if normalized_tags:
             # where 找到含任一指定标签的行；group_by + having 再要求匹配数量
             # 等于标签总数，于是最终语义是“同时拥有全部指定标签”。

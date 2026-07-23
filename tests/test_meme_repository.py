@@ -73,6 +73,31 @@ def test_list_memes_supports_offset_and_limit() -> None:
         session.close()
 
 
+def test_list_memes_searches_title_and_description_case_insensitively() -> None:
+    repository_class = load_repository_class()
+    session = create_session()
+    repository = repository_class(session)
+
+    try:
+        title_match = build_meme(1)
+        title_match.title = "Grumpy CAT"
+        description_match = build_meme(2)
+        description_match.description = "A cat reaction"
+        unrelated = build_meme(3)
+        unrelated.title = "Dog"
+        for meme in (title_match, description_match, unrelated):
+            repository.create(meme)
+
+        assert repository.list(q="  cat  ") == [title_match, description_match]
+        assert repository.list(q="   ") == [
+            title_match,
+            description_match,
+            unrelated,
+        ]
+    finally:
+        session.close()
+
+
 def test_update_meme_fields() -> None:
     repository_class = load_repository_class()
     session = create_session()

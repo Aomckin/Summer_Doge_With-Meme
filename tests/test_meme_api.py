@@ -23,9 +23,9 @@ def load_api_components():
     return api_module, main_module
 
 
-def make_image_bytes() -> bytes:
+def make_image_bytes(color: str = "blue") -> bytes:
     buffer = BytesIO()
-    Image.new("RGB", (320, 240), color="blue").save(buffer, format="PNG")
+    Image.new("RGB", (320, 240), color=color).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -193,6 +193,41 @@ def test_upload_returns_browser_media_urls_without_local_paths(api_context) -> N
     assert stored is not None
     assert stored.file_path == stored.stored_filename
     assert stored.thumbnail_path == body["thumbnail_url"].rsplit("/", 1)[-1]
+
+
+def test_list_memes_combines_keyword_tags_and_pagination(api_context) -> None:
+    app, _, _ = api_context
+    uploads = [
+        ("dog.png", "Dog only", None, "funny", "red"),
+        ("title-cat.png", "Funny Cat", None, "funny", "green"),
+        ("description-cat.png", "Reaction", "A cat reaction", "serious", "yellow"),
+    ]
+    for filename, title, description, tags, color in uploads:
+        response = request(
+            app,
+            "POST",
+            "/api/memes",
+            files={"file": (filename, make_image_bytes(color), "image/png")},
+            data={
+                "title": title,
+                "description": description or "",
+                "tags": tags,
+            },
+        )
+        assert response.status_code == 201
+
+    response = request(
+        app,
+        "GET",
+        "/api/memes",
+        params=[("q", "cat"), ("tags", "funny"), ("offset", "0"), ("limit", "1")],
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    result = response.json()[0]
+    assert "cat" in (result["title"] + " " + (result["description"] or "")).lower()
+    assert [tag["name"] for tag in result["tags"]] == ["funny"]
 
 
 def test_unknown_meme_returns_not_found(api_context) -> None:

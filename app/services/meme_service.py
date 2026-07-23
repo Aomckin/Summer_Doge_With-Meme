@@ -94,9 +94,10 @@ class MemeService:
         offset: int = 0,
         limit: int = 100,
         tags: Sequence[str] | None = None,
+        q: str | None = None,
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
-        return self.repository.list(offset=offset, limit=limit, tags=tags)
+        return self.repository.list(offset=offset, limit=limit, tags=tags, q=q)
 
     def update_meme(
         self,

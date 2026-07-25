@@ -27,6 +27,7 @@ data/thumbnails/*
 !data/thumbnails/.gitkeep
 
 # Editor and operating-system files
+.worktrees/
 .idea/
 .vscode/
 .DS_Store

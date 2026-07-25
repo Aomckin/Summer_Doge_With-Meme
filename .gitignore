@@ -10,6 +10,10 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
 # Local configuration and secrets
 .env
 .env.*

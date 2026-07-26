@@ -1,10 +1,11 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.1.1，提供图片上传、元数据管理、关键词检索、标签筛选和随机 Meme API；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme API 外，还提供原生 TypeScript 网页管理台；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
 - Python 3.11 或更高版本
+- Node.js 20.19 或更高版本
 - Git
 
 ## 创建虚拟环境
@@ -32,12 +33,48 @@ python -m pip install -r requirements.txt
 
 ## 启动应用
 
+### 开发模式
+
+先安装前端依赖：
+
+```powershell
+npm.cmd --prefix frontend install
+```
+
+分别在两个终端启动后端与 Vite 开发服务器：
+
 ```powershell
 python -m uvicorn app.main:app --reload
 ```
 
-启动后可以访问：
+```powershell
+npm.cmd --prefix frontend run dev
+```
 
+开发页面默认位于 <http://127.0.0.1:5173>。Vite 会把 `/api` 和 `/media` 代理到 <http://127.0.0.1:8000>。
+
+如需使用其他后端地址，在 `frontend/.env` 中设置：
+
+```dotenv
+BACKEND_TARGET=http://127.0.0.1:8000
+```
+
+可以复制 [`frontend/.env.example`](frontend/.env.example) 作为起点。这个变量只配置 Vite 开发代理，不会进入浏览器构建产物。
+
+### 生产构建
+
+先构建前端，再启动或重启 FastAPI：
+
+```powershell
+npm.cmd --prefix frontend run build
+python -m uvicorn app.main:app
+```
+
+`build` 会先执行 `tsc --noEmit` 类型检查，再执行 Vite 构建。只有 `frontend/dist/index.html` 存在时，FastAPI 才会在根路径托管网页；没有构建产物时，后端 API 仍可独立启动。
+
+生产模式可访问：
+
+- 网页管理台：<http://127.0.0.1:8000/>
 - 健康检查：<http://127.0.0.1:8000/api/health>
 - Swagger API 文档：<http://127.0.0.1:8000/docs>
 
@@ -50,10 +87,24 @@ python -m uvicorn app.main:app --reload
 ## 运行测试
 
 ```powershell
+npm.cmd --prefix frontend run typecheck
+npm.cmd --prefix frontend test
+npm.cmd --prefix frontend run build
 python -m pytest -v
 ```
 
+如果 PowerShell 允许执行 npm 脚本，也可以把 `npm.cmd` 简写为 `npm`。
+
 Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录已被 Git 忽略。
+
+## TypeScript 前端
+
+- 顶部工具栏提供标题/描述搜索、随机抽取和上传入口。
+- 左侧资料库按网格展示 Meme，并支持多标签筛选和分批加载。
+- 右侧详情面板提供原图、元数据、编辑与删除操作。
+- 搜索输入使用 300ms 防抖；多标签沿用后端的“同时包含全部标签”语义。
+- 上传表单不会提交空的描述或来源字段；编辑时可通过 JSON `null` 清空这两个字段。
+- 列表、上传、随机、保存和删除均提供独立的加载或错误反馈。
 
 ## 数据库配置
 
@@ -115,6 +166,12 @@ meme-vault/
 ├── data/
 │   ├── images/              # 原图（内容不提交）
 │   └── thumbnails/          # 缩略图（内容不提交）
+├── frontend/
+│   ├── src/                 # TypeScript、界面样式和前端测试
+│   ├── index.html           # Vite 页面入口
+│   ├── package.json         # 前端命令与依赖
+│   ├── tsconfig.json        # 严格 TypeScript 配置
+│   └── vite.config.ts       # 开发代理、构建与 Vitest 配置
 ├── docs/PROJECT_PLAN.md     # 长期开发蓝图与进度
 ├── tests/                   # Pytest 测试
 ├── .env.example
@@ -128,5 +185,5 @@ meme-vault/
 
 - 每次只执行 `docs/PROJECT_PLAN.md` 中的一个阶段。
 - API Key 和本地配置写入 `.env`，不得提交到 Git。
-- 数据库、上传图片、缩略图、虚拟环境和缓存文件不得提交。
+- 数据库、上传图片、缩略图、虚拟环境、`node_modules`、前端构建产物和缓存文件不得提交。
 - 每个阶段完成后运行相关验证，并更新项目计划中的复选框。

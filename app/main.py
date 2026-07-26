@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.memes import router as meme_router
 from app.api.tags import router as tag_router
 from app.config import (
+    FRONTEND_DIST_DIR,
     IMAGES_DIR,
     IMAGES_URL_PREFIX,
     THUMBNAILS_DIR,
@@ -32,9 +33,11 @@ def health_check() -> dict[str, str]:
 def create_app(
     images_dir: Path = IMAGES_DIR,
     thumbnails_dir: Path = THUMBNAILS_DIR,
+    frontend_dir: Path = FRONTEND_DIST_DIR,
 ) -> FastAPI:
     resolved_images = images_dir.resolve()
     resolved_thumbnails = thumbnails_dir.resolve()
+    resolved_frontend = frontend_dir.resolve()
 
     # StaticFiles 初始化时要求目录已经存在，因此先创建再挂载。
     resolved_images.mkdir(parents=True, exist_ok=True)
@@ -58,6 +61,15 @@ def create_app(
     application.include_router(meme_router)
     application.include_router(tag_router)
     application.add_api_route("/api/health", health_check, methods=["GET"])
+
+    # 根路径挂载必须最后注册，避免吞掉 API、媒体与 Swagger 路由。
+    # 只有完整构建的入口文件存在时才启用，后端因此可独立启动。
+    if (resolved_frontend / "index.html").is_file():
+        application.mount(
+            "/",
+            StaticFiles(directory=resolved_frontend, html=True),
+            name="frontend",
+        )
     return application
 
 

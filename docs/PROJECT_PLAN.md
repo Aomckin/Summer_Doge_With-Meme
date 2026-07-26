@@ -230,11 +230,13 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 ### v0.2：TypeScript 前端
 
-- [ ] 创建前端基础目录并配置 TypeScript
-- [ ] 实现 Meme 上传、网格展示和详情视图
-- [ ] 实现标题搜索、标签筛选和随机按钮
-- [ ] 实现编辑和删除
-- [ ] 处理加载状态和错误提示
+- [x] 创建前端基础目录并配置 TypeScript
+- [x] 实现 Meme 上传、网格展示和详情视图
+- [x] 实现标题搜索、标签筛选和随机按钮
+- [x] 实现编辑和删除
+- [x] 处理加载状态和错误提示
+
+验收：Vite 开发代理与 FastAPI 生产托管正常；上传、网格、详情、搜索、多标签筛选、随机、编辑、删除、分批加载和错误重试形成完整闭环；类型检查、前端测试、生产构建与 Pytest 全部通过。
 
 ### v0.3：AI 自动标签
 
@@ -321,13 +323,13 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.1.1 后端媒体访问与检索收尾已完成
+当前状态：v0.2 TypeScript 前端已完成
 后端：Python + FastAPI
-前端：TypeScript
+前端：Vite + 原生 TypeScript
 数据库：SQLite
 ORM：SQLAlchemy
 图片处理：Pillow
 图片存储：本地文件系统
-测试：Pytest
-下一步：v0.2——TypeScript 前端
+测试：Vitest + jsdom + Pytest
+下一步：v0.3——AI 自动标签
 ```

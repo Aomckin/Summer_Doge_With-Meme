@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 IMAGES_DIR = DATA_DIR / "images"
 THUMBNAILS_DIR = DATA_DIR / "thumbnails"
+FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 IMAGES_URL_PREFIX = "/media/images"
 THUMBNAILS_URL_PREFIX = "/media/thumbnails"
 DATABASE_PATH = DATA_DIR / "meme_vault.db"

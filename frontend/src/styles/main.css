@@ -353,19 +353,24 @@ h2 {
 }
 
 .meme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px;
+  column-width: 220px;
+  column-gap: 14px;
 }
 
 .meme-card {
+  position: relative;
+  display: inline-block;
   overflow: hidden;
-  min-height: 250px;
+  width: 100%;
+  min-height: 0;
+  margin: 0 0 14px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 14px;
   text-align: left;
+  vertical-align: top;
   background: #11151d;
+  break-inside: avoid;
   transition:
     transform 160ms ease,
     border-color 160ms ease,
@@ -383,7 +388,22 @@ h2 {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-.card-image,
+.card-image {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  background:
+    linear-gradient(135deg, rgb(230 255 74 / 6%), transparent),
+    #0b0e13;
+}
+
+.card-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .detail-image {
   position: relative;
   display: grid;
@@ -394,11 +414,6 @@ h2 {
     #0b0e13;
 }
 
-.card-image {
-  aspect-ratio: 4 / 3;
-}
-
-.card-image img,
 .detail-image img {
   width: 100%;
   height: 100%;
@@ -415,13 +430,28 @@ h2 {
   display: block;
 }
 
-.card-body {
+.card-overlay {
+  position: absolute;
+  inset: auto 0 0;
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 42px 14px 14px;
+  background: linear-gradient(transparent, rgb(7 9 13 / 92%));
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
-.card-body strong {
+.meme-card:hover .card-overlay,
+.meme-card:focus-visible .card-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.card-overlay strong {
   overflow: hidden;
   font-size: 14px;
   line-height: 1.35;
@@ -707,9 +737,6 @@ label small {
     padding: 16px;
   }
 
-  .meme-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

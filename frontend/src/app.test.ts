@@ -83,6 +83,31 @@ afterEach(() => {
 });
 
 describe("MemeVaultApp", () => {
+  it("renders natural-ratio cards with overlay metadata", async () => {
+    const portrait = {
+      ...makeMeme(1, "纵向 Meme"),
+      width: 1260,
+      height: 1861,
+    };
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([portrait]) }),
+    );
+
+    await app.start();
+
+    const card = document.querySelector<HTMLElement>('[data-meme-id="1"]');
+    const image = card?.querySelector<HTMLImageElement>(".card-image img");
+    expect(image?.getAttribute("width")).toBe("1260");
+    expect(image?.getAttribute("height")).toBe("1861");
+    expect(card?.querySelector(".card-overlay strong")?.textContent).toBe(
+      "纵向 Meme",
+    );
+    expect(card?.querySelector(".card-overlay .tag")?.textContent).toBe(
+      "funny",
+    );
+  });
+
   it("loads the library, appends another page and filters by tag", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),

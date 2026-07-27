@@ -228,10 +228,16 @@ function cardMarkup(meme: MemeResponse, selected: boolean): string {
       aria-label="查看 ${escapeHtml(meme.title)}"
     >
       <span class="card-image">
-        <img src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" loading="lazy">
+        <img
+          src="${escapeHtml(image)}"
+          alt="${escapeHtml(meme.title)}"
+          width="${meme.width}"
+          height="${meme.height}"
+          loading="lazy"
+        >
         <span class="image-fallback" aria-hidden="true">图片不可用</span>
       </span>
-      <span class="card-body">
+      <span class="card-overlay">
         <strong>${escapeHtml(meme.title)}</strong>
         <span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span>
       </span>

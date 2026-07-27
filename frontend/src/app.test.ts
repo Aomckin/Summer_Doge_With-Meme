@@ -40,6 +40,19 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     uploadMeme: vi.fn().mockResolvedValue(makeMeme(2, "新上传")),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),
     deleteMeme: vi.fn().mockResolvedValue(undefined),
+    analyzeMeme: vi.fn().mockResolvedValue({
+      id: 1,
+      meme_id: 1,
+      model_name: "gpt-5.6-luna-test",
+      description: "AI 描述",
+      suggestions: [
+        { name: "funny", confidence: 0.95, existing: true },
+        { name: "reaction", confidence: 0.87, existing: false },
+      ],
+      created_at: "2026-07-27T00:00:00Z",
+      confirmed_at: null,
+    }),
+    confirmAIAnalysis: vi.fn().mockResolvedValue(makeMeme(1)),
     ...overrides,
   };
 }
@@ -510,6 +523,105 @@ describe("MemeVaultApp", () => {
     });
     expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
       "第二个",
+    );
+  });
+
+  it("previews AI suggestions and applies only after confirmation", async () => {
+    const original = makeMeme(1, "待分析");
+    const reactionTag = { ...funnyTag, id: 2, name: "reaction" };
+    const updated = {
+      ...original,
+      description: "AI 生成的图片描述",
+      tags: [funnyTag, reactionTag],
+    };
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([original]),
+      listTags: vi
+        .fn()
+        .mockResolvedValueOnce([funnyTag])
+        .mockResolvedValueOnce([funnyTag, reactionTag]),
+      confirmAIAnalysis: vi.fn().mockResolvedValue(updated),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    button("AI 分析").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".ai-description")?.textContent).toBe(
+        "AI 描述",
+      );
+    });
+    expect(document.querySelector(".ai-panel .eyebrow")?.textContent).toContain(
+      "gpt-5.6-luna-test",
+    );
+    expect(
+      [...document.querySelectorAll(".detail-tags .tag")].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["funny"]);
+    expect(
+      document.querySelector('[data-ai-tag="reaction"]')
+        ?.closest(".ai-suggestion")
+        ?.textContent,
+    ).toContain("新建议");
+
+    const funnyChoice =
+      document.querySelector<HTMLInputElement>('[data-ai-tag="funny"]');
+    const descriptionChoice =
+      document.querySelector<HTMLInputElement>("[data-ai-description]");
+    if (!funnyChoice || !descriptionChoice) {
+      throw new Error("Missing AI confirmation controls");
+    }
+    funnyChoice.checked = false;
+    funnyChoice.dispatchEvent(new Event("change", { bubbles: true }));
+    descriptionChoice.checked = true;
+    descriptionChoice.dispatchEvent(new Event("change", { bubbles: true }));
+    button("确认采用").click();
+
+    await vi.waitFor(() => {
+      expect(api.confirmAIAnalysis).toHaveBeenCalledWith(1, 1, {
+        tags: ["reaction"],
+        apply_description: true,
+      });
+      expect(document.querySelector(".detail-description")?.textContent).toBe(
+        "AI 生成的图片描述",
+      );
+    });
+    expect(
+      [...document.querySelectorAll(".detail-tags .tag")].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["funny", "reaction"]);
+    expect(document.querySelector(".ai-description")).toBeNull();
+    expect(button("reaction")).toBeTruthy();
+  });
+
+  it("keeps AI results and selections when confirmation fails", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1)]),
+      confirmAIAnalysis: vi.fn().mockRejectedValue(new Error("offline")),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    button("AI 分析").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-ai-tag="reaction"]')).not.toBeNull();
+    });
+
+    button("确认采用").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".ai-error")?.textContent).toContain(
+        "网络请求失败",
+      );
+    });
+    expect(
+      document.querySelector<HTMLInputElement>('[data-ai-tag="reaction"]')
+        ?.checked,
+    ).toBe(true);
+    expect(document.querySelector(".ai-description")?.textContent).toBe(
+      "AI 描述",
     );
   });
 

@@ -27,6 +27,7 @@ class Base(DeclarativeBase):
 def create_tables() -> None:
     # 必须先导入模型，SQLAlchemy 才会把这些类登记到 Base.metadata。
     # noqa 告诉代码检查器：这些导入虽然没有直接调用，但绝不是多余的。
+    from app.models import ai_analysis  # noqa: F401
     from app.models import meme  # noqa: F401
     from app.models import tag  # noqa: F401
 

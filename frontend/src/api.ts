@@ -1,4 +1,6 @@
 import type {
+  AIAnalysisConfirmPayload,
+  AIAnalysisResponse,
   ListMemesOptions,
   MemeResponse,
   MemeUpdatePayload,
@@ -168,4 +170,28 @@ export function updateMeme(
 
 export function deleteMeme(id: number): Promise<void> {
   return requestJson<void>(`/api/memes/${id}`, { method: "DELETE" });
+}
+
+export function analyzeMeme(id: number): Promise<AIAnalysisResponse> {
+  return requestJson<AIAnalysisResponse>(`/api/memes/${id}/analyze`, {
+    method: "POST",
+  });
+}
+
+export function confirmAIAnalysis(
+  memeId: number,
+  analysisId: number,
+  payload: AIAnalysisConfirmPayload,
+): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(
+    `/api/memes/${memeId}/analyses/${analysisId}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tags: normalizeTags(payload.tags),
+        apply_description: payload.apply_description,
+      }),
+    },
+  );
 }

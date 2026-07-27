@@ -1,5 +1,7 @@
 import {
   ApiError,
+  analyzeMeme,
+  confirmAIAnalysis,
   deleteMeme,
   getRandomMeme,
   listMemes,
@@ -9,6 +11,8 @@ import {
   uploadMeme,
 } from "./api";
 import type {
+  AIAnalysisConfirmPayload,
+  AIAnalysisResponse,
   AppState,
   ListMemesOptions,
   MemeResponse,
@@ -42,6 +46,12 @@ export interface MemeApi {
     payload: MemeUpdatePayload,
   ): Promise<MemeResponse>;
   deleteMeme(id: number): Promise<void>;
+  analyzeMeme(id: number): Promise<AIAnalysisResponse>;
+  confirmAIAnalysis(
+    memeId: number,
+    analysisId: number,
+    payload: AIAnalysisConfirmPayload,
+  ): Promise<MemeResponse>;
 }
 
 const defaultApi: MemeApi = {
@@ -51,6 +61,8 @@ const defaultApi: MemeApi = {
   uploadMeme,
   updateMeme,
   deleteMeme,
+  analyzeMeme,
+  confirmAIAnalysis,
 };
 
 function initialState(): AppState {
@@ -68,6 +80,12 @@ function initialState(): AppState {
     saving: false,
     deleting: false,
     randomizing: false,
+    analyzing: false,
+    confirmingAnalysis: false,
+    aiAnalysis: null,
+    selectedAITags: [],
+    applyAIDescription: false,
+    aiError: null,
     listError: null,
     loadMoreError: null,
     actionError: null,
@@ -195,6 +213,24 @@ export class MemeVaultApp {
         this.cancelEdit();
       } else if (target.closest("[data-delete-meme]")) {
         void this.removeSelected();
+      } else if (target.closest("[data-analyze-meme]")) {
+        void this.analyzeSelected();
+      } else if (target.closest("[data-confirm-ai]")) {
+        void this.confirmAnalysis();
+      }
+    });
+    this.elements.detailPanel.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      const tag = target.dataset.aiTag;
+      if (tag) {
+        this.state.selectedAITags = target.checked
+          ? [...new Set([...this.state.selectedAITags, tag])]
+          : this.state.selectedAITags.filter((name) => name !== tag);
+      } else if (target.matches("[data-ai-description]")) {
+        this.state.applyAIDescription = target.checked;
       }
     });
     this.elements.detailPanel.addEventListener("submit", (event) => {
@@ -347,6 +383,7 @@ export class MemeVaultApp {
     this.state.operationError = null;
     this.editing = false;
     this.editDraft = null;
+    this.resetAIAnalysis();
     renderLibrary(this.elements, this.state);
     renderDetail(this.elements, this.state, false, null);
   }
@@ -537,6 +574,100 @@ export class MemeVaultApp {
     }
   }
 
+  private resetAIAnalysis(): void {
+    this.state.analyzing = false;
+    this.state.confirmingAnalysis = false;
+    this.state.aiAnalysis = null;
+    this.state.selectedAITags = [];
+    this.state.applyAIDescription = false;
+    this.state.aiError = null;
+  }
+
+  private async analyzeSelected(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.analyzing || this.state.confirmingAnalysis) {
+      return;
+    }
+    this.state.analyzing = true;
+    this.state.aiError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const analysis = await this.api.analyzeMeme(meme.id);
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.state.aiAnalysis = analysis;
+      this.state.selectedAITags = analysis.suggestions.map(
+        (suggestion) => suggestion.name,
+      );
+      this.state.applyAIDescription = !meme.description;
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.aiError = readableError(error);
+      }
+    } finally {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.analyzing = false;
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
+      }
+    }
+  }
+
+  private async confirmAnalysis(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const analysis = this.state.aiAnalysis;
+    if (
+      !meme ||
+      !analysis ||
+      this.state.analyzing ||
+      this.state.confirmingAnalysis
+    ) {
+      return;
+    }
+    this.state.confirmingAnalysis = true;
+    this.state.aiError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.confirmAIAnalysis(
+        meme.id,
+        analysis.id,
+        {
+          tags: this.state.selectedAITags,
+          apply_description: this.state.applyAIDescription,
+        },
+      );
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.replaceMeme(updated);
+      this.state.aiAnalysis = null;
+      this.state.selectedAITags = [];
+      this.state.applyAIDescription = false;
+      await this.refreshTags();
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.aiError = readableError(error);
+      }
+    } finally {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.confirmingAnalysis = false;
+        renderTags(this.elements, this.state);
+        renderLibrary(this.elements, this.state);
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
+      }
+    }
+  }
+
   private async removeSelected(): Promise<void> {
     const meme = this.state.selectedMeme;
     if (
@@ -559,6 +690,7 @@ export class MemeVaultApp {
         this.state.selectedMeme = null;
         this.editing = false;
         this.editDraft = null;
+        this.resetAIAnalysis();
       }
       await this.reloadMemes();
     } catch (error) {

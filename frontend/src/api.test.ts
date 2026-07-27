@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  analyzeMeme,
+  confirmAIAnalysis,
   deleteMeme,
   listMemes,
   parseTagInput,
@@ -115,6 +117,45 @@ describe("deleteMeme", () => {
     );
 
     await expect(deleteMeme(7)).resolves.toBeUndefined();
+  });
+});
+
+describe("AI analysis", () => {
+  it("requests analysis and confirms normalized selected tags", async () => {
+    const analysis = {
+      id: 3,
+      meme_id: 7,
+      model_name: "gpt-5.6-luna-test",
+      description: "AI 描述",
+      suggestions: [
+        { name: "reaction", confidence: 0.91, existing: true },
+      ],
+      created_at: "2026-07-27T00:00:00Z",
+      confirmed_at: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(analysis))
+      .mockResolvedValueOnce(jsonResponse(meme));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(analyzeMeme(7)).resolves.toEqual(analysis);
+    await confirmAIAnalysis(7, 3, {
+      tags: [" Reaction ", "reaction", "NEW"],
+      apply_description: true,
+    });
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/api/memes/7/analyze",
+      { method: "POST" },
+    ]);
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/memes/7/analyses/3/confirm");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      tags: ["reaction", "new"],
+      apply_description: true,
+    });
   });
 });
 

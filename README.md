@@ -1,6 +1,6 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme API 外，还提供原生 TypeScript 网页管理台；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -105,12 +105,39 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 - 搜索输入使用 300ms 防抖；多标签沿用后端的“同时包含全部标签”语义。
 - 上传表单不会提交空的描述或来源字段；编辑时可通过 JSON `null` 清空这两个字段。
 - 列表、上传、随机、保存和删除均提供独立的加载或错误反馈。
+- 详情面板可发起 AI 图片分析，预览描述、标签建议、置信度和使用的模型。
+- AI 建议只有在用户选择并点击“确认采用”后才会写入；确认失败会保留当前结果以便重试。
+
+## AI 图片分析
+
+v0.3 使用 OpenAI Responses API 分析已经保存的原图。启动后端前至少需要设置 API Key：
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+```
+
+可选配置：
+
+```powershell
+$env:OPENAI_MODEL = "gpt-5.6-luna"
+$env:OPENAI_BASE_URL = "https://api.openai.com/v1"
+$env:AI_TIMEOUT_SECONDS = "30"
+```
+
+默认模型面向低成本图片整理任务，可通过 `OPENAI_MODEL` 替换。应用不会自动读取 `.env`，可复制 [`.env.example`](.env.example) 后由终端或部署环境注入；真实密钥不得提交到 Git。
+
+分析分为两个阶段：
+
+1. `POST /api/memes/{meme_id}/analyze` 读取原图并生成描述与标签建议，同时记录模型名和置信度，但不修改正式标签。
+2. `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm` 只追加用户选中的标签，并可按用户选择采用描述。
+
+后端会优先提供已有标签给模型，并再次规范化输出：总建议不超过 8 个，新标签不超过 3 个。超时返回 504，未配置密钥返回 503，上游或响应格式错误返回 502。
 
 ## 数据库配置
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`tags` 和 `meme_tags`。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`tags`、`meme_tags` 和 `meme_ai_analyses`。
 
 数据库操作封装在 Repository 中。Repository 执行查询和 `flush`，事务提交或回滚由 `MemeService` 统一控制。
 
@@ -138,6 +165,8 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 - `PATCH /api/memes/{meme_id}`：修改标题、描述、来源或标签数组。
 - `DELETE /api/memes/{meme_id}`：删除记录、原图和缩略图。
 - `GET /api/tags`：按名称排序获取标签列表。
+- `POST /api/memes/{meme_id}/analyze`：生成并记录 AI 描述、标签建议、模型名和置信度，不直接修改 Meme。
+- `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm`：确认选中的 AI 标签，并可采用 AI 描述。
 
 Meme 响应使用 `image_url` 和可为 `null` 的 `thumbnail_url` 提供浏览器可访问地址，不会返回服务器本地的 `file_path` 或 `thumbnail_path`。
 
@@ -155,6 +184,7 @@ $env:DATABASE_URL = "sqlite:///data/custom.db"
 meme-vault/
 ├── app/
 │   ├── api/                 # FastAPI 路由
+│   ├── ai/                  # 统一 AI 客户端与供应商适配
 │   ├── models/              # SQLAlchemy ORM 模型
 │   ├── repositories/        # 数据库访问
 │   ├── schemas/             # Pydantic 请求与响应结构

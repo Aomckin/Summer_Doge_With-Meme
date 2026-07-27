@@ -14,11 +14,24 @@ from fastapi import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.ai.client import (
+    AIClient,
+    AIConfigurationError,
+    AIInvalidResponseError,
+    AIRequestTimeoutError,
+    AIUpstreamError,
+    OpenAIResponsesClient,
+)
 from app.config import IMAGES_URL_PREFIX, THUMBNAILS_URL_PREFIX
 from app.database import get_db
 from app.models.meme import Meme
+from app.models.ai_analysis import MemeAIAnalysis
+from app.repositories.ai_analysis_repository import AIAnalysisRepository
+from app.schemas.ai_analysis import AIAnalysisConfirm, AIAnalysisResponse
 from app.schemas.meme import MemeResponse, MemeUpdate, TagResponse
 from app.services.meme_service import (
+    AIAnalysisAlreadyConfirmedError,
+    AIAnalysisNotFoundError,
     MemeFileMissingError,
     MemeNotFoundError,
     MemeService,
@@ -46,6 +59,16 @@ def get_meme_service(
 
 # 把较长的依赖声明起别名，下面每个接口都能直接写 service: ServiceDependency。
 ServiceDependency = Annotated[MemeService, Depends(get_meme_service)]
+
+
+def get_ai_client() -> AIClient:
+    try:
+        return OpenAIResponsesClient.from_env()
+    except AIConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+AIClientDependency = Annotated[AIClient, Depends(get_ai_client)]
 
 
 def _parse_tags(value: str | None) -> list[str]:
@@ -84,6 +107,20 @@ def _to_meme_response(meme: Meme) -> MemeResponse:
         created_at=meme.created_at,
         updated_at=meme.updated_at,
         tags=[TagResponse.model_validate(tag) for tag in meme.tags],
+    )
+
+
+def _to_ai_analysis_response(
+    analysis: MemeAIAnalysis,
+) -> AIAnalysisResponse:
+    return AIAnalysisResponse(
+        id=analysis.id,
+        meme_id=analysis.meme_id,
+        model_name=analysis.model_name,
+        description=analysis.description,
+        suggestions=AIAnalysisRepository.load_suggestions(analysis),
+        created_at=analysis.created_at,
+        confirmed_at=analysis.confirmed_at,
     )
 
 
@@ -146,6 +183,57 @@ def get_random_meme(
     except MemeFileMissingError as error:
         # 410 表示记录曾存在，但其对应文件已经不可用。
         raise HTTPException(status_code=410, detail=str(error)) from error
+    return _to_meme_response(meme)
+
+
+@router.post("/{meme_id}/analyze", response_model=AIAnalysisResponse)
+def analyze_meme(
+    meme_id: int,
+    service: ServiceDependency,
+    ai_client: AIClientDependency,
+) -> AIAnalysisResponse:
+    try:
+        analysis = service.analyze_meme(meme_id, ai_client)
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except AIConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except AIRequestTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except (AIUpstreamError, AIInvalidResponseError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return _to_ai_analysis_response(analysis)
+
+
+@router.post(
+    "/{meme_id}/analyses/{analysis_id}/confirm",
+    response_model=MemeResponse,
+)
+def confirm_ai_analysis(
+    meme_id: int,
+    analysis_id: int,
+    payload: AIAnalysisConfirm,
+    service: ServiceDependency,
+) -> MemeResponse:
+    try:
+        meme = service.confirm_ai_analysis(
+            meme_id,
+            analysis_id,
+            tags=payload.tags,
+            apply_description=payload.apply_description,
+        )
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except AIAnalysisNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except AIAnalysisAlreadyConfirmedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return _to_meme_response(meme)
 
 

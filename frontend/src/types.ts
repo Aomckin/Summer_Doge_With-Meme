@@ -40,6 +40,27 @@ export interface UploadMemeInput {
   tags?: string[];
 }
 
+export interface AITagSuggestionResponse {
+  name: string;
+  confidence: number;
+  existing: boolean;
+}
+
+export interface AIAnalysisResponse {
+  id: number;
+  meme_id: number;
+  model_name: string;
+  description: string;
+  suggestions: AITagSuggestionResponse[];
+  created_at: string;
+  confirmed_at: string | null;
+}
+
+export interface AIAnalysisConfirmPayload {
+  tags: string[];
+  apply_description: boolean;
+}
+
 export interface ListMemesOptions {
   offset: number;
   limit: number;
@@ -62,6 +83,12 @@ export interface AppState {
   saving: boolean;
   deleting: boolean;
   randomizing: boolean;
+  analyzing: boolean;
+  confirmingAnalysis: boolean;
+  aiAnalysis: AIAnalysisResponse | null;
+  selectedAITags: string[];
+  applyAIDescription: boolean;
+  aiError: string | null;
   listError: string | null;
   loadMoreError: string | null;
   actionError: string | null;

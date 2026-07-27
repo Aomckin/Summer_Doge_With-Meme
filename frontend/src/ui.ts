@@ -370,6 +370,96 @@ function detailError(message: string | null): string {
     : "";
 }
 
+function aiAnalysisMarkup(state: AppState): string {
+  const analysis = state.aiAnalysis;
+  const error = state.aiError
+    ? `<p class="form-error ai-error" role="alert">${escapeHtml(state.aiError)}</p>`
+    : "";
+
+  if (!analysis) {
+    return `
+      <section class="ai-panel" aria-labelledby="ai-panel-title">
+        <div class="ai-panel-heading">
+          <div>
+            <p class="eyebrow">AI ASSIST</p>
+            <h3 id="ai-panel-title">智能描述与标签</h3>
+          </div>
+          <button
+            class="button button-primary"
+            type="button"
+            data-analyze-meme
+            ${state.analyzing ? "disabled" : ""}
+          >${state.analyzing ? "正在分析…" : "AI 分析"}</button>
+        </div>
+        <p class="ai-hint">分析结果仅供预览，确认前不会修改描述或标签。</p>
+        ${error}
+      </section>
+    `;
+  }
+
+  const suggestions = analysis.suggestions.length
+    ? analysis.suggestions
+        .map((suggestion) => {
+          const checked = state.selectedAITags.includes(suggestion.name);
+          return `
+            <label class="ai-suggestion">
+              <input
+                type="checkbox"
+                data-ai-tag="${escapeHtml(suggestion.name)}"
+                ${checked ? "checked" : ""}
+                ${state.confirmingAnalysis ? "disabled" : ""}
+              >
+              <span class="ai-suggestion-name">${escapeHtml(suggestion.name)}</span>
+              <span class="ai-suggestion-kind">${suggestion.existing ? "已有" : "新建议"}</span>
+              <span class="ai-confidence">${Math.round(suggestion.confidence * 100)}%</span>
+            </label>
+          `;
+        })
+        .join("")
+    : '<p class="muted">这次分析没有返回标签建议。</p>';
+
+  return `
+    <section class="ai-panel has-result" aria-labelledby="ai-panel-title">
+      <div class="ai-panel-heading">
+        <div>
+          <p class="eyebrow">AI ASSIST · ${escapeHtml(analysis.model_name)}</p>
+          <h3 id="ai-panel-title">分析建议</h3>
+        </div>
+        <button
+          class="button button-secondary"
+          type="button"
+          data-analyze-meme
+          ${state.analyzing || state.confirmingAnalysis ? "disabled" : ""}
+        >${state.analyzing ? "正在分析…" : "重新分析"}</button>
+      </div>
+      <p class="ai-description">${escapeHtml(analysis.description)}</p>
+      <label class="ai-description-choice">
+        <input
+          type="checkbox"
+          data-ai-description
+          ${state.applyAIDescription ? "checked" : ""}
+          ${state.confirmingAnalysis ? "disabled" : ""}
+        >
+        <span>同时采用这段图片描述</span>
+      </label>
+      <fieldset class="ai-suggestions">
+        <legend>选择要追加的标签</legend>
+        ${suggestions}
+      </fieldset>
+      ${error}
+      <div class="ai-actions">
+        <span class="ai-hint">只有点击确认后才会写入。</span>
+        <button
+          class="button button-primary"
+          type="button"
+          data-confirm-ai
+          ${state.confirmingAnalysis ? "disabled" : ""}
+        >${state.confirmingAnalysis ? "正在保存…" : "确认采用"}</button>
+      </div>
+    </section>
+  `;
+}
+
 export function renderDetail(
   elements: AppElements,
   state: AppState,
@@ -446,6 +536,7 @@ export function renderDetail(
             <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>
             <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
           </dl>
+          ${aiAnalysisMarkup(state)}
           ${detailError(state.actionError)}
           <div class="detail-actions">
             <button class="button button-secondary" type="button" data-edit-meme>编辑</button>

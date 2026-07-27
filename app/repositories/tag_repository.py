@@ -56,5 +56,33 @@ class TagRepository:
         self.session.flush()
         return list(meme.tags)
 
+    def add_ai_tags(
+        self,
+        meme: Meme,
+        suggestions: Sequence[tuple[str, float]],
+    ) -> list[Tag]:
+        links_by_name = {link.tag.name: link for link in meme.tag_links}
+        for name, confidence in suggestions:
+            normalized = self.normalize_name(name)
+            if not normalized:
+                continue
+            existing_link = links_by_name.get(normalized)
+            if existing_link is not None:
+                # 用户标签拥有更高优先级，AI 确认不能改写其来源和置信度。
+                if existing_link.source == "ai":
+                    existing_link.confidence = confidence
+                continue
+
+            link = MemeTag(
+                tag=self.get_or_create(normalized),
+                source="ai",
+                confidence=confidence,
+            )
+            meme.tag_links.append(link)
+            links_by_name[normalized] = link
+
+        self.session.flush()
+        return list(meme.tags)
+
     def list(self) -> list[Tag]:
         return list(self.session.scalars(select(Tag).order_by(Tag.name)))

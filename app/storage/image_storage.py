@@ -136,6 +136,11 @@ class ImageStorage:
         thumbnail = self._path_inside(thumbnail_path, self.thumbnails_dir)
         return thumbnail.is_file()
 
+    def read_original(self, file_path: str | Path) -> bytes:
+        # AI 分析等读取流程复用与删除相同的目录边界检查。
+        original = self._path_inside(file_path, self.images_dir)
+        return original.read_bytes()
+
     def _inspect_image(self, content: bytes) -> tuple[str, int, int]:
         try:
             with Image.open(BytesIO(content)) as image:

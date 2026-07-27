@@ -240,12 +240,12 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 ### v0.3：AI 自动标签
 
-- [ ] 创建统一 AI 客户端并从环境变量读取 API Key
-- [ ] 创建图片分析接口并生成图片描述
-- [ ] 优先推荐已有标签，限制 AI 任意新建标签
-- [ ] 用户确认后才保存标签
-- [ ] 记录模型名和置信度
-- [ ] 处理 API 超时与失败
+- [x] 创建统一 AI 客户端并从环境变量读取 API Key
+- [x] 创建图片分析接口并生成图片描述
+- [x] 优先推荐已有标签，限制 AI 任意新建标签
+- [x] 用户确认后才保存标签
+- [x] 记录模型名和置信度
+- [x] 处理 API 超时与失败
 
 ### v0.4：Meme 文案实验室
 
@@ -323,7 +323,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.2 TypeScript 前端已完成
+当前状态：v0.3 AI 自动标签已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -331,5 +331,6 @@ ORM：SQLAlchemy
 图片处理：Pillow
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
-下一步：v0.3——AI 自动标签
+AI：OpenAI Responses API + 可替换统一客户端
+下一步：v0.4——Meme 文案实验室
 ```

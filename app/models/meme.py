@@ -11,6 +11,7 @@ from app.database import Base
 
 # 这些类型只帮助编辑器理解注解；运行时不导入，可避免 Meme 与 Tag 循环导入。
 if TYPE_CHECKING:
+    from app.models.ai_analysis import MemeAIAnalysis
     from app.models.tag import MemeTag, Tag
 
 
@@ -58,6 +59,14 @@ class Meme(Base):
         back_populates="meme",
         cascade="all, delete-orphan",
     )
+    ai_analyses: Mapped[list["MemeAIAnalysis"]] = relationship(
+        back_populates="meme",
+        cascade="all, delete-orphan",
+    )
 
     # association_proxy 让调用方可以写 meme.tags，而不必手动穿过 meme.tag_links。
     tags: AssociationProxy[list["Tag"]] = association_proxy("tag_links", "tag")
+
+
+# 运行时登记关联模型，确保只导入 Meme 后 SQLAlchemy 也能解析关系并建新表。
+from app.models import ai_analysis as _ai_analysis  # noqa: E402,F401

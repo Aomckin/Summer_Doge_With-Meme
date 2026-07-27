@@ -7,12 +7,42 @@ import pytest
 from httpx import ASGITransport, AsyncClient, Response
 from PIL import Image
 from sqlalchemy import create_engine
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.ai.client import (
+    AIImageResult,
+    AIRequestTimeoutError,
+    AITagSuggestion,
+    AIUpstreamError,
+)
 from app.database import Base, get_db
+from app.models.ai_analysis import MemeAIAnalysis
 from app.models.meme import Meme
+from app.models.tag import MemeTag
 from app.storage.image_storage import ImageStorage
+
+
+class FakeAIClient:
+    def __init__(self, result: AIImageResult | Exception) -> None:
+        self.result = result
+
+    def analyze_image(self, **_: object) -> AIImageResult:
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def fake_ai_result() -> AIImageResult:
+    return AIImageResult(
+        model_name="gpt-5.6-luna-test",
+        description="AI 生成的图片描述",
+        tags=(
+            AITagSuggestion("funny", 0.94),
+            AITagSuggestion("reaction", 0.88),
+        ),
+    )
 
 
 def load_api_components():
@@ -95,8 +125,158 @@ def test_meme_routes_are_registered_in_openapi(api_context) -> None:
 
     assert "/api/memes" in paths
     assert "/api/memes/{meme_id}" in paths
+    assert "/api/memes/{meme_id}/analyze" in paths
+    assert "/api/memes/{meme_id}/analyses/{analysis_id}/confirm" in paths
     assert set(paths["/api/memes"]) == {"get", "post"}
     assert set(paths["/api/memes/{meme_id}"]) == {"get", "patch", "delete"}
+
+
+def test_ai_analysis_requires_confirmation_before_applying_tags(
+    api_context,
+) -> None:
+    app, session, _ = api_context
+    api_module, _ = load_api_components()
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        fake_ai_result()
+    )
+    upload = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("example.png", make_image_bytes(), "image/png")},
+        data={
+            "title": "AI API 测试",
+            "description": "用户描述",
+            "tags": "funny",
+        },
+    )
+    meme_id = upload.json()["id"]
+
+    analysis_response = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/analyze",
+    )
+    unchanged = request(app, "GET", f"/api/memes/{meme_id}")
+
+    assert analysis_response.status_code == 200
+    analysis = analysis_response.json()
+    assert analysis["model_name"] == "gpt-5.6-luna-test"
+    assert analysis["description"] == "AI 生成的图片描述"
+    assert analysis["suggestions"] == [
+        {"name": "funny", "confidence": 0.94, "existing": True},
+        {"name": "reaction", "confidence": 0.88, "existing": False},
+    ]
+    assert unchanged.json()["description"] == "用户描述"
+    assert [tag["name"] for tag in unchanged.json()["tags"]] == ["funny"]
+
+    confirmed = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/analyses/{analysis['id']}/confirm",
+        json={"tags": ["funny", "reaction"], "apply_description": True},
+    )
+    repeated = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/analyses/{analysis['id']}/confirm",
+        json={"tags": [], "apply_description": False},
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["description"] == "AI 生成的图片描述"
+    assert [tag["name"] for tag in confirmed.json()["tags"]] == [
+        "funny",
+        "reaction",
+    ]
+    links = {
+        link.tag.name: link
+        for link in session.scalars(select(MemeTag)).all()
+    }
+    assert links["funny"].source == "user"
+    assert links["reaction"].source == "ai"
+    assert links["reaction"].confidence == 0.88
+    stored_analysis = session.get(MemeAIAnalysis, analysis["id"])
+    assert stored_analysis is not None
+    assert stored_analysis.confirmed_at is not None
+    assert repeated.status_code == 409
+
+
+def test_ai_analysis_maps_configuration_timeout_and_invalid_confirmation(
+    api_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, _, _ = api_context
+    api_module, _ = load_api_components()
+    upload = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("example.png", make_image_bytes(), "image/png")},
+        data={"title": "AI 错误测试"},
+    )
+    meme_id = upload.json()["id"]
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    unconfigured = request(app, "POST", f"/api/memes/{meme_id}/analyze")
+
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        AIRequestTimeoutError("AI request timed out")
+    )
+    timeout = request(app, "POST", f"/api/memes/{meme_id}/analyze")
+
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        AIUpstreamError("AI service is unavailable")
+    )
+    upstream = request(app, "POST", f"/api/memes/{meme_id}/analyze")
+
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        fake_ai_result()
+    )
+    analysis = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/analyze",
+    ).json()
+    invalid = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/analyses/{analysis['id']}/confirm",
+        json={"tags": ["not-suggested"], "apply_description": False},
+    )
+
+    assert unconfigured.status_code == 503
+    assert "OPENAI_API_KEY" in unconfigured.json()["detail"]
+    assert timeout.status_code == 504
+    assert upstream.status_code == 502
+    assert invalid.status_code == 422
+    assert "not suggested" in invalid.json()["detail"]
+
+
+def test_ai_analysis_reports_missing_meme_and_image(api_context) -> None:
+    app, _, storage = api_context
+    api_module, _ = load_api_components()
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        fake_ai_result()
+    )
+
+    missing_meme = request(app, "POST", "/api/memes/999/analyze")
+    upload = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("example.png", make_image_bytes(), "image/png")},
+        data={"title": "缺图分析"},
+    ).json()
+    storage.delete(upload["stored_filename"], None)
+    missing_image = request(
+        app,
+        "POST",
+        f"/api/memes/{upload['id']}/analyze",
+    )
+
+    assert missing_meme.status_code == 404
+    assert missing_image.status_code == 410
 
 
 def test_meme_api_crud_flow(api_context) -> None:

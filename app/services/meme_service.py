@@ -1,8 +1,13 @@
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from math import isfinite
 
 from sqlalchemy.orm import Session
 
+from app.ai.client import AIClient, AIImageResult, AIInvalidResponseError
 from app.models.meme import Meme
+from app.models.ai_analysis import MemeAIAnalysis
+from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.repositories.meme_repository import MemeRepository
 from app.repositories.tag_repository import TagRepository
 from app.storage.image_storage import ImageStorage
@@ -13,6 +18,8 @@ from app.storage.image_storage import ImageStorage
 EDITABLE_FIELDS = {"title", "description", "source", "tags"}
 # 单独的哨兵对象用来区分“请求没传 tags”和“请求明确把 tags 清空”。
 TAGS_NOT_PROVIDED = object()
+MAX_AI_SUGGESTIONS = 8
+MAX_AI_NEW_TAGS = 3
 
 
 class MemeNotFoundError(LookupError):
@@ -30,12 +37,21 @@ class NoMemesAvailableError(LookupError):
     pass
 
 
+class AIAnalysisNotFoundError(LookupError):
+    pass
+
+
+class AIAnalysisAlreadyConfirmedError(RuntimeError):
+    pass
+
+
 class MemeService:
     def __init__(self, session: Session, storage: ImageStorage | None = None) -> None:
         # 依赖从外部传入，测试时可以换成临时数据库和临时文件目录。
         self.session = session
         self.repository = MemeRepository(session)
         self.tag_repository = TagRepository(session)
+        self.ai_analysis_repository = AIAnalysisRepository(session)
         self.storage = storage or ImageStorage()
 
     def create_meme(
@@ -138,6 +154,91 @@ class MemeService:
         self._ensure_files_exist(meme)
         return meme
 
+    def analyze_meme(
+        self,
+        meme_id: int,
+        ai_client: AIClient,
+    ) -> MemeAIAnalysis:
+        meme = self.get_meme(meme_id)
+        result = ai_client.analyze_image(
+            image_bytes=self.storage.read_original(meme.file_path),
+            mime_type=meme.mime_type,
+            existing_tags=[
+                tag.name for tag in self.tag_repository.list()[:200]
+            ],
+        )
+        suggestions = self._normalize_ai_suggestions(result)
+        description = result.description.strip()
+        if not description:
+            raise AIInvalidResponseError("AI description cannot be empty")
+
+        try:
+            analysis = self.ai_analysis_repository.create(
+                meme,
+                model_name=result.model_name[:100],
+                description=description,
+                suggestions=suggestions,
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return analysis
+
+    def confirm_ai_analysis(
+        self,
+        meme_id: int,
+        analysis_id: int,
+        *,
+        tags: Sequence[str],
+        apply_description: bool,
+    ) -> Meme:
+        meme = self.get_meme(meme_id)
+        analysis = self.ai_analysis_repository.get_for_meme(meme_id, analysis_id)
+        if analysis is None:
+            raise AIAnalysisNotFoundError(
+                f"AI analysis {analysis_id} does not exist for Meme {meme_id}"
+            )
+        if analysis.confirmed_at is not None:
+            raise AIAnalysisAlreadyConfirmedError(
+                f"AI analysis {analysis_id} has already been confirmed"
+            )
+
+        suggestions = self.ai_analysis_repository.load_suggestions(analysis)
+        confidence_by_name = {
+            str(item["name"]): float(item["confidence"])
+            for item in suggestions
+        }
+        selected_names = list(
+            dict.fromkeys(
+                normalized
+                for name in tags
+                if (normalized := self.tag_repository.normalize_name(name))
+            )
+        )
+        unknown_names = set(selected_names) - set(confidence_by_name)
+        if unknown_names:
+            names = ", ".join(sorted(unknown_names))
+            raise ValueError(f"Tags were not suggested by this analysis: {names}")
+
+        try:
+            self.tag_repository.add_ai_tags(
+                meme,
+                [
+                    (name, confidence_by_name[name])
+                    for name in selected_names
+                ],
+            )
+            if apply_description:
+                self.repository.update(meme, {"description": analysis.description})
+            analysis.confirmed_at = datetime.now(UTC)
+            self.session.flush()
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return meme
+
     def delete_meme(self, meme_id: int) -> None:
         # 删除的目标是清理记录；即使磁盘文件已丢失，也不能阻止数据库删除。
         meme = self.repository.get_by_id(meme_id)
@@ -161,3 +262,40 @@ class MemeService:
         # 集中维护“数据库记录与磁盘文件必须对应”的完整性规则。
         if not self.storage.exists(meme.file_path, meme.thumbnail_path):
             raise MemeFileMissingError(f"Image file is missing for Meme {meme.id}")
+
+    def _normalize_ai_suggestions(
+        self,
+        result: AIImageResult,
+    ) -> list[dict[str, object]]:
+        existing_names = {tag.name for tag in self.tag_repository.list()}
+        existing_suggestions: list[dict[str, object]] = []
+        new_suggestions: list[dict[str, object]] = []
+        seen: set[str] = set()
+
+        for suggestion in result.tags:
+            name = self.tag_repository.normalize_name(suggestion.name)
+            if not name or len(name) > 100 or name in seen:
+                continue
+            is_existing = name in existing_names
+
+            raw_confidence = float(suggestion.confidence)
+            confidence = (
+                min(1.0, max(0.0, raw_confidence))
+                if isfinite(raw_confidence)
+                else 0.0
+            )
+            normalized = {
+                "name": name,
+                "confidence": confidence,
+                "existing": is_existing,
+            }
+            target = existing_suggestions if is_existing else new_suggestions
+            target.append(normalized)
+            seen.add(name)
+
+        # 即使模型没有按提示排序，服务端仍保证已有标签先占建议名额。
+        prioritized = [
+            *existing_suggestions,
+            *new_suggestions[:MAX_AI_NEW_TAGS],
+        ]
+        return prioritized[:MAX_AI_SUGGESTIONS]

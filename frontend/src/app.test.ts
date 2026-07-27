@@ -512,4 +512,116 @@ describe("MemeVaultApp", () => {
       "第二个",
     );
   });
+
+  it("opens the selected original image in a reusable viewer", async () => {
+    const portrait = {
+      ...makeMeme(1, "纵向 Meme"),
+      width: 1260,
+      height: 1861,
+    };
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([portrait]) }),
+    );
+    await app.start();
+
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    document.querySelector<HTMLButtonElement>("[data-open-viewer]")?.click();
+
+    const dialog =
+      document.querySelector<HTMLDialogElement>("#image-viewer-dialog");
+    const image = dialog?.querySelector<HTMLImageElement>("[data-viewer-image]");
+    const link = dialog?.querySelector<HTMLAnchorElement>("[data-viewer-link]");
+    expect(dialog?.open).toBe(true);
+    expect(image?.getAttribute("src")).toBe(portrait.image_url);
+    expect(image?.getAttribute("width")).toBe("1260");
+    expect(image?.getAttribute("height")).toBe("1861");
+    expect(dialog?.querySelector("[data-viewer-title]")?.textContent).toBe(
+      "纵向 Meme",
+    );
+    expect(link?.getAttribute("href")).toBe(portrait.image_url);
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("closes only for the viewer backdrop or explicit close button", async () => {
+    const meme = makeMeme(1, "查看边界");
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }),
+    );
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    const trigger =
+      document.querySelector<HTMLButtonElement>("[data-open-viewer]");
+    trigger?.click();
+
+    const dialog =
+      document.querySelector<HTMLDialogElement>("#image-viewer-dialog");
+    const content = dialog?.querySelector<HTMLElement>(".image-viewer-content");
+    const title = dialog?.querySelector<HTMLElement>("[data-viewer-title]");
+    content?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    title?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(dialog?.open).toBe(true);
+
+    dialog
+      ?.querySelector<HTMLButtonElement>("[data-close-viewer]")
+      ?.click();
+    expect(dialog?.open).toBe(false);
+
+    trigger?.click();
+    expect(dialog?.open).toBe(true);
+    dialog?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(dialog?.open).toBe(false);
+  });
+
+  it("recovers when a valid image opens after a failed viewer image", async () => {
+    const broken = makeMeme(1, "损坏图片");
+    const valid = makeMeme(2, "正常图片");
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([broken, valid]) }),
+    );
+    await app.start();
+
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    document.querySelector<HTMLButtonElement>("[data-open-viewer]")?.click();
+    const dialog =
+      document.querySelector<HTMLDialogElement>("#image-viewer-dialog");
+    const image = dialog?.querySelector<HTMLImageElement>("[data-viewer-image]");
+    const frame = dialog?.querySelector<HTMLElement>("[data-viewer-frame]");
+    const error = dialog?.querySelector<HTMLElement>("[data-viewer-error]");
+    image?.dispatchEvent(new Event("error"));
+    expect(image?.hidden).toBe(true);
+    expect(frame?.classList.contains("is-broken")).toBe(true);
+    expect(error?.hidden).toBe(false);
+
+    dialog?.close();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="2"]')?.click();
+    document.querySelector<HTMLButtonElement>("[data-open-viewer]")?.click();
+    expect(image?.hidden).toBe(false);
+    expect(frame?.classList.contains("is-broken")).toBe(false);
+    expect(error?.hidden).toBe(true);
+    expect(image?.getAttribute("src")).toBe(valid.image_url);
+  });
+
+  it("does not call showModal again while the viewer is open", async () => {
+    const showModal = vi.spyOn(
+      HTMLDialogElement.prototype,
+      "showModal",
+    );
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([makeMeme(1)]) }),
+    );
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    const trigger =
+      document.querySelector<HTMLButtonElement>("[data-open-viewer]");
+    trigger?.click();
+    trigger?.click();
+
+    expect(showModal).toHaveBeenCalledTimes(1);
+  });
 });

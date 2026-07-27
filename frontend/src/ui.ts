@@ -22,6 +22,12 @@ export interface AppElements {
   uploadFile: HTMLInputElement;
   uploadError: HTMLElement;
   uploadSubmit: HTMLButtonElement;
+  imageViewerDialog: HTMLDialogElement;
+  imageViewerFrame: HTMLElement;
+  imageViewerImage: HTMLImageElement;
+  imageViewerTitle: HTMLElement;
+  imageViewerLink: HTMLAnchorElement;
+  imageViewerError: HTMLElement;
 }
 
 function required<T extends Element>(root: ParentNode, selector: string): T {
@@ -154,6 +160,36 @@ export function mountShell(root: HTMLElement): AppElements {
         </div>
       </form>
     </dialog>
+
+    <dialog
+      id="image-viewer-dialog"
+      class="image-viewer"
+      aria-labelledby="image-viewer-title"
+    >
+      <div class="image-viewer-content">
+        <header class="image-viewer-header">
+          <h2 id="image-viewer-title" data-viewer-title></h2>
+          <div class="image-viewer-actions">
+            <a
+              class="button button-secondary"
+              data-viewer-link
+              target="_blank"
+              rel="noopener noreferrer"
+            >打开原图</a>
+            <button
+              class="icon-button"
+              type="button"
+              data-close-viewer
+              aria-label="关闭原图查看器"
+            >×</button>
+          </div>
+        </header>
+        <div class="image-viewer-frame" data-viewer-frame>
+          <img data-viewer-image alt="" hidden>
+          <p data-viewer-error role="alert" hidden>原图加载失败</p>
+        </div>
+      </div>
+    </dialog>
   `;
 
   return {
@@ -171,6 +207,12 @@ export function mountShell(root: HTMLElement): AppElements {
     uploadFile: required(document, "#upload-file"),
     uploadError: required(document, "#upload-error"),
     uploadSubmit: required(document, "#upload-submit"),
+    imageViewerDialog: required(document, "#image-viewer-dialog"),
+    imageViewerFrame: required(document, "[data-viewer-frame]"),
+    imageViewerImage: required(document, "[data-viewer-image]"),
+    imageViewerTitle: required(document, "[data-viewer-title]"),
+    imageViewerLink: required(document, "[data-viewer-link]"),
+    imageViewerError: required(document, "[data-viewer-error]"),
   };
 }
 
@@ -305,10 +347,20 @@ export function renderLibrary(
 
 function detailImage(meme: MemeResponse): string {
   return `
-    <div class="detail-image">
-      <img src="${escapeHtml(meme.image_url)}" alt="${escapeHtml(meme.title)}">
+    <button
+      class="detail-image"
+      type="button"
+      data-open-viewer
+      aria-label="查看《${escapeHtml(meme.title)}》原图"
+    >
+      <img
+        src="${escapeHtml(meme.image_url)}"
+        alt="${escapeHtml(meme.title)}"
+        width="${meme.width}"
+        height="${meme.height}"
+      >
       <span class="image-fallback" aria-hidden="true">原图不可用</span>
-    </div>
+    </button>
   `;
 }
 
@@ -407,6 +459,33 @@ export function renderDetail(
   }
 
   bindImageFallbacks(elements.detailPanel);
+}
+
+export function openImageViewer(
+  elements: AppElements,
+  meme: MemeResponse,
+): void {
+  elements.imageViewerImage.hidden = false;
+  elements.imageViewerFrame.classList.remove("is-broken");
+  elements.imageViewerError.hidden = true;
+  elements.imageViewerError.textContent = "";
+
+  elements.imageViewerImage.src = meme.image_url;
+  elements.imageViewerImage.alt = meme.title;
+  elements.imageViewerImage.width = meme.width;
+  elements.imageViewerImage.height = meme.height;
+  elements.imageViewerTitle.textContent = meme.title;
+  elements.imageViewerLink.href = meme.image_url;
+
+  if (!elements.imageViewerDialog.open) {
+    elements.imageViewerDialog.showModal();
+  }
+}
+
+export function closeImageViewer(elements: AppElements): void {
+  if (elements.imageViewerDialog.open) {
+    elements.imageViewerDialog.close();
+  }
 }
 
 export function setUploadBusy(

@@ -19,7 +19,9 @@ import type {
 import {
   type AppElements,
   type EditDraft,
+  closeImageViewer,
   mountShell,
+  openImageViewer,
   renderDetail,
   renderLibrary,
   renderOperationError,
@@ -182,7 +184,12 @@ export class MemeVaultApp {
 
     this.elements.detailPanel.addEventListener("click", (event) => {
       const target = event.target as Element;
-      if (target.closest("[data-edit-meme]")) {
+      if (target.closest("[data-open-viewer]")) {
+        const meme = this.state.selectedMeme;
+        if (meme) {
+          openImageViewer(this.elements, meme);
+        }
+      } else if (target.closest("[data-edit-meme]")) {
         this.beginEdit();
       } else if (target.closest("[data-cancel-edit]")) {
         this.cancelEdit();
@@ -199,6 +206,21 @@ export class MemeVaultApp {
       }
       event.preventDefault();
       void this.submitEdit(form);
+    });
+
+    this.elements.imageViewerDialog.addEventListener("click", (event) => {
+      if (event.target === this.elements.imageViewerDialog) {
+        closeImageViewer(this.elements);
+      }
+    });
+    this.elements.imageViewerDialog
+      .querySelector("[data-close-viewer]")
+      ?.addEventListener("click", () => closeImageViewer(this.elements));
+    this.elements.imageViewerImage.addEventListener("error", () => {
+      this.elements.imageViewerImage.hidden = true;
+      this.elements.imageViewerFrame.classList.add("is-broken");
+      this.elements.imageViewerError.textContent = "原图加载失败";
+      this.elements.imageViewerError.hidden = false;
     });
   }
 

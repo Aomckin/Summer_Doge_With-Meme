@@ -246,6 +246,15 @@ def test_embedding_activation_is_independent_from_analysis_activation(tmp_path: 
     assert rejected.status_code == 422
     service = AISettingsService(session, tmp_path / "settings.key")
     assert isinstance(service.build_active_embedding_client(), DashScopeEmbeddingClient)
+    disabled = request(
+        app,
+        "PATCH",
+        f"/api/ai-settings/providers/{provider_id}",
+        json={"enabled": False},
+    )
+    models_after_disable = request(app, "GET", "/api/ai-settings/models").json()
+    assert disabled.status_code == 200
+    assert not any(item["is_embedding_active"] for item in models_after_disable)
     session.close()
 
 

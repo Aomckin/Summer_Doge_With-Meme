@@ -67,9 +67,13 @@ function field<T extends HTMLInputElement | HTMLSelectElement>(
 }
 
 function protocolLabel(protocol: string): string {
-  return protocol === "openai_responses"
-    ? "OpenAI Responses"
-    : "OpenAI 兼容 Chat";
+  if (protocol === "openai_responses") {
+    return "OpenAI Responses";
+  }
+  if (protocol === "dashscope_multimodal_embedding") {
+    return "DashScope 多模态向量";
+  }
+  return "OpenAI 兼容 Chat";
 }
 
 export class AISettingsController {
@@ -150,6 +154,8 @@ export class AISettingsController {
           this.openModelEditor(modelId);
         } else if (target.closest("[data-activate-model]")) {
           void this.activateModel(modelId);
+        } else if (target.closest("[data-activate-embedding-model]")) {
+          void this.activateEmbeddingModel(modelId);
         } else if (target.closest("[data-delete-model]")) {
           void this.deleteModel(modelId);
         }
@@ -296,8 +302,8 @@ export class AISettingsController {
           .map((model) => {
             const provider = providers.get(model.provider_id);
             return `
-              <article class="settings-row model-row${model.is_active ? " is-active-model" : ""}" data-model-record-id="${model.id}">
-                <span class="model-active-mark" aria-hidden="true">${model.is_active ? "✓" : ""}</span>
+              <article class="settings-row model-row${model.is_active || model.is_embedding_active ? " is-active-model" : ""}" data-model-record-id="${model.id}">
+                <span class="model-active-mark" aria-hidden="true">${model.is_active || model.is_embedding_active ? "✓" : ""}</span>
                 <div class="settings-primary">
                   <strong>${escapeHtml(model.display_name)}</strong>
                   <span>${escapeHtml(model.model_id)}</span>
@@ -305,10 +311,12 @@ export class AISettingsController {
                 <div class="settings-meta">
                   <span>${escapeHtml(provider?.name ?? "厂商已删除")}</span>
                   <span class="capability${model.supports_vision ? " supports" : ""}">${model.supports_vision ? "支持视觉" : "仅文本"}</span>
+                  ${model.supports_image_embedding ? '<span class="capability supports">模板视觉检索</span>' : ""}
                   <span>${model.enabled ? "已启用" : "已停用"}</span>
                 </div>
                 <div class="settings-actions">
                   <button class="button ${model.is_active ? "button-primary" : "button-secondary"}" type="button" data-activate-model ${!model.enabled || !model.supports_vision || !provider?.enabled || this.state.busy ? "disabled" : ""}>${model.is_active ? "当前分析模型" : "用于图片分析"}</button>
+                  ${model.supports_image_embedding ? `<button class="button ${model.is_embedding_active ? "button-primary" : "button-secondary"}" type="button" data-activate-embedding-model ${!model.enabled || !provider?.enabled || this.state.busy ? "disabled" : ""}>${model.is_embedding_active ? "当前视觉检索模型" : "用于模板视觉检索"}</button>` : ""}
                   <button class="button button-secondary" type="button" data-edit-model>编辑</button>
                   <button class="button button-danger" type="button" data-delete-model>删除</button>
                 </div>
@@ -326,7 +334,7 @@ export class AISettingsController {
       <div class="settings-toolbar">
         <div>
           <h3>模型列表</h3>
-          <p>只有已启用且支持视觉的模型可以设为当前图片分析模型。</p>
+          <p>图片分析模型与模板视觉检索模型独立配置；后者用于筛选最多 10 张参考图。</p>
         </div>
         <button class="button button-primary" type="button" data-add-model ${this.state.providers.length ? "" : "disabled"}>＋ 添加模型</button>
       </div>
@@ -495,6 +503,8 @@ export class AISettingsController {
       field<HTMLInputElement>(form, "model_id").value = model.model_id;
       field<HTMLInputElement>(form, "supports_vision").checked =
         model.supports_vision;
+      field<HTMLInputElement>(form, "supports_image_embedding").checked =
+        model.supports_image_embedding;
       field<HTMLInputElement>(form, "enabled").checked = model.enabled;
       if (title) {
         title.textContent = "编辑模型";
@@ -529,6 +539,10 @@ export class AISettingsController {
         form,
         "supports_vision",
       ).checked,
+      supports_image_embedding: field<HTMLInputElement>(
+        form,
+        "supports_image_embedding",
+      ).checked,
       enabled: field<HTMLInputElement>(form, "enabled").checked,
     };
     this.state.busy = true;
@@ -543,6 +557,7 @@ export class AISettingsController {
             field<HTMLSelectElement>(form, "provider_id").value,
           ),
           is_active: false,
+          is_embedding_active: false,
         });
       }
       this.elements.modelDialog.close();
@@ -579,6 +594,14 @@ export class AISettingsController {
       await this.api.updateAIModel(modelId, { is_active: true });
       this.state.models = await this.api.listAIModels();
       return "当前图片分析模型已更新。";
+    });
+  }
+
+  private async activateEmbeddingModel(modelId: number): Promise<void> {
+    await this.runOperation(async () => {
+      await this.api.updateAIModel(modelId, { is_embedding_active: true });
+      this.state.models = await this.api.listAIModels();
+      return "当前模板视觉检索模型已更新。";
     });
   }
 

@@ -93,6 +93,22 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
             model_id: "qwen3.6-flash",
             display_name: "Qwen3.6 Flash",
             supports_vision: true,
+            supports_image_embedding: false,
+          },
+        ],
+      },
+      {
+        id: "dashscope_embedding",
+        name: "阿里云百炼图像向量",
+        base_url: "https://dashscope.aliyuncs.com/api/v1",
+        protocol: "dashscope_multimodal_embedding",
+        description: "多模态图像向量 API",
+        models: [
+          {
+            model_id: "multimodal-embedding-v1",
+            display_name: "Multimodal Embedding V1",
+            supports_vision: false,
+            supports_image_embedding: true,
           },
         ],
       },
@@ -1015,8 +1031,10 @@ describe("MemeVaultApp", () => {
       model_id: "qwen3.6-flash",
       display_name: "Qwen3.6 Flash",
       supports_vision: true,
+      supports_image_embedding: false,
       enabled: true,
       is_active: false,
+      is_embedding_active: false,
       created_at: "2026-07-27T00:00:00Z",
       updated_at: "2026-07-27T00:00:00Z",
     };
@@ -1051,6 +1069,68 @@ describe("MemeVaultApp", () => {
         is_active: true,
       });
       expect(button("当前分析模型")).toBeTruthy();
+    });
+  });
+
+  it("activates an image embedding model independently from image analysis", async () => {
+    const provider = {
+      id: 2,
+      name: "阿里云百炼图像向量",
+      protocol: "dashscope_multimodal_embedding" as const,
+      base_url: "https://dashscope.aliyuncs.com/api/v1",
+      has_api_key: true,
+      api_key_hint: "••••1234",
+      timeout_seconds: 30,
+      max_retries: 1,
+      retry_delay_seconds: 1,
+      enabled: true,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const embeddingModel = {
+      id: 9,
+      provider_id: 2,
+      model_id: "multimodal-embedding-v1",
+      display_name: "Multimodal Embedding V1",
+      supports_vision: false,
+      supports_image_embedding: true,
+      enabled: true,
+      is_active: false,
+      is_embedding_active: false,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const api = makeApi({
+      listAIProviders: vi.fn().mockResolvedValue([provider]),
+      listAIModels: vi
+        .fn()
+        .mockResolvedValueOnce([embeddingModel])
+        .mockResolvedValueOnce([
+          { ...embeddingModel, is_embedding_active: true },
+        ]),
+      updateAIModel: vi.fn().mockResolvedValue({
+        ...embeddingModel,
+        is_embedding_active: true,
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    button("API 设置").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-settings-tab='models']")).not.toBeNull();
+    });
+    button("模型列表").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-model-record-id='9']")).not.toBeNull();
+    });
+    button("用于模板视觉检索").click();
+
+    await vi.waitFor(() => {
+      expect(api.updateAIModel).toHaveBeenCalledWith(9, {
+        is_embedding_active: true,
+      });
+      expect(button("当前视觉检索模型")).toBeTruthy();
     });
   });
 

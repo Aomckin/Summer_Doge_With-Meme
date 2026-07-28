@@ -109,6 +109,7 @@ class AISettingsService:
         if not provider.enabled:
             for model in provider.models:
                 model.is_active = False
+                model.is_embedding_active = False
         self._commit()
         return provider
 

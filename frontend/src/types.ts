@@ -92,12 +92,14 @@ export interface AIAnalysisConfirmPayload {
 
 export type AIProviderProtocol =
   | "openai_responses"
-  | "openai_chat_completions";
+  | "openai_chat_completions"
+  | "dashscope_multimodal_embedding";
 
 export interface AIPresetModel {
   model_id: string;
   display_name: string;
   supports_vision: boolean;
+  supports_image_embedding: boolean;
 }
 
 export interface AIProviderPreset {
@@ -146,8 +148,10 @@ export interface AIModelResponse {
   model_id: string;
   display_name: string;
   supports_vision: boolean;
+  supports_image_embedding: boolean;
   enabled: boolean;
   is_active: boolean;
+  is_embedding_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -157,8 +161,10 @@ export interface AIModelCreatePayload {
   model_id: string;
   display_name: string;
   supports_vision: boolean;
+  supports_image_embedding: boolean;
   enabled: boolean;
   is_active: boolean;
+  is_embedding_active: boolean;
 }
 
 export type AIModelUpdatePayload = Partial<

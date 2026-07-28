@@ -225,7 +225,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <div>
             <p class="eyebrow">AI CONFIGURATION · v0.3.3</p>
             <h2 id="settings-title">API 设置</h2>
-            <p>管理模型厂商、连接凭据与图片分析模型。</p>
+            <p>管理模型厂商、连接凭据、图片分析与模板视觉检索模型。</p>
           </div>
           <button class="icon-button" type="button" data-close-settings aria-label="关闭 API 设置">×</button>
         </header>
@@ -261,6 +261,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <select name="protocol" required>
             <option value="openai_responses">OpenAI Responses</option>
             <option value="openai_chat_completions">OpenAI 兼容 Chat Completions</option>
+            <option value="dashscope_multimodal_embedding">DashScope 多模态向量</option>
           </select>
         </label>
         <label>
@@ -323,6 +324,10 @@ export function mountShell(root: HTMLElement): AppElements {
         <label class="check-row">
           <input name="supports_vision" type="checkbox">
           <span>支持图片输入</span>
+        </label>
+        <label class="check-row">
+          <input name="supports_image_embedding" type="checkbox">
+          <span>支持模板视觉检索向量</span>
         </label>
         <label class="check-row">
           <input name="enabled" type="checkbox" checked>

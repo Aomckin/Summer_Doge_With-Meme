@@ -44,7 +44,7 @@ npm.cmd --prefix frontend install
 分别在两个终端启动后端与 Vite 开发服务器：
 
 ```powershell
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --port 8002
 ```
 
 ```powershell

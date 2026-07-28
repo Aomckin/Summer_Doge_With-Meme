@@ -175,7 +175,7 @@ export function mountShell(root: HTMLElement): AppElements {
       <div class="settings-shell">
         <header class="settings-header">
           <div>
-            <p class="eyebrow">AI CONFIGURATION · v0.3.1</p>
+            <p class="eyebrow">AI CONFIGURATION · v0.3.2</p>
             <h2 id="settings-title">API 设置</h2>
             <p>管理模型厂商、连接凭据与图片分析模型。</p>
           </div>

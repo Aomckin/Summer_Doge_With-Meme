@@ -1,6 +1,6 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.1，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议，以及网页内的模型厂商和模型管理；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议、网页内的模型厂商和模型管理，以及响应式瀑布流画廊；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 

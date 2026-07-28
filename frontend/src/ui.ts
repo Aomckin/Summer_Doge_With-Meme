@@ -11,6 +11,7 @@ export interface AppElements {
   searchInput: HTMLInputElement;
   randomButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
+  openSettingsButton: HTMLButtonElement;
   operationError: HTMLElement;
   tagFilters: HTMLElement;
   listStatus: HTMLElement;
@@ -22,6 +23,14 @@ export interface AppElements {
   uploadFile: HTMLInputElement;
   uploadError: HTMLElement;
   uploadSubmit: HTMLButtonElement;
+  settingsDialog: HTMLDialogElement;
+  settingsContent: HTMLElement;
+  providerDialog: HTMLDialogElement;
+  providerForm: HTMLFormElement;
+  providerError: HTMLElement;
+  modelDialog: HTMLDialogElement;
+  modelForm: HTMLFormElement;
+  modelError: HTMLElement;
   imageViewerDialog: HTMLDialogElement;
   imageViewerFrame: HTMLElement;
   imageViewerImage: HTMLImageElement;
@@ -98,6 +107,7 @@ export function mountShell(root: HTMLElement): AppElements {
             <span aria-hidden="true">⌕</span>
             <input id="meme-search" type="search" placeholder="搜索标题或描述…" aria-label="搜索 Meme" autocomplete="off">
           </label>
+          <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">上传 Meme</button>
         </div>
@@ -161,6 +171,123 @@ export function mountShell(root: HTMLElement): AppElements {
       </form>
     </dialog>
 
+    <dialog id="api-settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+      <div class="settings-shell">
+        <header class="settings-header">
+          <div>
+            <p class="eyebrow">AI CONFIGURATION · v0.3.1</p>
+            <h2 id="settings-title">API 设置</h2>
+            <p>管理模型厂商、连接凭据与图片分析模型。</p>
+          </div>
+          <button class="icon-button" type="button" data-close-settings aria-label="关闭 API 设置">×</button>
+        </header>
+        <div id="settings-content" class="settings-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="provider-dialog" class="modal settings-editor" aria-labelledby="provider-dialog-title">
+      <form id="provider-form" class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">MODEL PROVIDER</p>
+            <h2 id="provider-dialog-title">添加模型厂商</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-provider aria-label="关闭">×</button>
+        </div>
+        <input name="provider_id" type="hidden">
+        <label>
+          <span>厂商模板</span>
+          <select name="preset_id"></select>
+          <small>模板会填写基础 URL、协议与常用模型。</small>
+        </label>
+        <label>
+          <span>名称</span>
+          <input name="name" type="text" maxlength="100" required>
+        </label>
+        <label>
+          <span>基础 URL</span>
+          <input name="base_url" type="url" maxlength="500" required>
+        </label>
+        <label>
+          <span>API 协议</span>
+          <select name="protocol" required>
+            <option value="openai_responses">OpenAI Responses</option>
+            <option value="openai_chat_completions">OpenAI 兼容 Chat Completions</option>
+          </select>
+        </label>
+        <label>
+          <span>API Key</span>
+          <input name="api_key" type="password" maxlength="1000" autocomplete="new-password" placeholder="编辑时留空表示保持不变">
+          <small data-key-hint>密钥提交后只显示末四位。</small>
+        </label>
+        <label class="check-row" data-clear-key-row hidden>
+          <input name="clear_api_key" type="checkbox">
+          <span>清除已保存的 API Key</span>
+        </label>
+        <div class="settings-field-grid">
+          <label>
+            <span>超时（秒）</span>
+            <input name="timeout_seconds" type="number" min="1" max="600" step="1" value="30" required>
+          </label>
+          <label>
+            <span>最大重试</span>
+            <input name="max_retries" type="number" min="0" max="5" step="1" value="1" required>
+          </label>
+          <label>
+            <span>重试间隔（秒）</span>
+            <input name="retry_delay_seconds" type="number" min="0" max="60" step="0.5" value="1" required>
+          </label>
+        </div>
+        <label class="check-row">
+          <input name="enabled" type="checkbox" checked>
+          <span>启用该厂商</span>
+        </label>
+        <p id="provider-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button class="button button-ghost" type="button" data-close-provider>取消</button>
+          <button class="button button-primary" type="submit" data-provider-submit>保存厂商</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="model-dialog" class="modal settings-editor" aria-labelledby="model-dialog-title">
+      <form id="model-form" class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">MODEL REGISTRY</p>
+            <h2 id="model-dialog-title">添加模型</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-model aria-label="关闭">×</button>
+        </div>
+        <input name="model_record_id" type="hidden">
+        <label>
+          <span>模型厂商</span>
+          <select name="provider_id" required></select>
+        </label>
+        <label>
+          <span>模型名称</span>
+          <input name="display_name" type="text" maxlength="200" required>
+        </label>
+        <label>
+          <span>模型标识符</span>
+          <input name="model_id" type="text" maxlength="200" required>
+        </label>
+        <label class="check-row">
+          <input name="supports_vision" type="checkbox">
+          <span>支持图片输入</span>
+        </label>
+        <label class="check-row">
+          <input name="enabled" type="checkbox" checked>
+          <span>启用该模型</span>
+        </label>
+        <p id="model-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button class="button button-ghost" type="button" data-close-model>取消</button>
+          <button class="button button-primary" type="submit" data-model-submit>保存模型</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog
       id="image-viewer-dialog"
       class="image-viewer"
@@ -196,6 +323,7 @@ export function mountShell(root: HTMLElement): AppElements {
     searchInput: required(root, "#meme-search"),
     randomButton: required(root, "#random-button"),
     openUploadButton: required(root, "#open-upload"),
+    openSettingsButton: required(root, "#open-settings"),
     operationError: required(root, "#operation-error"),
     tagFilters: required(root, "#tag-filters"),
     listStatus: required(root, "#list-status"),
@@ -207,6 +335,14 @@ export function mountShell(root: HTMLElement): AppElements {
     uploadFile: required(document, "#upload-file"),
     uploadError: required(document, "#upload-error"),
     uploadSubmit: required(document, "#upload-submit"),
+    settingsDialog: required(document, "#api-settings-dialog"),
+    settingsContent: required(document, "#settings-content"),
+    providerDialog: required(document, "#provider-dialog"),
+    providerForm: required(document, "#provider-form"),
+    providerError: required(document, "#provider-error"),
+    modelDialog: required(document, "#model-dialog"),
+    modelForm: required(document, "#model-form"),
+    modelError: required(document, "#model-error"),
     imageViewerDialog: required(document, "#image-viewer-dialog"),
     imageViewerFrame: required(document, "[data-viewer-frame]"),
     imageViewerImage: required(document, "[data-viewer-image]"),

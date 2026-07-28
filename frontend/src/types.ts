@@ -61,6 +61,87 @@ export interface AIAnalysisConfirmPayload {
   apply_description: boolean;
 }
 
+export type AIProviderProtocol =
+  | "openai_responses"
+  | "openai_chat_completions";
+
+export interface AIPresetModel {
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+}
+
+export interface AIProviderPreset {
+  id: string;
+  name: string;
+  base_url: string;
+  protocol: AIProviderProtocol;
+  description: string;
+  models: AIPresetModel[];
+}
+
+export interface AIProviderResponse {
+  id: number;
+  name: string;
+  protocol: AIProviderProtocol;
+  base_url: string;
+  has_api_key: boolean;
+  api_key_hint: string | null;
+  timeout_seconds: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProviderCreatePayload {
+  preset_id?: string | null;
+  name: string;
+  protocol: AIProviderProtocol;
+  base_url: string;
+  api_key?: string | null;
+  timeout_seconds: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  enabled: boolean;
+}
+
+export type AIProviderUpdatePayload = Partial<
+  Omit<AIProviderCreatePayload, "preset_id">
+>;
+
+export interface AIModelResponse {
+  id: number;
+  provider_id: number;
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+  enabled: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIModelCreatePayload {
+  provider_id: number;
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+  enabled: boolean;
+  is_active: boolean;
+}
+
+export type AIModelUpdatePayload = Partial<
+  Omit<AIModelCreatePayload, "provider_id">
+>;
+
+export interface AIConnectionTestResponse {
+  ok: boolean;
+  message: string;
+  model_count: number;
+}
+
 export interface ListMemesOptions {
   offset: number;
   limit: number;

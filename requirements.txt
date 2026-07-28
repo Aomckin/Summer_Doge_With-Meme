@@ -4,5 +4,6 @@ sqlalchemy
 pydantic
 pillow
 python-multipart
+cryptography
 pytest
 uvicorn[standard]

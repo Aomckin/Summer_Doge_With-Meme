@@ -6,9 +6,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.api.ai_settings import router as ai_settings_router
 from app.api.memes import router as meme_router
 from app.api.tags import router as tag_router
 from app.config import (
+    AI_SETTINGS_KEY_FILE,
     FRONTEND_DIST_DIR,
     IMAGES_DIR,
     IMAGES_URL_PREFIX,
@@ -34,6 +36,7 @@ def create_app(
     images_dir: Path = IMAGES_DIR,
     thumbnails_dir: Path = THUMBNAILS_DIR,
     frontend_dir: Path = FRONTEND_DIST_DIR,
+    ai_settings_key_file: Path = AI_SETTINGS_KEY_FILE,
 ) -> FastAPI:
     resolved_images = images_dir.resolve()
     resolved_thumbnails = thumbnails_dir.resolve()
@@ -46,6 +49,7 @@ def create_app(
     application = FastAPI(title="Meme Vault", lifespan=lifespan)
     application.state.images_dir = resolved_images
     application.state.thumbnails_dir = resolved_thumbnails
+    application.state.ai_settings_key_file = ai_settings_key_file.resolve()
     application.mount(
         IMAGES_URL_PREFIX,
         StaticFiles(directory=resolved_images),
@@ -60,6 +64,7 @@ def create_app(
     # 各业务路由在独立模块中定义，入口文件只负责把它们挂到应用上。
     application.include_router(meme_router)
     application.include_router(tag_router)
+    application.include_router(ai_settings_router)
     application.add_api_route("/api/health", health_check, methods=["GET"])
 
     # 根路径挂载必须最后注册，避免吞掉 API、媒体与 Swagger 路由。

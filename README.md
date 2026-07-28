@@ -1,6 +1,6 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.1，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议，以及网页内的模型厂商和模型管理；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -99,7 +99,7 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 
 ## TypeScript 前端
 
-- 顶部工具栏提供标题/描述搜索、随机抽取和上传入口。
+- 顶部工具栏提供标题/描述搜索、API 设置、随机抽取和上传入口。
 - 左侧资料库按网格展示 Meme，并支持多标签筛选和分批加载。
 - 右侧详情面板提供原图、元数据、编辑与删除操作。
 - 搜索输入使用 300ms 防抖；多标签沿用后端的“同时包含全部标签”语义。
@@ -108,9 +108,19 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 - 详情面板可发起 AI 图片分析，预览描述、标签建议、置信度和使用的模型。
 - AI 建议只有在用户选择并点击“确认采用”后才会写入；确认失败会保留当前结果以便重试。
 
-## AI 图片分析
+## API 设置与 AI 图片分析
 
-v0.3 使用 OpenAI Responses API 分析已经保存的原图。启动后端前至少需要设置 API Key：
+点击网页顶部的“API 设置”，可以管理模型厂商和模型列表：
+
+- 厂商页支持 OpenAI、Qwen、DeepSeek 和自定义 OpenAI 兼容接口，提供密钥、基础 URL、协议、超时与重试参数。
+- 模型页可添加、编辑和删除模型，并将一个已启用的视觉模型设为当前图片分析模型。
+- “测试”会请求厂商的 `/models` 接口；“刷新模型”会导入新发现的模型，新模型默认停用，需确认视觉能力后手动启用。
+- DeepSeek 官方当前预设模型为文本模型，因此会显示在列表中，但不能直接设为图片分析模型。
+- API Key 由后端加密后写入本地数据库，公开 API 只返回“是否已配置”和末四位提示，绝不返回明文。
+
+首次保存密钥时，应用会自动生成被 Git 忽略的 `data/.ai_settings.key`。备份或迁移数据库时必须同时保存该文件，否则旧密钥无法解密。也可以通过 `AI_SETTINGS_ENCRYPTION_KEY` 提供固定的 Fernet Key。
+
+v0.3 环境变量方式继续作为无网页配置时的兼容回退：
 
 ```powershell
 $env:OPENAI_API_KEY = "your-api-key"
@@ -124,7 +134,13 @@ $env:OPENAI_BASE_URL = "https://api.openai.com/v1"
 $env:AI_TIMEOUT_SECONDS = "30"
 ```
 
-默认模型面向低成本图片整理任务，可通过 `OPENAI_MODEL` 替换。应用不会自动读取 `.env`，可复制 [`.env.example`](.env.example) 后由终端或部署环境注入；真实密钥不得提交到 Git。
+默认回退模型面向低成本图片整理任务，可通过 `OPENAI_MODEL` 替换。应用不会自动读取 `.env`，可复制 [`.env.example`](.env.example) 后由终端或部署环境注入；真实密钥不得提交到 Git。
+
+内置预设参考厂商官方文档，并可通过在线刷新获取账号当前可用的模型：
+
+- [OpenAI 模型列表](https://developers.openai.com/api/docs/models/all)
+- [DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models)
+- [Qwen 视觉理解模型](https://help.aliyun.com/zh/model-studio/vision-model/)
 
 分析分为两个阶段：
 
@@ -137,7 +153,7 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`tags`、`meme_tags` 和 `meme_ai_analyses`。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
 
 数据库操作封装在 Repository 中。Repository 执行查询和 `flush`，事务提交或回滚由 `MemeService` 统一控制。
 
@@ -167,6 +183,10 @@ $env:AI_TIMEOUT_SECONDS = "30"
 - `GET /api/tags`：按名称排序获取标签列表。
 - `POST /api/memes/{meme_id}/analyze`：生成并记录 AI 描述、标签建议、模型名和置信度，不直接修改 Meme。
 - `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm`：确认选中的 AI 标签，并可采用 AI 描述。
+- `/api/ai-settings/providers`：模型厂商的列表、新增、修改与删除。
+- `/api/ai-settings/providers/{id}/test`：验证密钥和 `/models` 连接。
+- `/api/ai-settings/providers/{id}/refresh-models`：同步厂商模型标识。
+- `/api/ai-settings/models`：模型列表、新增、修改、删除与当前视觉模型选择。
 
 Meme 响应使用 `image_url` 和可为 `null` 的 `thumbnail_url` 提供浏览器可访问地址，不会返回服务器本地的 `file_path` 或 `thumbnail_path`。
 
@@ -214,6 +234,7 @@ meme-vault/
 ## 开发约定
 
 - 每次只执行 `docs/PROJECT_PLAN.md` 中的一个阶段。
-- API Key 和本地配置写入 `.env`，不得提交到 Git。
+- API Key 只能通过环境变量或网页设置提交到后端；不得写入代码或提交到 Git。
+- 网页设置中的 API Key 必须加密保存，公开响应不得返回明文。
 - 数据库、上传图片、缩略图、虚拟环境、`node_modules`、前端构建产物和缓存文件不得提交。
 - 每个阶段完成后运行相关验证，并更新项目计划中的复选框。

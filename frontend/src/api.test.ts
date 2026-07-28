@@ -4,9 +4,13 @@ import {
   ApiError,
   analyzeMeme,
   confirmAIAnalysis,
+  createAIProvider,
   deleteMeme,
   listMemes,
   parseTagInput,
+  testAIProvider,
+  updateAIModel,
+  updateAIProvider,
   updateMeme,
   uploadMeme,
 } from "./api";
@@ -155,6 +159,86 @@ describe("AI analysis", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       tags: ["reaction", "new"],
       apply_description: true,
+    });
+  });
+});
+
+describe("AI settings", () => {
+  it("creates a provider and omits an unchanged API key on patch", async () => {
+    const provider = {
+      id: 2,
+      name: "Qwen",
+      protocol: "openai_chat_completions",
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      has_api_key: true,
+      api_key_hint: "••••1234",
+      timeout_seconds: 30,
+      max_retries: 1,
+      retry_delay_seconds: 1,
+      enabled: true,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(provider))
+      .mockResolvedValueOnce(jsonResponse(provider));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createAIProvider({
+      preset_id: "qwen",
+      name: "Qwen",
+      protocol: "openai_chat_completions",
+      base_url: provider.base_url,
+      api_key: "secret",
+      timeout_seconds: 30,
+      max_retries: 1,
+      retry_delay_seconds: 1,
+      enabled: true,
+    });
+    await updateAIProvider(2, { name: "Qwen 主账号" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/ai-settings/providers");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(
+      expect.objectContaining({ preset_id: "qwen", api_key: "secret" }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      name: "Qwen 主账号",
+    });
+    expect(fetchMock.mock.calls[1][1].body).not.toContain("api_key");
+  });
+
+  it("tests providers and activates a selected model", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, message: "连接成功", model_count: 3 }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 4,
+          provider_id: 2,
+          model_id: "qwen3.6-flash",
+          display_name: "Qwen3.6 Flash",
+          supports_vision: true,
+          enabled: true,
+          is_active: true,
+          created_at: "2026-07-27T00:00:00Z",
+          updated_at: "2026-07-27T00:00:00Z",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await testAIProvider(2);
+    await updateAIModel(4, { is_active: true });
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/api/ai-settings/providers/2/test",
+      { method: "POST" },
+    ]);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/ai-settings/models/4");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      is_active: true,
     });
   });
 });

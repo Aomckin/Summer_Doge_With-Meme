@@ -8,6 +8,7 @@ from app.ai.client import (
     AIInvalidResponseError,
     AIRequestTimeoutError,
     AIUpstreamError,
+    OpenAICompatibleChatClient,
     OpenAIResponsesClient,
 )
 
@@ -145,3 +146,85 @@ def test_client_maps_upstream_http_error_without_exposing_response_body() -> Non
             )
 
     assert "secret upstream detail" not in str(caught.value)
+
+
+def test_chat_compatible_client_sends_image_and_parses_json() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.6-flash",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "description": "一张惊讶反应图。",
+                                    "tags": [
+                                        {
+                                            "name": "reaction",
+                                            "confidence": 0.9,
+                                        }
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAICompatibleChatClient(
+            api_key="secret",
+            model="qwen3.6-flash",
+            base_url="https://example.test/v1",
+            timeout_seconds=10,
+            http_client=http_client,
+        )
+        result = client.analyze_image(
+            image_bytes=b"image",
+            mime_type="image/png",
+            existing_tags=["funny"],
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["response_format"] == {"type": "json_object"}
+    content = payload["messages"][1]["content"]
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith(
+        "data:image/png;base64,"
+    )
+    assert result.model_name == "qwen3.6-flash"
+    assert result.tags[0].name == "reaction"
+
+
+def test_client_retries_retryable_status_only() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json=response_payload())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAIResponsesClient(
+            api_key="secret",
+            max_retries=1,
+            retry_delay_seconds=0,
+            http_client=http_client,
+        )
+        client.analyze_image(
+            image_bytes=b"image",
+            mime_type="image/png",
+            existing_tags=[],
+        )
+
+    assert calls == 2

@@ -20,7 +20,6 @@ from app.ai.client import (
     AIInvalidResponseError,
     AIRequestTimeoutError,
     AIUpstreamError,
-    OpenAIResponsesClient,
 )
 from app.config import IMAGES_URL_PREFIX, THUMBNAILS_URL_PREFIX
 from app.database import get_db
@@ -61,9 +60,17 @@ def get_meme_service(
 ServiceDependency = Annotated[MemeService, Depends(get_meme_service)]
 
 
-def get_ai_client() -> AIClient:
+def get_ai_client(
+    request: Request,
+    session: Annotated[Session, Depends(get_db)],
+) -> AIClient:
+    from app.services.ai_settings_service import AISettingsService
+
     try:
-        return OpenAIResponsesClient.from_env()
+        return AISettingsService(
+            session,
+            request.app.state.ai_settings_key_file,
+        ).build_active_client()
     except AIConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

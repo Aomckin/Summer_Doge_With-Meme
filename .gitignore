@@ -18,6 +18,7 @@ frontend/dist/
 .env
 .env.*
 !.env.example
+data/.ai_settings.key
 
 # Local database files
 data/*.db

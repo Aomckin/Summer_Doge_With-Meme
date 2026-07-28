@@ -2,11 +2,22 @@ import {
   ApiError,
   analyzeMeme,
   confirmAIAnalysis,
+  createAIModel,
+  createAIProvider,
   deleteMeme,
+  deleteAIModel,
+  deleteAIProvider,
   getRandomMeme,
+  listAIModels,
+  listAIProviderPresets,
+  listAIProviders,
   listMemes,
   listTags,
   parseTagInput,
+  refreshAIModels,
+  testAIProvider,
+  updateAIModel,
+  updateAIProvider,
   updateMeme,
   uploadMeme,
 } from "./api";
@@ -20,6 +31,10 @@ import type {
   TagResponse,
   UploadMemeInput,
 } from "./types";
+import {
+  AISettingsController,
+  type AISettingsApi,
+} from "./settings";
 import {
   type AppElements,
   type EditDraft,
@@ -36,7 +51,7 @@ import {
 
 const PAGE_SIZE = 24;
 
-export interface MemeApi {
+export interface MemeApi extends AISettingsApi {
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   listTags(signal?: AbortSignal): Promise<TagResponse[]>;
   getRandomMeme(tags: string[], signal?: AbortSignal): Promise<MemeResponse>;
@@ -63,6 +78,17 @@ const defaultApi: MemeApi = {
   deleteMeme,
   analyzeMeme,
   confirmAIAnalysis,
+  listAIProviderPresets,
+  listAIProviders,
+  createAIProvider,
+  updateAIProvider,
+  deleteAIProvider,
+  testAIProvider,
+  refreshAIModels,
+  listAIModels,
+  createAIModel,
+  updateAIModel,
+  deleteAIModel,
 };
 
 function initialState(): AppState {
@@ -123,12 +149,14 @@ export class MemeVaultApp {
   private editing = false;
   private editDraft: EditDraft | null = null;
   private uploadError: string | null = null;
+  private readonly settings: AISettingsController;
 
   constructor(
     root: HTMLElement,
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    this.settings = new AISettingsController(this.elements, this.api);
     this.bindEvents();
     this.render();
   }
@@ -191,6 +219,9 @@ export class MemeVaultApp {
     });
     this.elements.openUploadButton.addEventListener("click", () => {
       this.openUpload();
+    });
+    this.elements.openSettingsButton.addEventListener("click", () => {
+      this.settings.open();
     });
     for (const button of document.querySelectorAll("[data-close-upload]")) {
       button.addEventListener("click", () => this.closeUpload());

@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
@@ -57,6 +58,13 @@ class AIClient(Protocol):
     ) -> AIImageResult: ...
 
 
+SYSTEM_PROMPT = (
+    "你是 Meme 图片整理助手。生成简体中文图片描述，并推荐适合检索的短标签。"
+    "必须优先复用用户已有标签；只有已有标签无法表达关键信息时才建议新标签，"
+    "且新标签最多 3 个。标签使用简短的小写名称，不要输出重复项。"
+)
+
+
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -92,7 +100,117 @@ ANALYSIS_SCHEMA = {
 }
 
 
-class OpenAIResponsesClient:
+class _HTTPAIClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str,
+        timeout_seconds: float,
+        max_retries: int = 0,
+        retry_delay_seconds: float = 1.0,
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        if not api_key.strip():
+            raise AIConfigurationError(
+                "OPENAI_API_KEY or provider API Key is not configured"
+            )
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise AIConfigurationError("AI timeout must be greater than zero")
+        if max_retries < 0 or max_retries > 5:
+            raise AIConfigurationError("AI max retries must be between 0 and 5")
+        if not isfinite(retry_delay_seconds) or retry_delay_seconds < 0:
+            raise AIConfigurationError("AI retry delay cannot be negative")
+
+        self.api_key = api_key
+        self.model = model.strip()
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self.retry_delay_seconds = retry_delay_seconds
+        self.http_client = http_client
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                if self.http_client is not None:
+                    response = self.http_client.post(
+                        f"{self.base_url}{path}",
+                        headers=self._headers(),
+                        json=payload,
+                        timeout=self.timeout_seconds,
+                    )
+                else:
+                    with httpx.Client() as client:
+                        response = client.post(
+                            f"{self.base_url}{path}",
+                            headers=self._headers(),
+                            json=payload,
+                            timeout=self.timeout_seconds,
+                        )
+            except httpx.TimeoutException as error:
+                last_error = error
+                if attempt >= self.max_retries:
+                    raise AIRequestTimeoutError("AI request timed out") from error
+            except httpx.RequestError as error:
+                last_error = error
+                if attempt >= self.max_retries:
+                    raise AIUpstreamError("AI service is unavailable") from error
+            else:
+                if not response.is_error:
+                    return response
+                if (
+                    response.status_code != 429
+                    and response.status_code < 500
+                ) or attempt >= self.max_retries:
+                    raise AIUpstreamError(
+                        f"AI service returned HTTP {response.status_code}"
+                    )
+            if self.retry_delay_seconds:
+                time.sleep(self.retry_delay_seconds * (attempt + 1))
+        raise AIUpstreamError("AI service is unavailable") from last_error
+
+    def _parse_result(
+        self,
+        response_payload: object,
+        output_text: str,
+    ) -> AIImageResult:
+        try:
+            result = json.loads(output_text)
+            description = result["description"].strip()
+            raw_tags = result["tags"]
+            if not description or not isinstance(raw_tags, list):
+                raise ValueError
+            tags = tuple(
+                AITagSuggestion(
+                    name=str(item["name"]),
+                    confidence=float(item["confidence"]),
+                )
+                for item in raw_tags
+            )
+            if not isinstance(response_payload, dict):
+                raise ValueError
+            model_name = str(response_payload.get("model") or self.model)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned an invalid response"
+            ) from error
+        return AIImageResult(
+            model_name=model_name,
+            description=description,
+            tags=tags,
+        )
+
+
+class OpenAIResponsesClient(_HTTPAIClient):
     def __init__(
         self,
         *,
@@ -100,18 +218,19 @@ class OpenAIResponsesClient:
         model: str = DEFAULT_OPENAI_MODEL,
         base_url: str = DEFAULT_OPENAI_BASE_URL,
         timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS,
+        max_retries: int = 0,
+        retry_delay_seconds: float = 1.0,
         http_client: httpx.Client | None = None,
     ) -> None:
-        if not api_key.strip():
-            raise AIConfigurationError("OPENAI_API_KEY is not configured")
-        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
-            raise AIConfigurationError("AI_TIMEOUT_SECONDS must be greater than zero")
-
-        self.api_key = api_key
-        self.model = model.strip() or DEFAULT_OPENAI_MODEL
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
-        self.http_client = http_client
+        super().__init__(
+            api_key=api_key,
+            model=model.strip() or DEFAULT_OPENAI_MODEL,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            retry_delay_seconds=retry_delay_seconds,
+            http_client=http_client,
+        )
 
     @classmethod
     def from_env(
@@ -158,12 +277,7 @@ class OpenAIResponsesClient:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": (
-                                "你是 Meme 图片整理助手。生成简体中文图片描述，并推荐"
-                                "适合检索的短标签。必须优先复用用户已有标签；只有已有"
-                                "标签无法表达关键信息时才建议新标签，且新标签最多 3 个。"
-                                "标签使用简短的小写名称，不要输出重复项。"
-                            ),
+                            "text": SYSTEM_PROMPT,
                         }
                     ],
                 },
@@ -192,67 +306,18 @@ class OpenAIResponsesClient:
             },
         }
 
-        try:
-            if self.http_client is not None:
-                response = self.http_client.post(
-                    f"{self.base_url}/responses",
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=self.timeout_seconds,
-                )
-            else:
-                with httpx.Client() as client:
-                    response = client.post(
-                        f"{self.base_url}/responses",
-                        headers=self._headers(),
-                        json=payload,
-                        timeout=self.timeout_seconds,
-                    )
-        except httpx.TimeoutException as error:
-            raise AIRequestTimeoutError("AI request timed out") from error
-        except httpx.RequestError as error:
-            raise AIUpstreamError("AI service is unavailable") from error
-
-        if response.is_error:
-            raise AIUpstreamError(
-                f"AI service returned HTTP {response.status_code}"
-            )
-
+        response = self._post("/responses", payload)
         return self._parse_response(response)
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
     def _parse_response(self, response: httpx.Response) -> AIImageResult:
         try:
             response_payload = response.json()
             output_text = self._extract_output_text(response_payload)
-            result = json.loads(output_text)
-            description = result["description"].strip()
-            raw_tags = result["tags"]
-            if not description or not isinstance(raw_tags, list):
-                raise ValueError
-            tags = tuple(
-                AITagSuggestion(
-                    name=str(item["name"]),
-                    confidence=float(item["confidence"]),
-                )
-                for item in raw_tags
-            )
-            model_name = str(response_payload.get("model") or self.model)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise AIInvalidResponseError(
                 "AI service returned an invalid response"
             ) from error
-
-        return AIImageResult(
-            model_name=model_name,
-            description=description,
-            tags=tags,
-        )
+        return self._parse_result(response_payload, output_text)
 
     @staticmethod
     def _extract_output_text(payload: object) -> str:
@@ -269,3 +334,61 @@ class OpenAIResponsesClient:
                 ):
                     return content["text"]
         raise AIInvalidResponseError("AI service returned no structured output")
+
+
+class OpenAICompatibleChatClient(_HTTPAIClient):
+    """OpenAI-compatible Chat Completions client used by Qwen and custom APIs."""
+
+    def analyze_image(
+        self,
+        *,
+        image_bytes: bytes,
+        mime_type: str,
+        existing_tags: Sequence[str],
+    ) -> AIImageResult:
+        image_data = base64.b64encode(image_bytes).decode("ascii")
+        known_tags = ", ".join(existing_tags) if existing_tags else "（暂无）"
+        payload: dict[str, object] = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{SYSTEM_PROMPT} 必须只输出 JSON 对象，格式示例："
+                        '{"description":"图片描述","tags":'
+                        '[{"name":"reaction","confidence":0.9}]}'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"当前标签库：{known_tags}",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_data}"
+                            },
+                        },
+                    ],
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": 1200,
+        }
+        response = self._post("/chat/completions", payload)
+        try:
+            response_payload = response.json()
+            if not isinstance(response_payload, dict):
+                raise TypeError
+            choices = response_payload["choices"]
+            output_text = choices[0]["message"]["content"]
+            if not isinstance(output_text, str):
+                raise TypeError
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned no structured output"
+            ) from error
+        return self._parse_result(response_payload, output_text)

@@ -1,6 +1,14 @@
 import type {
   AIAnalysisConfirmPayload,
   AIAnalysisResponse,
+  AIConnectionTestResponse,
+  AIModelCreatePayload,
+  AIModelResponse,
+  AIModelUpdatePayload,
+  AIProviderCreatePayload,
+  AIProviderPreset,
+  AIProviderResponse,
+  AIProviderUpdatePayload,
   ListMemesOptions,
   MemeResponse,
   MemeUpdatePayload,
@@ -194,4 +202,90 @@ export function confirmAIAnalysis(
       }),
     },
   );
+}
+
+function jsonRequest(method: string, body?: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
+}
+
+export function listAIProviderPresets(): Promise<AIProviderPreset[]> {
+  return requestJson<AIProviderPreset[]>("/api/ai-settings/presets");
+}
+
+export function listAIProviders(): Promise<AIProviderResponse[]> {
+  return requestJson<AIProviderResponse[]>("/api/ai-settings/providers");
+}
+
+export function createAIProvider(
+  payload: AIProviderCreatePayload,
+): Promise<AIProviderResponse> {
+  return requestJson<AIProviderResponse>(
+    "/api/ai-settings/providers",
+    jsonRequest("POST", payload),
+  );
+}
+
+export function updateAIProvider(
+  id: number,
+  payload: AIProviderUpdatePayload,
+): Promise<AIProviderResponse> {
+  return requestJson<AIProviderResponse>(
+    `/api/ai-settings/providers/${id}`,
+    jsonRequest("PATCH", payload),
+  );
+}
+
+export function deleteAIProvider(id: number): Promise<void> {
+  return requestJson<void>(`/api/ai-settings/providers/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function testAIProvider(
+  id: number,
+): Promise<AIConnectionTestResponse> {
+  return requestJson<AIConnectionTestResponse>(
+    `/api/ai-settings/providers/${id}/test`,
+    { method: "POST" },
+  );
+}
+
+export function refreshAIModels(id: number): Promise<AIModelResponse[]> {
+  return requestJson<AIModelResponse[]>(
+    `/api/ai-settings/providers/${id}/refresh-models`,
+    { method: "POST" },
+  );
+}
+
+export function listAIModels(): Promise<AIModelResponse[]> {
+  return requestJson<AIModelResponse[]>("/api/ai-settings/models");
+}
+
+export function createAIModel(
+  payload: AIModelCreatePayload,
+): Promise<AIModelResponse> {
+  return requestJson<AIModelResponse>(
+    "/api/ai-settings/models",
+    jsonRequest("POST", payload),
+  );
+}
+
+export function updateAIModel(
+  id: number,
+  payload: AIModelUpdatePayload,
+): Promise<AIModelResponse> {
+  return requestJson<AIModelResponse>(
+    `/api/ai-settings/models/${id}`,
+    jsonRequest("PATCH", payload),
+  );
+}
+
+export function deleteAIModel(id: number): Promise<void> {
+  return requestJson<void>(`/api/ai-settings/models/${id}`, {
+    method: "DELETE",
+  });
 }

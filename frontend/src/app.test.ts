@@ -53,6 +53,44 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
       confirmed_at: null,
     }),
     confirmAIAnalysis: vi.fn().mockResolvedValue(makeMeme(1)),
+    listAIProviderPresets: vi.fn().mockResolvedValue([
+      {
+        id: "qwen",
+        name: "Qwen",
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        protocol: "openai_chat_completions",
+        description: "Qwen 视觉模型",
+        models: [
+          {
+            model_id: "qwen3.6-flash",
+            display_name: "Qwen3.6 Flash",
+            supports_vision: true,
+          },
+        ],
+      },
+      {
+        id: "deepseek",
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com",
+        protocol: "openai_chat_completions",
+        description: "DeepSeek 文本模型",
+        models: [],
+      },
+    ]),
+    listAIProviders: vi.fn().mockResolvedValue([]),
+    createAIProvider: vi.fn(),
+    updateAIProvider: vi.fn(),
+    deleteAIProvider: vi.fn().mockResolvedValue(undefined),
+    testAIProvider: vi.fn().mockResolvedValue({
+      ok: true,
+      message: "连接成功",
+      model_count: 1,
+    }),
+    refreshAIModels: vi.fn().mockResolvedValue([]),
+    listAIModels: vi.fn().mockResolvedValue([]),
+    createAIModel: vi.fn(),
+    updateAIModel: vi.fn(),
+    deleteAIModel: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -623,6 +661,134 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector(".ai-description")?.textContent).toBe(
       "AI 描述",
     );
+  });
+
+  it("opens API settings and fills common provider presets", async () => {
+    const provider = {
+      id: 1,
+      name: "DeepSeek",
+      protocol: "openai_chat_completions" as const,
+      base_url: "https://api.deepseek.com",
+      has_api_key: true,
+      api_key_hint: "••••1234",
+      timeout_seconds: 30,
+      max_retries: 1,
+      retry_delay_seconds: 1,
+      enabled: true,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const api = makeApi({
+      listAIProviders: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([provider]),
+      createAIProvider: vi.fn().mockResolvedValue(provider),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    button("API 设置").click();
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector<HTMLDialogElement>("#api-settings-dialog")
+          ?.open,
+      ).toBe(true);
+      expect(button("添加厂商")).toBeTruthy();
+    });
+    button("添加厂商").click();
+    const form = document.querySelector<HTMLFormElement>("#provider-form");
+    if (!form) {
+      throw new Error("Missing provider form");
+    }
+    const preset = form.elements.namedItem("preset_id") as HTMLSelectElement;
+    preset.value = "deepseek";
+    preset.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(
+      (form.elements.namedItem("base_url") as HTMLInputElement).value,
+    ).toBe("https://api.deepseek.com");
+    expect(
+      (form.elements.namedItem("protocol") as HTMLSelectElement).value,
+    ).toBe("openai_chat_completions");
+    (form.elements.namedItem("api_key") as HTMLInputElement).value =
+      "secret-key";
+    form.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+
+    await vi.waitFor(() => {
+      expect(api.createAIProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preset_id: "deepseek",
+          name: "DeepSeek",
+          base_url: "https://api.deepseek.com",
+          api_key: "secret-key",
+        }),
+      );
+      expect(document.querySelector(".provider-row")?.textContent).toContain(
+        "DeepSeek",
+      );
+    });
+  });
+
+  it("activates only a vision-capable model from the model list", async () => {
+    const provider = {
+      id: 1,
+      name: "Qwen",
+      protocol: "openai_chat_completions" as const,
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      has_api_key: true,
+      api_key_hint: "••••1234",
+      timeout_seconds: 30,
+      max_retries: 1,
+      retry_delay_seconds: 1,
+      enabled: true,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const inactive = {
+      id: 8,
+      provider_id: 1,
+      model_id: "qwen3.6-flash",
+      display_name: "Qwen3.6 Flash",
+      supports_vision: true,
+      enabled: true,
+      is_active: false,
+      created_at: "2026-07-27T00:00:00Z",
+      updated_at: "2026-07-27T00:00:00Z",
+    };
+    const api = makeApi({
+      listAIProviders: vi.fn().mockResolvedValue([provider]),
+      listAIModels: vi
+        .fn()
+        .mockResolvedValueOnce([inactive])
+        .mockResolvedValueOnce([{ ...inactive, is_active: true }]),
+      updateAIModel: vi.fn().mockResolvedValue({
+        ...inactive,
+        is_active: true,
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    button("API 设置").click();
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector("[data-settings-tab='models']"),
+      ).not.toBeNull();
+      expect(api.listAIModels).toHaveBeenCalledTimes(1);
+    });
+    button("模型列表").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-model-record-id='8']")).not.toBeNull();
+    });
+    button("用于图片分析").click();
+
+    await vi.waitFor(() => {
+      expect(api.updateAIModel).toHaveBeenCalledWith(8, {
+        is_active: true,
+      });
+      expect(button("当前分析模型")).toBeTruthy();
+    });
   });
 
   it("opens the selected original image in a reusable viewer", async () => {

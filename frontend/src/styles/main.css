@@ -230,11 +230,11 @@ textarea:focus-visible {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) minmax(360px, 430px);
-  gap: 18px;
-  max-width: 1720px;
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 20vw, 420px);
+  gap: clamp(18px, 2vw, 32px);
+  width: 100%;
   min-height: calc(100vh - 78px);
-  margin: 0 auto;
+  margin: 0;
   padding: 24px clamp(20px, 3vw, 48px) 44px;
 }
 
@@ -290,6 +290,7 @@ h2 {
 .tag-filters {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin: 24px 0 16px;
 }
@@ -313,6 +314,22 @@ h2 {
 .filter-chip.is-active {
   border-color: rgb(230 255 74 / 60%);
   color: var(--accent);
+  background: rgb(230 255 74 / 8%);
+}
+
+.filter-toggle {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px dashed #4b566b;
+  border-radius: 999px;
+  color: var(--accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.filter-toggle:hover {
+  border-color: var(--accent);
   background: rgb(230 255 74 / 8%);
 }
 
@@ -359,8 +376,21 @@ h2 {
 }
 
 .meme-grid {
-  column-width: 220px;
+  column-width: 200px;
   column-gap: 14px;
+}
+
+@media (min-width: 1750px) {
+  .meme-grid {
+    column-count: 6;
+    column-width: auto;
+  }
+}
+
+@media (min-width: 2030px) {
+  .meme-grid {
+    column-count: 7;
+  }
 }
 
 .meme-card {

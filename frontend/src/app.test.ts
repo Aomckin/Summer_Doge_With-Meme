@@ -198,6 +198,32 @@ describe("MemeVaultApp", () => {
     );
   });
 
+  it("collapses excess tags and keeps selected tags visible", async () => {
+    const tags = Array.from({ length: 10 }, (_, index) => ({
+      ...funnyTag,
+      id: index + 1,
+      name: `标签${index + 1}`,
+    }));
+    const api = makeApi({ listTags: vi.fn().mockResolvedValue(tags) });
+    const app = new MemeVaultApp(root(), api);
+
+    await app.start();
+
+    expect(document.querySelectorAll("[data-tag]")).toHaveLength(8);
+    expect(button("展开全部标签（+2）").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    button("展开全部标签（+2）").click();
+    expect(document.querySelectorAll("[data-tag]")).toHaveLength(10);
+    expect(button("收起标签").getAttribute("aria-expanded")).toBe("true");
+
+    document.querySelector<HTMLButtonElement>('[data-tag="标签10"]')?.click();
+    button("收起标签").click();
+    expect(document.querySelectorAll("[data-tag]")).toHaveLength(9);
+    expect(document.querySelector('[data-tag="标签10"]')).not.toBeNull();
+  });
+
   it("debounces search and randomizes only within selected tags", async () => {
     vi.useFakeTimers();
     const api = makeApi();

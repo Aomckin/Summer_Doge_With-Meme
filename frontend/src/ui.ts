@@ -375,13 +375,24 @@ export function renderOperationError(
   );
 }
 
+const COLLAPSED_TAG_LIMIT = 8;
+
 export function renderTags(elements: AppElements, state: AppState): void {
   if (!state.availableTags.length) {
     elements.tagFilters.innerHTML =
       '<span class="muted">还没有可筛选的标签</span>';
     return;
   }
-  elements.tagFilters.innerHTML = state.availableTags
+  const collapsed = state.availableTags.length > COLLAPSED_TAG_LIMIT;
+  const visibleTags = state.tagsExpanded
+    ? state.availableTags
+    : state.availableTags.filter(
+        (tag, index) =>
+          index < COLLAPSED_TAG_LIMIT ||
+          state.selectedTags.includes(tag.name),
+      );
+  const hiddenCount = state.availableTags.length - visibleTags.length;
+  const tags = visibleTags
     .map((tag) => {
       const selected = state.selectedTags.includes(tag.name);
       return `
@@ -394,6 +405,17 @@ export function renderTags(elements: AppElements, state: AppState): void {
       `;
     })
     .join("");
+  const toggle = collapsed
+    ? `
+      <button
+        class="filter-toggle"
+        type="button"
+        data-expand-tags
+        aria-expanded="${state.tagsExpanded}"
+      >${state.tagsExpanded ? "收起标签" : `展开全部标签（+${hiddenCount}）`}</button>
+    `
+    : "";
+  elements.tagFilters.innerHTML = `${tags}${toggle}`;
 }
 
 function cardMarkup(meme: MemeResponse, selected: boolean): string {

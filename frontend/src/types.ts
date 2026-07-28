@@ -156,6 +156,7 @@ export interface AppState {
   selectedMeme: MemeResponse | null;
   query: string;
   selectedTags: string[];
+  tagsExpanded: boolean;
   offset: number;
   hasMore: boolean;
   loadingList: boolean;

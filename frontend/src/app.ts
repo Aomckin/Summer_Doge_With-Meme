@@ -98,6 +98,7 @@ function initialState(): AppState {
     selectedMeme: null,
     query: "",
     selectedTags: [],
+    tagsExpanded: false,
     offset: 0,
     hasMore: false,
     loadingList: false,
@@ -178,9 +179,17 @@ export class MemeVaultApp {
 
     this.elements.tagFilters.addEventListener("click", (event) => {
       const target = (event.target as Element).closest<HTMLButtonElement>(
-        "[data-tag]",
+        "button",
       );
-      if (!target?.dataset.tag) {
+      if (!target) {
+        return;
+      }
+      if (target.matches("[data-expand-tags]")) {
+        this.state.tagsExpanded = !this.state.tagsExpanded;
+        renderTags(this.elements, this.state);
+        return;
+      }
+      if (!target.dataset.tag) {
         return;
       }
       const tag = target.dataset.tag;

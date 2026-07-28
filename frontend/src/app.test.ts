@@ -11,6 +11,21 @@ const funnyTag: TagResponse = {
   created_at: "2026-07-25T00:00:00Z",
 };
 
+const dogeTemplate = {
+  id: 3,
+  name: "Doge",
+  description: "经典柴犬模板",
+  created_at: "2026-07-28T00:00:00Z",
+  updated_at: "2026-07-28T00:00:00Z",
+};
+
+const wojakTemplate = {
+  ...dogeTemplate,
+  id: 4,
+  name: "Wojak",
+  description: null,
+};
+
 function makeMeme(id: number, title = `Meme ${id}`): MemeResponse {
   return {
     id,
@@ -29,6 +44,7 @@ function makeMeme(id: number, title = `Meme ${id}`): MemeResponse {
     created_at: "2026-07-25T00:00:00Z",
     updated_at: "2026-07-25T00:00:00Z",
     tags: [funnyTag],
+    template: null,
   };
 }
 
@@ -36,6 +52,10 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
   return {
     listMemes: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([funnyTag]),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    createTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
     getRandomMeme: vi.fn().mockResolvedValue(makeMeme(99, "随机 Meme")),
     uploadMeme: vi.fn().mockResolvedValue(makeMeme(2, "新上传")),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),
@@ -51,6 +71,7 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
       ],
       created_at: "2026-07-27T00:00:00Z",
       confirmed_at: null,
+      suggested_template: null,
     }),
     confirmAIAnalysis: vi.fn().mockResolvedValue(makeMeme(1)),
     listAIProviderPresets: vi.fn().mockResolvedValue([
@@ -327,12 +348,156 @@ describe("MemeVaultApp", () => {
       description: null,
       source: null,
       tags: ["reaction"],
+      template_id: null,
     });
 
     button("删除").click();
     await vi.waitFor(() => {
       expect(api.deleteMeme).toHaveBeenCalledWith(2);
       expect(document.querySelector("[data-detail-title]")).toBeNull();
+    });
+  });
+
+  it("loads templates and uses them in upload, edit and detail views", async () => {
+    const assigned = {
+      ...makeMeme(1, "Doge Meme"),
+      template: dogeTemplate,
+    };
+    const created = {
+      ...makeMeme(2, "上传模板 Meme"),
+      template: dogeTemplate,
+    };
+    const cleared = { ...assigned, template: null };
+    const api = makeApi({
+      listTemplates: vi.fn().mockResolvedValue([dogeTemplate]),
+      listMemes: vi
+        .fn()
+        .mockResolvedValueOnce([assigned])
+        .mockResolvedValueOnce([assigned, created])
+        .mockResolvedValueOnce([cleared, created]),
+      uploadMeme: vi.fn().mockResolvedValue(created),
+      updateMeme: vi.fn().mockResolvedValue(cleared),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    expect(api.listTemplates).toHaveBeenCalledTimes(1);
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    expect(document.querySelector(".metadata")?.textContent).toContain("Doge");
+
+    button("上传 Meme").click();
+    const uploadForm = document.querySelector<HTMLFormElement>("#upload-form");
+    const fileInput =
+      document.querySelector<HTMLInputElement>("#upload-file");
+    const uploadTemplate =
+      document.querySelector<HTMLSelectElement>("#upload-template");
+    if (!uploadForm || !fileInput || !uploadTemplate) {
+      throw new Error("Missing upload template controls");
+    }
+    expect(uploadTemplate.textContent).toContain("Doge");
+    uploadTemplate.value = "3";
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["image"], "doge.png", { type: "image/png" })],
+    });
+    (uploadForm.elements.namedItem("title") as HTMLInputElement).value =
+      "上传模板 Meme";
+    uploadForm.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(api.uploadMeme).toHaveBeenCalledWith(
+        expect.objectContaining({ template_id: 3 }),
+      );
+    });
+
+    button("编辑").click();
+    const editForm = document.querySelector<HTMLFormElement>("#edit-form");
+    const editTemplate = editForm?.elements.namedItem(
+      "template_id",
+    ) as HTMLSelectElement | null;
+    if (!editForm || !editTemplate) {
+      throw new Error("Missing edit template controls");
+    }
+    expect(editTemplate.value).toBe("3");
+    editTemplate.value = "";
+    editForm.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(api.updateMeme).toHaveBeenCalledWith(
+        2,
+        expect.objectContaining({ template_id: null }),
+      );
+    });
+  });
+
+  it("creates, edits and deletes templates in the management dialog", async () => {
+    const renamed = { ...dogeTemplate, name: "Doge Classic" };
+    const listTemplates = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([dogeTemplate])
+      .mockResolvedValueOnce([renamed])
+      .mockResolvedValueOnce([]);
+    const api = makeApi({
+      listTemplates,
+      createTemplate: vi.fn().mockResolvedValue(dogeTemplate),
+      updateTemplate: vi.fn().mockResolvedValue(renamed),
+      deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    button("模板管理").click();
+    const dialog =
+      document.querySelector<HTMLDialogElement>("#template-dialog");
+    const form = document.querySelector<HTMLFormElement>("#template-form");
+    if (!dialog || !form) {
+      throw new Error("Missing template manager");
+    }
+    expect(dialog.open).toBe(true);
+    (form.elements.namedItem("name") as HTMLInputElement).value = "Doge";
+    (form.elements.namedItem("description") as HTMLTextAreaElement).value =
+      "经典柴犬模板";
+    form.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(api.createTemplate).toHaveBeenCalledWith({
+        name: "Doge",
+        description: "经典柴犬模板",
+      });
+      expect(document.querySelector(".template-row")?.textContent).toContain(
+        "Doge",
+      );
+    });
+
+    document
+      .querySelector<HTMLButtonElement>('[data-edit-template="3"]')
+      ?.click();
+    (form.elements.namedItem("name") as HTMLInputElement).value =
+      "Doge Classic";
+    form.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(api.updateTemplate).toHaveBeenCalledWith(3, {
+        name: "Doge Classic",
+        description: "经典柴犬模板",
+      });
+      expect(document.querySelector(".template-row")?.textContent).toContain(
+        "Doge Classic",
+      );
+    });
+
+    document
+      .querySelector<HTMLButtonElement>('[data-delete-template="3"]')
+      ?.click();
+    await vi.waitFor(() => {
+      expect(confirm).toHaveBeenCalled();
+      expect(api.deleteTemplate).toHaveBeenCalledWith(3);
+      expect(api.listMemes).toHaveBeenCalledTimes(2);
+      expect(listTemplates).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -647,6 +812,8 @@ describe("MemeVaultApp", () => {
       expect(api.confirmAIAnalysis).toHaveBeenCalledWith(1, 1, {
         tags: ["reaction"],
         apply_description: true,
+        template_id: null,
+        apply_template: false,
       });
       expect(document.querySelector(".detail-description")?.textContent).toBe(
         "AI 生成的图片描述",
@@ -659,6 +826,69 @@ describe("MemeVaultApp", () => {
     ).toEqual(["funny", "reaction"]);
     expect(document.querySelector(".ai-description")).toBeNull();
     expect(button("reaction")).toBeTruthy();
+  });
+
+  it("defaults to the AI template suggestion and allows choosing another template", async () => {
+    const original = makeMeme(1, "模板建议");
+    const updated = { ...original, template: wojakTemplate };
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([original]),
+      listTemplates: vi
+        .fn()
+        .mockResolvedValue([dogeTemplate, wojakTemplate]),
+      analyzeMeme: vi.fn().mockResolvedValue({
+        id: 9,
+        meme_id: 1,
+        model_name: "fake",
+        description: "AI 描述",
+        suggestions: [
+          { name: "funny", confidence: 0.9, existing: true },
+          { name: "reaction", confidence: 0.8, existing: false },
+        ],
+        created_at: "2026-07-28T00:00:00Z",
+        confirmed_at: null,
+        suggested_template: dogeTemplate,
+      }),
+      confirmAIAnalysis: vi.fn().mockResolvedValue(updated),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    button("AI 分析").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".ai-template-choice")?.textContent).toContain(
+        "建议模板：Doge",
+      );
+    });
+    const select = document.querySelector<HTMLSelectElement>(
+      "[data-ai-template]",
+    );
+    const apply = document.querySelector<HTMLInputElement>(
+      "[data-ai-apply-template]",
+    );
+    if (!select || !apply) {
+      throw new Error("Missing AI template controls");
+    }
+    expect(apply.checked).toBe(true);
+    expect(select.value).toBe("3");
+    select.value = "4";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    button("确认采用").click();
+
+    await vi.waitFor(() => {
+      expect(api.confirmAIAnalysis).toHaveBeenCalledWith(
+        1,
+        9,
+        expect.objectContaining({
+          template_id: 4,
+          apply_template: true,
+        }),
+      );
+      expect(document.querySelector(".metadata")?.textContent).toContain(
+        "Wojak",
+      );
+    });
   });
 
   it("keeps AI results and selections when confirmation fails", async () => {

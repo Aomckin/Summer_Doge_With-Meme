@@ -62,8 +62,14 @@ class AIModel(Base):
     model_id: Mapped[str] = mapped_column(String(200))
     display_name: Mapped[str] = mapped_column(String(200))
     supports_vision: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_image_embedding: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_embedding_active: Mapped[bool] = mapped_column(
+        Boolean, default=False, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

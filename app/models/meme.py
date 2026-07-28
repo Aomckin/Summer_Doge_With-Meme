@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +13,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.ai_analysis import MemeAIAnalysis
     from app.models.tag import MemeTag, Tag
+    from app.models.template import Template
 
 
 def utc_now() -> datetime:
@@ -42,6 +43,11 @@ class Meme(Base):
     # SHA-256 哈希唯一，可在写入数据库时阻止同一图片被重复收录。
     file_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     source: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # default 在首次写入时生效；onupdate 在记录被修改时刷新时间。
     created_at: Mapped[datetime] = mapped_column(
@@ -63,6 +69,7 @@ class Meme(Base):
         back_populates="meme",
         cascade="all, delete-orphan",
     )
+    template: Mapped["Template | None"] = relationship(back_populates="memes")
 
     # association_proxy 让调用方可以写 meme.tags，而不必手动穿过 meme.tag_links。
     tags: AssociationProxy[list["Tag"]] = association_proxy("tag_links", "tag")
@@ -70,3 +77,4 @@ class Meme(Base):
 
 # 运行时登记关联模型，确保只导入 Meme 后 SQLAlchemy 也能解析关系并建新表。
 from app.models import ai_analysis as _ai_analysis  # noqa: E402,F401
+from app.models import template as _template  # noqa: E402,F401

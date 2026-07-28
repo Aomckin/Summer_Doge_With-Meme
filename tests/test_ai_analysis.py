@@ -7,10 +7,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.ai.client import AIImageResult, AIInvalidResponseError, AITagSuggestion
+from app.ai.client import (
+    AIImageResult,
+    AIInvalidResponseError,
+    AITagSuggestion,
+    AITemplateCandidate,
+)
 from app.database import Base
 from app.models.ai_analysis import MemeAIAnalysis
 from app.models.tag import MemeTag, Tag
+from app.models.template import Template
 from app.services.meme_service import (
     AIAnalysisAlreadyConfirmedError,
     MemeService,
@@ -29,12 +35,14 @@ class FakeAIClient:
         image_bytes: bytes,
         mime_type: str,
         existing_tags: list[str],
+        existing_templates: list[AITemplateCandidate],
     ) -> AIImageResult:
         self.calls.append(
             {
                 "image_bytes": image_bytes,
                 "mime_type": mime_type,
                 "existing_tags": existing_tags,
+                "existing_templates": existing_templates,
             }
         )
         return self.result
@@ -191,5 +199,75 @@ def test_confirmation_rejects_tag_not_present_in_analysis(tmp_path: Path) -> Non
                 tags=["invented-by-client"],
                 apply_description=False,
             )
+    finally:
+        session.close()
+
+
+def test_ai_template_match_is_validated_and_applied_only_on_confirmation(
+    tmp_path: Path,
+) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        doge = Template(name="Doge", description="经典柴犬")
+        wojak = Template(name="Wojak")
+        session.add_all([doge, wojak])
+        session.commit()
+        meme = service.create_meme(
+            "example.png",
+            make_image_bytes(),
+            title="AI 模板测试",
+        )
+        result = AIImageResult(
+            model_name="fake",
+            description="描述",
+            tags=(
+                AITagSuggestion("反应图", 0.9),
+                AITagSuggestion("柴犬", 0.8),
+            ),
+            template_id=doge.id,
+        )
+        client = FakeAIClient(result)
+
+        analysis = service.analyze_meme(meme.id, client)
+
+        assert [
+            candidate.id
+            for candidate in client.calls[0]["existing_templates"]
+        ] == [doge.id, wojak.id]
+        assert analysis.suggested_template_id == doge.id
+        assert meme.template_id is None
+
+        updated = service.confirm_ai_analysis(
+            meme.id,
+            analysis.id,
+            tags=[],
+            apply_description=False,
+            template_id=wojak.id,
+            apply_template=True,
+        )
+        assert updated.template_id == wojak.id
+    finally:
+        session.close()
+
+
+def test_ai_template_match_rejects_id_outside_candidates(tmp_path: Path) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        meme = service.create_meme(
+            "example.png",
+            make_image_bytes(),
+            title="AI 模板测试",
+        )
+        result = AIImageResult(
+            model_name="fake",
+            description="描述",
+            tags=(
+                AITagSuggestion("反应图", 0.9),
+                AITagSuggestion("震惊", 0.8),
+            ),
+            template_id=999,
+        )
+        with pytest.raises(AIInvalidResponseError, match="candidates"):
+            service.analyze_meme(meme.id, FakeAIClient(result))
     finally:
         session.close()

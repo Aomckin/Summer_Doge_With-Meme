@@ -1,7 +1,7 @@
 import json
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.ai_analysis import MemeAIAnalysis
@@ -19,6 +19,7 @@ class AIAnalysisRepository:
         model_name: str,
         description: str,
         suggestions: Sequence[dict[str, object]],
+        suggested_template_id: int | None = None,
     ) -> MemeAIAnalysis:
         analysis = MemeAIAnalysis(
             meme=meme,
@@ -29,6 +30,7 @@ class AIAnalysisRepository:
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
+            suggested_template_id=suggested_template_id,
         )
         self.session.add(analysis)
         self.session.flush()
@@ -54,3 +56,11 @@ class AIAnalysisRepository:
         if not isinstance(value, list):
             raise ValueError("Stored AI suggestions are invalid")
         return value
+
+    def clear_template_references(self, template_id: int) -> None:
+        self.session.execute(
+            update(MemeAIAnalysis)
+            .where(MemeAIAnalysis.suggested_template_id == template_id)
+            .values(suggested_template_id=None)
+        )
+        self.session.flush()

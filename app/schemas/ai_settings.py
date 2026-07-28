@@ -4,13 +4,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-AIProtocol = Literal["openai_responses", "openai_chat_completions"]
+AIProtocol = Literal["openai_responses", "openai_chat_completions", "dashscope_multimodal_embedding"]
 
 
 class PresetModelResponse(BaseModel):
     model_id: str
     display_name: str
     supports_vision: bool
+    supports_image_embedding: bool = False
 
 
 class ProviderPresetResponse(BaseModel):
@@ -67,6 +68,7 @@ class ModelCreate(BaseModel):
     model_id: str = Field(min_length=1, max_length=200)
     display_name: str = Field(min_length=1, max_length=200)
     supports_vision: bool = False
+    supports_image_embedding: bool = False
     enabled: bool = True
     is_active: bool = False
 
@@ -75,6 +77,8 @@ class ModelUpdate(BaseModel):
     model_id: str = Field(default="", min_length=1, max_length=200)
     display_name: str = Field(default="", min_length=1, max_length=200)
     supports_vision: bool = False
+    supports_image_embedding: bool = False
+    is_embedding_active: bool = False
     enabled: bool = True
     is_active: bool = False
 
@@ -87,8 +91,10 @@ class ModelResponse(BaseModel):
     model_id: str
     display_name: str
     supports_vision: bool
+    supports_image_embedding: bool
     enabled: bool
     is_active: bool
+    is_embedding_active: bool
     created_at: datetime
     updated_at: datetime
 

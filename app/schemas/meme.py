@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.template import TemplateResponse
+
 
 class TagResponse(BaseModel):
     # from_attributes=True 允许直接从 SQLAlchemy ORM 对象读取同名属性。
@@ -28,6 +30,7 @@ class MemeUpdate(BaseModel):
     description: str | None = None
     source: str | None = Field(default=None, max_length=500)
     tags: list[str] | None = None
+    template_id: int | None = None
 
     @model_validator(mode="after")
     def validate_changes(self) -> "MemeUpdate":
@@ -56,3 +59,4 @@ class MemeResponse(MemeCreate):
     created_at: datetime
     updated_at: datetime
     tags: list[TagResponse] = Field(default_factory=list)
+    template: TemplateResponse | None = None

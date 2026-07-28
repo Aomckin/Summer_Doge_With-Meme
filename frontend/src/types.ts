@@ -6,6 +6,24 @@ export interface TagResponse {
   created_at: string;
 }
 
+export interface TemplateResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateCreatePayload {
+  name: string;
+  description?: string | null;
+}
+
+export interface TemplateUpdatePayload {
+  name?: string;
+  description?: string | null;
+}
+
 export interface MemeResponse {
   id: number;
   title: string;
@@ -23,6 +41,7 @@ export interface MemeResponse {
   created_at: string;
   updated_at: string;
   tags: TagResponse[];
+  template: TemplateResponse | null;
 }
 
 export interface MemeUpdatePayload {
@@ -30,6 +49,7 @@ export interface MemeUpdatePayload {
   description?: string | null;
   source?: string | null;
   tags?: string[];
+  template_id?: number | null;
 }
 
 export interface UploadMemeInput {
@@ -38,6 +58,7 @@ export interface UploadMemeInput {
   description?: string;
   source?: string;
   tags?: string[];
+  template_id?: number | null;
 }
 
 export interface AITagSuggestionResponse {
@@ -54,11 +75,14 @@ export interface AIAnalysisResponse {
   suggestions: AITagSuggestionResponse[];
   created_at: string;
   confirmed_at: string | null;
+  suggested_template: TemplateResponse | null;
 }
 
 export interface AIAnalysisConfirmPayload {
   tags: string[];
   apply_description: boolean;
+  template_id: number | null;
+  apply_template: boolean;
 }
 
 export type AIProviderProtocol =
@@ -153,6 +177,7 @@ export interface ListMemesOptions {
 export interface AppState {
   memes: MemeResponse[];
   availableTags: TagResponse[];
+  availableTemplates: TemplateResponse[];
   selectedMeme: MemeResponse | null;
   query: string;
   selectedTags: string[];
@@ -170,6 +195,8 @@ export interface AppState {
   aiAnalysis: AIAnalysisResponse | null;
   selectedAITags: string[];
   applyAIDescription: boolean;
+  selectedAITemplateId: number | null;
+  applyAITemplate: boolean;
   aiError: string | null;
   listError: string | null;
   loadMoreError: string | null;

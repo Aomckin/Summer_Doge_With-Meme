@@ -1,7 +1,7 @@
 # Repository 层只关心“怎样读写数据库”，不理解 HTTP，也不保存图片。
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.meme import Meme
@@ -92,4 +92,12 @@ class MemeRepository:
     def delete(self, meme: Meme) -> None:
         self.session.delete(meme)
         # 此处仍不 commit，让 Service 决定整个业务流程是否成功。
+        self.session.flush()
+
+    def clear_template_references(self, template_id: int) -> None:
+        self.session.execute(
+            update(Meme)
+            .where(Meme.template_id == template_id)
+            .values(template_id=None)
+        )
         self.session.flush()

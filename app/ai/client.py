@@ -42,10 +42,21 @@ class AITagSuggestion:
 
 
 @dataclass(frozen=True)
+class AITemplateCandidate:
+    id: int
+    name: str
+    description: str | None
+    reference_image_bytes: bytes | None = None
+    reference_image_mime_type: str | None = None
+    visual_similarity: float | None = None
+
+
+@dataclass(frozen=True)
 class AIImageResult:
     model_name: str
     description: str
     tags: tuple[AITagSuggestion, ...]
+    template_id: int | None = None
 
 
 class AIClient(Protocol):
@@ -55,6 +66,7 @@ class AIClient(Protocol):
         image_bytes: bytes,
         mime_type: str,
         existing_tags: Sequence[str],
+        existing_templates: Sequence[AITemplateCandidate],
     ) -> AIImageResult: ...
 
 
@@ -66,6 +78,8 @@ SYSTEM_PROMPT = (
     "（如“Ciallo~”），或者外语比中文更能准确表达 Meme 含义时，"
     "才保留原外语标签。标签总数必须为 2 至 8 个，名称应简短且不得重复；"
     "固定外语表达应保留其惯用拼写和标点。"
+    "模板只能从用户提供的已有模板候选中选择 template_id；不得创建或命名新模板，"
+    "不得返回候选列表之外的 ID；不确定或没有合适模板时必须返回 null。"
 )
 
 
@@ -99,8 +113,11 @@ ANALYSIS_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "template_id": {
+            "type": ["integer", "null"],
+        },
     },
-    "required": ["description", "tags"],
+    "required": ["description", "tags", "template_id"],
     "additionalProperties": False,
 }
 
@@ -192,7 +209,12 @@ class _HTTPAIClient:
             result = json.loads(output_text)
             description = result["description"].strip()
             raw_tags = result["tags"]
+            template_id = result["template_id"]
             if not description or not isinstance(raw_tags, list):
+                raise ValueError
+            if template_id is not None and (
+                isinstance(template_id, bool) or not isinstance(template_id, int)
+            ):
                 raise ValueError
             tags = tuple(
                 AITagSuggestion(
@@ -214,7 +236,36 @@ class _HTTPAIClient:
             model_name=model_name,
             description=description,
             tags=tags,
+            template_id=template_id,
         )
+
+    @staticmethod
+    def _template_prompt(
+        existing_templates: Sequence[AITemplateCandidate],
+    ) -> str:
+        candidates = list(existing_templates[:200])
+        if not candidates:
+            return "当前没有已有模板候选，template_id 必须为 null。"
+        lines = ["已有模板候选（只能选择下列 ID）："]
+        for candidate in candidates:
+            description = (candidate.description or "无描述").strip()[:200]
+            lines.append(
+                f"ID: {candidate.id}\n名称: {candidate.name}\n描述: {description}"
+            )
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _template_images(existing_templates: Sequence[AITemplateCandidate], response_api: bool) -> list[dict[str, object]]:
+        parts: list[dict[str, object]] = []
+        for candidate in existing_templates:
+            if candidate.reference_image_bytes is None or candidate.reference_image_mime_type is None:
+                continue
+            data = base64.b64encode(candidate.reference_image_bytes).decode("ascii")
+            if response_api:
+                parts.extend([{"type": "input_text", "text": f"视觉参考模板 ID: {candidate.id}"}, {"type": "input_image", "image_url": f"data:{candidate.reference_image_mime_type};base64,{data}", "detail": "low"}])
+            else:
+                parts.extend([{"type": "text", "text": f"视觉参考模板 ID: {candidate.id}"}, {"type": "image_url", "image_url": {"url": f"data:{candidate.reference_image_mime_type};base64,{data}"}}])
+        return parts
 
 
 class OpenAIResponsesClient(_HTTPAIClient):
@@ -272,6 +323,7 @@ class OpenAIResponsesClient(_HTTPAIClient):
         image_bytes: bytes,
         mime_type: str,
         existing_tags: Sequence[str],
+        existing_templates: Sequence[AITemplateCandidate] = (),
     ) -> AIImageResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         known_tags = ", ".join(existing_tags) if existing_tags else "（暂无已有标签）"
@@ -295,6 +347,11 @@ class OpenAIResponsesClient(_HTTPAIClient):
                             "type": "input_text",
                             "text": f"当前标签库：{known_tags}",
                         },
+                        {
+                            "type": "input_text",
+                            "text": self._template_prompt(existing_templates),
+                        },
+                        *self._template_images(existing_templates, True),
                         {
                             "type": "input_image",
                             "image_url": f"data:{mime_type};base64,{image_data}",
@@ -352,6 +409,7 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
         image_bytes: bytes,
         mime_type: str,
         existing_tags: Sequence[str],
+        existing_templates: Sequence[AITemplateCandidate] = (),
     ) -> AIImageResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         known_tags = ", ".join(existing_tags) if existing_tags else "（暂无）"
@@ -364,7 +422,8 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                         f"{SYSTEM_PROMPT} 必须只输出 JSON 对象，格式示例："
                         '{"description":"图片描述","tags":'
                         '[{"name":"反应图","confidence":0.9},'
-                        '{"name":"震惊","confidence":0.8}]}'
+                        '{"name":"震惊","confidence":0.8}],'
+                        '"template_id":null}'
                     ),
                 },
                 {
@@ -374,6 +433,11 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                             "type": "text",
                             "text": f"当前标签库：{known_tags}",
                         },
+                        {
+                            "type": "text",
+                            "text": self._template_prompt(existing_templates),
+                        },
+                        *self._template_images(existing_templates, False),
                         {
                             "type": "image_url",
                             "image_url": {

@@ -25,6 +25,7 @@ class MemeAIAnalysis(Base):
     model_name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text)
     suggestions_json: Mapped[str] = mapped_column(Text)
+    suggested_template_id: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

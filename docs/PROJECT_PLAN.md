@@ -268,11 +268,11 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：窗口缩放时列数和卡片宽度响应变化；图片不被固定比例裁切；原图可完整查看；标签过多不挤占画廊空间。
 
-### v0.3.3：模板归类与 AI 模板匹配（规划中，暂不推送）
+### v0.3.3：模板归类与 AI 模板匹配（已完成）
 
-- [ ] 先建立模板数据模型、Meme 的可空模板归属、仓储、服务、接口和前端选择器。
-- [ ] 在已有 AI 标签分析中，仅从已有模板候选返回一个 `template_id` 或 `null`。
-- [ ] 用户确认后才保存模板归属；AI 不创建、不命名、不自动保存模板。
+- [x] 建立模板数据模型、Meme 的可空模板归属、仓储、服务、接口和前端选择器。
+- [x] 在已有 AI 标签分析中，仅从已有模板候选返回一个 `template_id` 或 `null`。
+- [x] 用户确认后才保存模板归属；AI 不创建、不命名、不自动保存模板。
 
 ### v0.4：Meme 文案实验室
 
@@ -350,7 +350,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.3.2 响应式画廊与标签收纳已完成
+当前状态：v0.3.3 模板归类与 AI 模板匹配已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -358,6 +358,6 @@ ORM：SQLAlchemy
 图片处理：Pillow
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
-AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 网页厂商/模型配置
-下一步：v0.3.3——模板归类与 AI 模板匹配（暂不推送）
+AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 网页厂商/模型配置 + 已有模板匹配
+下一步：v0.4——Meme 文案实验室
 ```

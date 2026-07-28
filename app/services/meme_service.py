@@ -4,18 +4,28 @@ from math import isfinite
 
 from sqlalchemy.orm import Session
 
-from app.ai.client import AIClient, AIImageResult, AIInvalidResponseError
+from app.ai.client import (
+    AIClient,
+    AIImageResult,
+    AIInvalidResponseError,
+    AITemplateCandidate,
+)
 from app.models.meme import Meme
 from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.repositories.meme_repository import MemeRepository
 from app.repositories.tag_repository import TagRepository
+from app.repositories.template_repository import TemplateRepository
 from app.storage.image_storage import ImageStorage
+from app.storage.template_image_storage import TemplateImageStorage
+from app.ai.embedding_client import ImageEmbeddingClient
+from app.services.template_matching import rank_visual_templates
+import json
 
 
 # Service 是业务编排层：把数据库操作和文件操作组成一次完整用例。
 # 它也是事务的主人，Repository 只 flush，最终 commit/rollback 在这里决定。
-EDITABLE_FIELDS = {"title", "description", "source", "tags"}
+EDITABLE_FIELDS = {"title", "description", "source", "tags", "template_id"}
 # 单独的哨兵对象用来区分“请求没传 tags”和“请求明确把 tags 清空”。
 TAGS_NOT_PROVIDED = object()
 MIN_AI_SUGGESTIONS = 2
@@ -52,6 +62,7 @@ class MemeService:
         self.repository = MemeRepository(session)
         self.tag_repository = TagRepository(session)
         self.ai_analysis_repository = AIAnalysisRepository(session)
+        self.template_repository = TemplateRepository(session)
         self.storage = storage or ImageStorage()
 
     def create_meme(
@@ -63,7 +74,13 @@ class MemeService:
         description: str | None = None,
         source: str | None = None,
         tags: Sequence[str] = (),
+        template_id: int | None = None,
     ) -> Meme:
+        if (
+            template_id is not None
+            and self.template_repository.get_by_id(template_id) is None
+        ):
+            raise ValueError(f"Template {template_id} does not exist")
         # 先保存并检查图片，由存储层返回可信的文件信息。
         stored = self.storage.save(original_filename, content)
         # ORM 对象只保存元数据和磁盘路径，图片二进制本身不塞进数据库。
@@ -80,6 +97,7 @@ class MemeService:
             height=stored.height,
             file_hash=stored.file_hash,
             source=source,
+            template_id=template_id,
         )
 
         try:
@@ -128,6 +146,17 @@ class MemeService:
             raise ValueError(f"Fields cannot be updated: {names}")
 
         tag_names = data.pop("tags", TAGS_NOT_PROVIDED)
+        if "template_id" in data:
+            template_id = data["template_id"]
+            if (
+                template_id is not None
+                and (
+                    isinstance(template_id, bool)
+                    or not isinstance(template_id, int)
+                    or self.template_repository.get_by_id(template_id) is None
+                )
+            ):
+                raise ValueError(f"Template {template_id} does not exist")
         meme = self.get_meme(meme_id)
         try:
             updated = self.repository.update(meme, data)
@@ -158,15 +187,39 @@ class MemeService:
         self,
         meme_id: int,
         ai_client: AIClient,
+        embedding_client: ImageEmbeddingClient | None = None,
     ) -> MemeAIAnalysis:
         meme = self.get_meme(meme_id)
+        templates = self.template_repository.list()
+        ranked: dict[int, float] = {}
+        if embedding_client is not None:
+            query = embedding_client.embed_image(self.storage.read_original(meme.file_path), meme.mime_type)
+            ranked = {item.template_id: item.similarity for item in rank_visual_templates(query.vector, [(template.id, json.loads(template.reference_embedding_json)) for template in templates if template.reference_embedding_json and template.reference_embedding_model_id == query.model_id])}
+        reference_storage = TemplateImageStorage()
+        candidates = [
+            AITemplateCandidate(
+                id=template.id,
+                name=template.name,
+                description=template.description,
+                reference_image_bytes=(reference_storage.read_original(template.reference_thumbnail_filename) if template.id in ranked and template.reference_thumbnail_filename else None),
+                reference_image_mime_type=("image/png" if template.id in ranked else None),
+                visual_similarity=ranked.get(template.id),
+            )
+            for template in templates
+        ]
         result = ai_client.analyze_image(
             image_bytes=self.storage.read_original(meme.file_path),
             mime_type=meme.mime_type,
             existing_tags=[
                 tag.name for tag in self.tag_repository.list()[:200]
             ],
+            existing_templates=candidates,
         )
+        candidate_ids = {candidate.id for candidate in candidates}
+        if result.template_id is not None and result.template_id not in candidate_ids:
+            raise AIInvalidResponseError(
+                "AI template_id is not in the provided template candidates"
+            )
         suggestions = self._normalize_ai_suggestions(result)
         description = result.description.strip()
         if not description:
@@ -178,6 +231,7 @@ class MemeService:
                 model_name=result.model_name[:100],
                 description=description,
                 suggestions=suggestions,
+                suggested_template_id=result.template_id,
             )
             self.session.commit()
         except Exception:
@@ -192,6 +246,8 @@ class MemeService:
         *,
         tags: Sequence[str],
         apply_description: bool,
+        template_id: int | None = None,
+        apply_template: bool = False,
     ) -> Meme:
         meme = self.get_meme(meme_id)
         analysis = self.ai_analysis_repository.get_for_meme(meme_id, analysis_id)
@@ -220,6 +276,12 @@ class MemeService:
         if unknown_names:
             names = ", ".join(sorted(unknown_names))
             raise ValueError(f"Tags were not suggested by this analysis: {names}")
+        if (
+            apply_template
+            and template_id is not None
+            and self.template_repository.get_by_id(template_id) is None
+        ):
+            raise ValueError(f"Template {template_id} does not exist")
 
         try:
             self.tag_repository.add_ai_tags(
@@ -231,6 +293,8 @@ class MemeService:
             )
             if apply_description:
                 self.repository.update(meme, {"description": analysis.description})
+            if apply_template:
+                self.repository.update(meme, {"template_id": template_id})
             analysis.confirmed_at = datetime.now(UTC)
             self.session.flush()
             self.session.commit()

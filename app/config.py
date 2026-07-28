@@ -9,10 +9,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 IMAGES_DIR = DATA_DIR / "images"
 THUMBNAILS_DIR = DATA_DIR / "thumbnails"
+TEMPLATE_IMAGES_DIR = DATA_DIR / "template_images"
+TEMPLATE_THUMBNAILS_DIR = DATA_DIR / "template_thumbnails"
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 AI_SETTINGS_KEY_FILE = DATA_DIR / ".ai_settings.key"
 IMAGES_URL_PREFIX = "/media/images"
 THUMBNAILS_URL_PREFIX = "/media/thumbnails"
+TEMPLATE_IMAGES_URL_PREFIX = "/media/template-images"
+TEMPLATE_THUMBNAILS_URL_PREFIX = "/media/template-thumbnails"
 DATABASE_PATH = DATA_DIR / "meme_vault.db"
 
 # 部署时可以用环境变量替换数据库；本地开发则自动使用 SQLite 文件。

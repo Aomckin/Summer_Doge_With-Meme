@@ -28,6 +28,7 @@ from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.schemas.ai_analysis import AIAnalysisConfirm, AIAnalysisResponse
 from app.schemas.meme import MemeResponse, MemeUpdate, TagResponse
+from app.schemas.template import TemplateResponse
 from app.services.meme_service import (
     AIAnalysisAlreadyConfirmedError,
     AIAnalysisNotFoundError,
@@ -85,6 +86,25 @@ def _parse_tags(value: str | None) -> list[str]:
     return [tag.strip() for tag in value.split(",") if tag.strip()]
 
 
+def _parse_template_id(value: str | None) -> int | None:
+    normalized = (value or "").strip()
+    if not normalized:
+        return None
+    try:
+        template_id = int(normalized)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail="template_id must be an integer",
+        ) from error
+    if template_id < 1:
+        raise HTTPException(
+            status_code=422,
+            detail="template_id must be a positive integer",
+        )
+    return template_id
+
+
 def _to_meme_response(meme: Meme) -> MemeResponse:
     """把内部 ORM 对象统一转换为不会泄露服务器路径的公开响应。"""
     image_name = ImageStorage.filename_from_reference(meme.file_path)
@@ -114,12 +134,23 @@ def _to_meme_response(meme: Meme) -> MemeResponse:
         created_at=meme.created_at,
         updated_at=meme.updated_at,
         tags=[TagResponse.model_validate(tag) for tag in meme.tags],
+        template=(
+            TemplateResponse.model_validate(meme.template)
+            if meme.template is not None
+            else None
+        ),
     )
 
 
 def _to_ai_analysis_response(
     analysis: MemeAIAnalysis,
+    service: MemeService,
 ) -> AIAnalysisResponse:
+    suggested_template = (
+        service.template_repository.get_by_id(analysis.suggested_template_id)
+        if analysis.suggested_template_id is not None
+        else None
+    )
     return AIAnalysisResponse(
         id=analysis.id,
         meme_id=analysis.meme_id,
@@ -128,6 +159,11 @@ def _to_ai_analysis_response(
         suggestions=AIAnalysisRepository.load_suggestions(analysis),
         created_at=analysis.created_at,
         confirmed_at=analysis.confirmed_at,
+        suggested_template=(
+            TemplateResponse.model_validate(suggested_template)
+            if suggested_template is not None
+            else None
+        ),
     )
 
 
@@ -139,6 +175,7 @@ async def upload_meme(
     description: Annotated[str | None, Form()] = None,
     source: Annotated[str | None, Form(max_length=500)] = None,
     tags: Annotated[str | None, Form()] = None,
+    template_id: Annotated[str | None, Form()] = None,
 ) -> MemeResponse:
     # UploadFile.read() 是异步读取，避免在接口函数里直接操作底层临时文件。
     content = await file.read()
@@ -150,6 +187,7 @@ async def upload_meme(
             description=description,
             source=source,
             tags=_parse_tags(tags),
+            template_id=_parse_template_id(template_id),
         )
     except ImageTooLargeError as error:
         # 业务/存储异常在边界处转换为明确的 HTTP 状态码。
@@ -158,6 +196,8 @@ async def upload_meme(
         raise HTTPException(status_code=415, detail=str(error)) from error
     except IntegrityError as error:
         raise HTTPException(status_code=409, detail="Image already exists") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
     return _to_meme_response(meme)
 
@@ -196,11 +236,17 @@ def get_random_meme(
 @router.post("/{meme_id}/analyze", response_model=AIAnalysisResponse)
 def analyze_meme(
     meme_id: int,
+    request: Request,
     service: ServiceDependency,
     ai_client: AIClientDependency,
 ) -> AIAnalysisResponse:
     try:
-        analysis = service.analyze_meme(meme_id, ai_client)
+        from app.services.ai_settings_service import AISettingsService
+        try:
+            embedding_client = AISettingsService(service.session, request.app.state.ai_settings_key_file).build_active_embedding_client()
+        except Exception:
+            embedding_client = None
+        analysis = service.analyze_meme(meme_id, ai_client, embedding_client)
     except MemeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except MemeFileMissingError as error:
@@ -211,7 +257,7 @@ def analyze_meme(
         raise HTTPException(status_code=504, detail=str(error)) from error
     except (AIUpstreamError, AIInvalidResponseError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
-    return _to_ai_analysis_response(analysis)
+    return _to_ai_analysis_response(analysis, service)
 
 
 @router.post(
@@ -230,6 +276,8 @@ def confirm_ai_analysis(
             analysis_id,
             tags=payload.tags,
             apply_description=payload.apply_description,
+            template_id=payload.template_id,
+            apply_template=payload.apply_template,
         )
     except MemeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

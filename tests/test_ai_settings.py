@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.ai.client import OpenAICompatibleChatClient
+from app.ai.embedding_client import DashScopeEmbeddingClient
 from app.database import Base, get_db
 from app.main import create_app
 from app.models.ai_settings import AIModel, AIProvider
@@ -69,7 +70,7 @@ def test_presets_include_openai_qwen_and_text_only_deepseek(
 
     assert response.status_code == 200
     presets = {item["id"]: item for item in response.json()}
-    assert set(presets) == {"openai", "qwen", "deepseek"}
+    assert set(presets) == {"openai", "qwen", "deepseek", "dashscope_embedding"}
     assert presets["openai"]["base_url"] == "https://api.openai.com/v1"
     assert any(
         model["supports_vision"] for model in presets["qwen"]["models"]
@@ -77,6 +78,7 @@ def test_presets_include_openai_qwen_and_text_only_deepseek(
     assert not any(
         model["supports_vision"] for model in presets["deepseek"]["models"]
     )
+    assert presets["dashscope_embedding"]["models"][0]["supports_image_embedding"]
     session.close()
 
 
@@ -223,6 +225,27 @@ def test_only_enabled_vision_model_can_be_activated(
     assert disabled.status_code == 200
     assert disabled.json()["enabled"] is False
     assert not any(item["is_active"] for item in models_after_disable)
+    session.close()
+
+
+def test_embedding_activation_is_independent_from_analysis_activation(tmp_path: Path) -> None:
+    app, session, _ = settings_context(tmp_path)
+    provider_id = request(app, "POST", "/api/ai-settings/providers", json={
+        **qwen_provider_payload(), "preset_id": "dashscope_embedding",
+        "name": "Embedding", "protocol": "dashscope_multimodal_embedding",
+        "base_url": "https://dashscope.aliyuncs.com/api/v1",
+    }).json()["id"]
+    model = next(item for item in request(app, "GET", "/api/ai-settings/models").json() if item["provider_id"] == provider_id)
+    activated = request(app, "PATCH", f"/api/ai-settings/models/{model['id']}", json={"is_embedding_active": True})
+    assert activated.status_code == 200
+    assert activated.json()["is_embedding_active"] is True
+    assert activated.json()["is_active"] is False
+    qwen_provider = request(app, "POST", "/api/ai-settings/providers", json=qwen_provider_payload()).json()["id"]
+    qwen_model = next(item for item in request(app, "GET", "/api/ai-settings/models").json() if item["provider_id"] == qwen_provider)
+    rejected = request(app, "PATCH", f"/api/ai-settings/models/{qwen_model['id']}", json={"is_embedding_active": True})
+    assert rejected.status_code == 422
+    service = AISettingsService(session, tmp_path / "settings.key")
+    assert isinstance(service.build_active_embedding_client(), DashScopeEmbeddingClient)
     session.close()
 
 

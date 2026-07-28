@@ -15,6 +15,7 @@ from app.ai.client import (
     OpenAICompatibleChatClient,
     OpenAIResponsesClient,
 )
+from app.ai.embedding_client import DashScopeEmbeddingClient, ImageEmbeddingClient
 from app.ai.presets import PROVIDER_PRESETS, get_preset
 from app.ai.secrets import APIKeyCipher
 from app.models.ai_settings import AIModel, AIProvider
@@ -73,6 +74,7 @@ class AISettingsService:
                     model_id=model["model_id"],
                     display_name=model["display_name"],
                     supports_vision=model["supports_vision"],
+                    supports_image_embedding=model.get("supports_image_embedding", False),
                     enabled=True,
                     is_active=False,
                 )
@@ -138,6 +140,7 @@ class AISettingsService:
         model = self._model(model_id)
         data = dict(values)
         activate = data.pop("is_active", None)
+        activate_embedding = data.pop("is_embedding_active", None)
         for key in ("model_id", "display_name"):
             if key in data:
                 data[key] = self._required_text(data[key], key)
@@ -153,6 +156,16 @@ class AISettingsService:
             or not model.provider.enabled
         ):
             model.is_active = False
+        if activate_embedding is True:
+            self._activate_embedding(model, model.provider)
+        elif activate_embedding is False:
+            model.is_embedding_active = False
+        elif model.is_embedding_active and (
+            not model.enabled
+            or not model.supports_image_embedding
+            or not model.provider.enabled
+        ):
+            model.is_embedding_active = False
         self._commit()
         return model
 
@@ -182,6 +195,7 @@ class AISettingsService:
                     provider,
                     external_id,
                 ),
+                supports_image_embedding=False,
                 enabled=False,
                 is_active=False,
             )
@@ -216,6 +230,25 @@ class AISettingsService:
             return OpenAICompatibleChatClient(**options)
         raise AIConfigurationError(
             f"不支持的厂商协议：{provider.protocol}"
+        )
+
+    def build_active_embedding_client(self) -> ImageEmbeddingClient:
+        model = self.repository.active_embedding_model()
+        if model is None:
+            raise AIConfigurationError("尚未配置模板视觉检索模型")
+        provider = model.provider
+        if not provider.enabled or not model.enabled or not model.supports_image_embedding:
+            raise AIConfigurationError("当前模型不能用于模板视觉检索")
+        if not provider.api_key_ciphertext:
+            raise AIConfigurationError(f"厂商 {provider.name} 尚未配置 API Key")
+        if provider.protocol != "dashscope_multimodal_embedding":
+            raise AIConfigurationError(f"不支持的图像向量协议：{provider.protocol}")
+        return DashScopeEmbeddingClient(
+            api_key=self.cipher.decrypt(provider.api_key_ciphertext),
+            model=model.model_id,
+            base_url=provider.base_url,
+            timeout_seconds=provider.timeout_seconds,
+            http_client=self.http_client,
         )
 
     def _fetch_model_ids(self, provider: AIProvider) -> list[str]:
@@ -307,6 +340,14 @@ class AISettingsService:
             )
         self.repository.clear_active_models()
         model.is_active = True
+
+    def _activate_embedding(self, model: AIModel, provider: AIProvider) -> None:
+        if not provider.enabled or not model.enabled:
+            raise AISettingsValidationError("请先启用该模型厂商和模型")
+        if not model.supports_image_embedding:
+            raise AISettingsValidationError("该模型不支持图像向量")
+        self.repository.clear_active_embedding_models()
+        model.is_embedding_active = True
 
     def _provider(self, provider_id: int) -> AIProvider:
         provider = self.repository.get_provider(provider_id)

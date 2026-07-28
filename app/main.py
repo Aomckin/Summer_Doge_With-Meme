@@ -9,11 +9,16 @@ from fastapi.staticfiles import StaticFiles
 from app.api.ai_settings import router as ai_settings_router
 from app.api.memes import router as meme_router
 from app.api.tags import router as tag_router
+from app.api.templates import router as template_router
 from app.config import (
     AI_SETTINGS_KEY_FILE,
     FRONTEND_DIST_DIR,
     IMAGES_DIR,
     IMAGES_URL_PREFIX,
+    TEMPLATE_IMAGES_DIR,
+    TEMPLATE_IMAGES_URL_PREFIX,
+    TEMPLATE_THUMBNAILS_DIR,
+    TEMPLATE_THUMBNAILS_URL_PREFIX,
     THUMBNAILS_DIR,
     THUMBNAILS_URL_PREFIX,
 )
@@ -40,21 +45,29 @@ def create_app(
 ) -> FastAPI:
     resolved_images = images_dir.resolve()
     resolved_thumbnails = thumbnails_dir.resolve()
+    resolved_template_images = TEMPLATE_IMAGES_DIR.resolve()
+    resolved_template_thumbnails = TEMPLATE_THUMBNAILS_DIR.resolve()
     resolved_frontend = frontend_dir.resolve()
 
     # StaticFiles 初始化时要求目录已经存在，因此先创建再挂载。
     resolved_images.mkdir(parents=True, exist_ok=True)
     resolved_thumbnails.mkdir(parents=True, exist_ok=True)
+    resolved_template_images.mkdir(parents=True, exist_ok=True)
+    resolved_template_thumbnails.mkdir(parents=True, exist_ok=True)
 
     application = FastAPI(title="Meme Vault", lifespan=lifespan)
     application.state.images_dir = resolved_images
     application.state.thumbnails_dir = resolved_thumbnails
+    application.state.template_images_dir = resolved_template_images
+    application.state.template_thumbnails_dir = resolved_template_thumbnails
     application.state.ai_settings_key_file = ai_settings_key_file.resolve()
     application.mount(
         IMAGES_URL_PREFIX,
         StaticFiles(directory=resolved_images),
         name="meme-images",
     )
+    application.mount(TEMPLATE_IMAGES_URL_PREFIX, StaticFiles(directory=resolved_template_images), name="template-images")
+    application.mount(TEMPLATE_THUMBNAILS_URL_PREFIX, StaticFiles(directory=resolved_template_thumbnails), name="template-thumbnails")
     application.mount(
         THUMBNAILS_URL_PREFIX,
         StaticFiles(directory=resolved_thumbnails),
@@ -65,6 +78,7 @@ def create_app(
     application.include_router(meme_router)
     application.include_router(tag_router)
     application.include_router(ai_settings_router)
+    application.include_router(template_router)
     application.add_api_route("/api/health", health_check, methods=["GET"])
 
     # 根路径挂载必须最后注册，避免吞掉 API、媒体与 Swagger 路由。

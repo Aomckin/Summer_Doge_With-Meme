@@ -1,6 +1,6 @@
 # Meme Vault
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供需要用户确认的 AI 图片描述与标签建议、网页内的模型厂商和模型管理，以及响应式瀑布流画廊；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.3，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供模板管理与归类、需要用户确认的 AI 图片描述/标签/已有模板建议、网页内的模型厂商和模型管理，以及响应式瀑布流画廊；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -99,14 +99,20 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 
 ## TypeScript 前端
 
-- 顶部工具栏提供标题/描述搜索、API 设置、随机抽取和上传入口。
+- 顶部工具栏提供标题/描述搜索、API 设置、模板管理、随机抽取和上传入口。
 - 左侧资料库按网格展示 Meme，并支持多标签筛选和分批加载。
 - 右侧详情面板提供原图、元数据、编辑与删除操作。
 - 搜索输入使用 300ms 防抖；多标签沿用后端的“同时包含全部标签”语义。
-- 上传表单不会提交空的描述或来源字段；编辑时可通过 JSON `null` 清空这两个字段。
+- 上传和编辑表单可以选择已有模板；编辑时选择“无模板”会通过 JSON `null` 清除归类。
 - 列表、上传、随机、保存和删除均提供独立的加载或错误反馈。
-- 详情面板可发起 AI 图片分析，预览描述、标签建议、置信度和使用的模型。
-- AI 建议只有在用户选择并点击“确认采用”后才会写入；确认失败会保留当前结果以便重试。
+- 详情面板可发起 AI 图片分析，预览描述、标签建议、已有模板建议、置信度和使用的模型。
+- AI 建议只有在用户选择并点击“确认采用”后才会写入；用户可拒绝模板建议、改选其他模板或清除归类。
+
+## 模板管理与归类
+
+点击顶部“模板管理”可查看、创建、编辑和删除模板。模板仅包含名称与可选描述，不保存模板图片。上传或编辑 Meme 时可以选择一个已有模板；详情页显示当前模板或“未归类”。
+
+删除模板不会删除 Meme：相关 `Meme.template_id` 会在同一事务中清空，历史 AI 分析保留，但对应的 `suggested_template_id` 也会清空，避免悬空引用。
 
 ## API 设置与 AI 图片分析
 
@@ -144,8 +150,9 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 分析分为两个阶段：
 
-1. `POST /api/memes/{meme_id}/analyze` 读取原图并生成描述与标签建议，同时记录模型名和置信度，但不修改正式标签。
-2. `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm` 只追加用户选中的标签，并可按用户选择采用描述。
+1. `POST /api/memes/{meme_id}/analyze` 读取原图、已有标签和最多 200 个已有模板，生成描述、标签建议以及一个已有 `template_id` 或 `null`，但不修改 Meme。
+2. 服务端再次校验 AI 返回的模板 ID 必须属于本次候选集合，并把它保存为分析快照。
+3. `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm` 在一个事务中追加用户选中的标签，并可采用描述和用户最终选择的模板。
 
 后端会优先提供已有标签给模型，并再次规范化输出：每次返回 2 至 8 个不重复标签。标签默认使用简体中文；常用外语专用表达、固定外语梗名，或使用外语才能更准确表达 Meme 含义时，会保留原外语标签。超时返回 504，未配置密钥返回 503，上游或响应格式错误返回 502。
 
@@ -153,7 +160,9 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
+
+从 v0.3.2 的旧 SQLite 数据库启动时，基础设施层会幂等检测并添加 `memes.template_id` 与 `meme_ai_analyses.suggested_template_id`。迁移不删除或重建已有表，不会丢失 Meme、标签、AI 分析或模型设置；非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
 
 数据库操作封装在 Repository 中。Repository 执行查询和 `flush`，事务提交或回滚由 `MemeService` 统一控制。
 
@@ -174,15 +183,17 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 所有接口均以 `/api` 开头，可在 <http://127.0.0.1:8000/docs> 使用 Swagger 操作：
 
-- `POST /api/memes`：使用 multipart 表单上传图片及标题、描述、来源和逗号分隔的标签。
+- `POST /api/memes`：使用 multipart 表单上传图片及标题、描述、来源、标签和可选 `template_id`。
 - `GET /api/memes`：获取列表，支持搜索标题和描述的 `q`、分页参数 `offset`/`limit`，以及可重复的 `tags` 参数。
 - `GET /api/memes/random`：随机获取 Meme，可使用重复的 `tags` 参数限定范围。
 - `GET /api/memes/{meme_id}`：获取详情。
-- `PATCH /api/memes/{meme_id}`：修改标题、描述、来源或标签数组。
+- `PATCH /api/memes/{meme_id}`：修改标题、描述、来源、标签数组或可空 `template_id`。
 - `DELETE /api/memes/{meme_id}`：删除记录、原图和缩略图。
 - `GET /api/tags`：按名称排序获取标签列表。
-- `POST /api/memes/{meme_id}/analyze`：生成并记录 AI 描述、标签建议、模型名和置信度，不直接修改 Meme。
-- `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm`：确认选中的 AI 标签，并可采用 AI 描述。
+- `GET/POST /api/templates`：获取模板列表或创建模板。
+- `GET/PATCH/DELETE /api/templates/{template_id}`：获取、修改或删除模板。
+- `POST /api/memes/{meme_id}/analyze`：生成并记录 AI 描述、标签和已有模板建议，不直接修改 Meme。
+- `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm`：确认选中的 AI 标签，并可采用描述和最终模板选择。
 - `/api/ai-settings/providers`：模型厂商的列表、新增、修改与删除。
 - `/api/ai-settings/providers/{id}/test`：验证密钥和 `/models` 连接。
 - `/api/ai-settings/providers/{id}/refresh-models`：同步厂商模型标识。

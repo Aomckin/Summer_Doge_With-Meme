@@ -13,6 +13,7 @@ PROVIDER_PRESETS: Final[tuple[dict[str, object], ...]] = (
                 "model_id": "gpt-5.6-luna",
                 "display_name": "GPT-5.6 Luna",
                 "supports_vision": True,
+                "supports_image_embedding": False,
             },
             {
                 "model_id": "gpt-5.6-terra",
@@ -23,6 +24,21 @@ PROVIDER_PRESETS: Final[tuple[dict[str, object], ...]] = (
                 "model_id": "gpt-5.6-sol",
                 "display_name": "GPT-5.6 Sol",
                 "supports_vision": True,
+            },
+        ),
+    },
+    {
+        "id": "dashscope_embedding",
+        "name": "阿里云百炼图像向量",
+        "base_url": "https://dashscope.aliyuncs.com/api/v1",
+        "protocol": "dashscope_multimodal_embedding",
+        "description": "阿里云百炼多模态图像向量 API。",
+        "models": (
+            {
+                "model_id": "multimodal-embedding-v1",
+                "display_name": "Multimodal Embedding V1",
+                "supports_vision": False,
+                "supports_image_embedding": True,
             },
         ),
     },

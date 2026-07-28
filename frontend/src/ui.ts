@@ -5,6 +5,7 @@ export interface EditDraft {
   description: string;
   source: string;
   tags: string;
+  templateId: string;
 }
 
 export interface AppElements {
@@ -12,6 +13,7 @@ export interface AppElements {
   randomButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
+  openTemplatesButton: HTMLButtonElement;
   operationError: HTMLElement;
   tagFilters: HTMLElement;
   listStatus: HTMLElement;
@@ -23,6 +25,12 @@ export interface AppElements {
   uploadFile: HTMLInputElement;
   uploadError: HTMLElement;
   uploadSubmit: HTMLButtonElement;
+  uploadTemplateSelect: HTMLSelectElement;
+  templateDialog: HTMLDialogElement;
+  templateForm: HTMLFormElement;
+  templateList: HTMLElement;
+  templateError: HTMLElement;
+  templateSubmit: HTMLButtonElement;
   settingsDialog: HTMLDialogElement;
   settingsContent: HTMLElement;
   providerDialog: HTMLDialogElement;
@@ -108,6 +116,7 @@ export function mountShell(root: HTMLElement): AppElements {
             <input id="meme-search" type="search" placeholder="搜索标题或描述…" aria-label="搜索 Meme" autocomplete="off">
           </label>
           <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
+          <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">上传 Meme</button>
         </div>
@@ -163,6 +172,12 @@ export function mountShell(root: HTMLElement): AppElements {
           <input name="tags" type="text" placeholder="funny, reaction">
           <small>使用英文逗号分隔</small>
         </label>
+        <label>
+          <span>模板</span>
+          <select id="upload-template" name="template_id">
+            <option value="">无模板</option>
+          </select>
+        </label>
         <p id="upload-error" class="form-error" role="alert" hidden></p>
         <div class="modal-actions">
           <button class="button button-ghost" type="button" data-close-upload>取消</button>
@@ -171,11 +186,43 @@ export function mountShell(root: HTMLElement): AppElements {
       </form>
     </dialog>
 
+    <dialog id="template-dialog" class="settings-dialog" aria-labelledby="template-dialog-title">
+      <div class="settings-shell template-settings-shell">
+        <header class="settings-header">
+          <div>
+            <p class="eyebrow">TEMPLATE LIBRARY · v0.3.3</p>
+            <h2 id="template-dialog-title">模板管理</h2>
+            <p>模板只保存名称与描述，不包含图片。</p>
+          </div>
+          <button class="icon-button" type="button" data-close-templates aria-label="关闭模板管理">×</button>
+        </header>
+        <div class="template-settings-layout">
+          <form id="template-form" class="modal-card template-form">
+            <input name="template_id" type="hidden">
+            <label>
+              <span>名称</span>
+              <input name="name" type="text" maxlength="100" required>
+            </label>
+            <label>
+              <span>描述</span>
+              <textarea name="description" rows="4"></textarea>
+            </label>
+            <p id="template-error" class="form-error" role="alert" hidden></p>
+            <div class="modal-actions">
+              <button class="button button-ghost" type="button" data-cancel-template-edit hidden>取消编辑</button>
+              <button id="template-submit" class="button button-primary" type="submit">创建模板</button>
+            </div>
+          </form>
+          <div id="template-list" class="template-list"></div>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="api-settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <div class="settings-shell">
         <header class="settings-header">
           <div>
-            <p class="eyebrow">AI CONFIGURATION · v0.3.2</p>
+            <p class="eyebrow">AI CONFIGURATION · v0.3.3</p>
             <h2 id="settings-title">API 设置</h2>
             <p>管理模型厂商、连接凭据与图片分析模型。</p>
           </div>
@@ -324,6 +371,7 @@ export function mountShell(root: HTMLElement): AppElements {
     randomButton: required(root, "#random-button"),
     openUploadButton: required(root, "#open-upload"),
     openSettingsButton: required(root, "#open-settings"),
+    openTemplatesButton: required(root, "#open-templates"),
     operationError: required(root, "#operation-error"),
     tagFilters: required(root, "#tag-filters"),
     listStatus: required(root, "#list-status"),
@@ -335,6 +383,12 @@ export function mountShell(root: HTMLElement): AppElements {
     uploadFile: required(document, "#upload-file"),
     uploadError: required(document, "#upload-error"),
     uploadSubmit: required(document, "#upload-submit"),
+    uploadTemplateSelect: required(document, "#upload-template"),
+    templateDialog: required(document, "#template-dialog"),
+    templateForm: required(document, "#template-form"),
+    templateList: required(document, "#template-list"),
+    templateError: required(document, "#template-error"),
+    templateSubmit: required(document, "#template-submit"),
     settingsDialog: required(document, "#api-settings-dialog"),
     settingsContent: required(document, "#settings-content"),
     providerDialog: required(document, "#provider-dialog"),
@@ -361,6 +415,85 @@ export function renderToolbar(
     ? "正在抽取…"
     : "随机一个";
   elements.openUploadButton.disabled = state.uploading;
+}
+
+function templateOptions(
+  state: AppState,
+  selectedId: string,
+): string {
+  return [
+    '<option value="">无模板</option>',
+    ...state.availableTemplates.map(
+      (template) =>
+        `<option value="${template.id}"${selectedId === String(template.id) ? " selected" : ""}>${escapeHtml(template.name)}</option>`,
+    ),
+  ].join("");
+}
+
+export function renderUploadTemplates(
+  elements: AppElements,
+  state: AppState,
+): void {
+  const selected = elements.uploadTemplateSelect.value;
+  elements.uploadTemplateSelect.innerHTML = templateOptions(state, selected);
+}
+
+export function renderTemplateManager(
+  elements: AppElements,
+  state: AppState,
+  editingId: number | null,
+  busy: boolean,
+  error: string | null,
+): void {
+  const editing = state.availableTemplates.find(
+    (template) => template.id === editingId,
+  );
+  const idField = elements.templateForm.elements.namedItem("template_id");
+  const nameField = elements.templateForm.elements.namedItem("name");
+  const descriptionField =
+    elements.templateForm.elements.namedItem("description");
+  if (
+    idField instanceof HTMLInputElement &&
+    nameField instanceof HTMLInputElement &&
+    descriptionField instanceof HTMLTextAreaElement
+  ) {
+    idField.value = editing ? String(editing.id) : "";
+    nameField.value = editing?.name ?? "";
+    descriptionField.value = editing?.description ?? "";
+  }
+  const cancel = elements.templateForm.querySelector<HTMLButtonElement>(
+    "[data-cancel-template-edit]",
+  );
+  if (cancel) {
+    cancel.hidden = !editing;
+    cancel.disabled = busy;
+  }
+  elements.templateSubmit.disabled = busy;
+  elements.templateSubmit.textContent = busy
+    ? "正在保存…"
+    : editing
+      ? "保存修改"
+      : "创建模板";
+  elements.templateError.hidden = !error;
+  elements.templateError.textContent = error ?? "";
+  elements.templateList.innerHTML = state.availableTemplates.length
+    ? state.availableTemplates
+        .map(
+          (template) => `
+            <article class="template-row">
+              <div>
+                <strong>${escapeHtml(template.name)}</strong>
+                <p>${escapeHtml(template.description || "暂无描述")}</p>
+              </div>
+              <div class="template-row-actions">
+                <button class="button button-secondary" type="button" data-edit-template="${template.id}" ${busy ? "disabled" : ""}>编辑</button>
+                <button class="button button-danger" type="button" data-delete-template="${template.id}" ${busy ? "disabled" : ""}>删除</button>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : '<p class="muted">还没有模板，可以先创建一个。</p>';
 }
 
 export function renderOperationError(
@@ -549,7 +682,7 @@ function aiAnalysisMarkup(state: AppState): string {
             ${state.analyzing ? "disabled" : ""}
           >${state.analyzing ? "正在分析…" : "AI 分析"}</button>
         </div>
-        <p class="ai-hint">分析结果仅供预览，确认前不会修改描述或标签。</p>
+        <p class="ai-hint">分析结果仅供预览，确认前不会修改描述、标签或模板。</p>
         ${error}
       </section>
     `;
@@ -575,6 +708,12 @@ function aiAnalysisMarkup(state: AppState): string {
         })
         .join("")
     : '<p class="muted">这次分析没有返回标签建议。</p>';
+  const suggestedTemplate = analysis.suggested_template
+    ? `
+      <p><strong>建议模板：${escapeHtml(analysis.suggested_template.name)}</strong></p>
+      ${analysis.suggested_template.description ? `<p class="muted">${escapeHtml(analysis.suggested_template.description)}</p>` : ""}
+    `
+    : '<p class="muted">模板匹配：未找到合适的已有模板</p>';
 
   return `
     <section class="ai-panel has-result" aria-labelledby="ai-panel-title">
@@ -603,6 +742,26 @@ function aiAnalysisMarkup(state: AppState): string {
       <fieldset class="ai-suggestions">
         <legend>选择要追加的标签</legend>
         ${suggestions}
+      </fieldset>
+      <fieldset class="ai-template-choice">
+        <legend>模板归类</legend>
+        ${suggestedTemplate}
+        <label class="check-row">
+          <input
+            type="checkbox"
+            data-ai-apply-template
+            ${state.applyAITemplate ? "checked" : ""}
+            ${state.confirmingAnalysis ? "disabled" : ""}
+          >
+          <span>应用模板归类</span>
+        </label>
+        <label>
+          <span>最终模板</span>
+          <select
+            data-ai-template
+            ${state.confirmingAnalysis || !state.applyAITemplate ? "disabled" : ""}
+          >${templateOptions(state, state.selectedAITemplateId === null ? "" : String(state.selectedAITemplateId))}</select>
+        </label>
       </fieldset>
       ${error}
       <div class="ai-actions">
@@ -664,6 +823,10 @@ export function renderDetail(
             <span>标签</span>
             <input name="tags" type="text" value="${escapeHtml(draft.tags)}">
           </label>
+          <label>
+            <span>模板</span>
+            <select name="template_id">${templateOptions(state, draft.templateId)}</select>
+          </label>
           ${detailError(state.actionError)}
           <div class="detail-actions">
             <button class="button button-ghost" type="button" data-cancel-edit>取消</button>
@@ -689,6 +852,7 @@ export function renderDetail(
           <p class="detail-description">${escapeHtml(meme.description || "暂无描述")}</p>
           <dl class="metadata">
             <div><dt>来源</dt><dd>${escapeHtml(meme.source || "未填写")}</dd></div>
+            <div><dt>模板</dt><dd>${escapeHtml(meme.template?.name || "未归类")}</dd></div>
             <div><dt>尺寸</dt><dd>${meme.width} × ${meme.height}</dd></div>
             <div><dt>文件</dt><dd>${formatFileSize(meme.file_size)} · ${escapeHtml(meme.mime_type)}</dd></div>
             <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>

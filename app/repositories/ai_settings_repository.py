@@ -69,3 +69,17 @@ class AISettingsRepository:
             .where(AIModel.is_active.is_(True))
             .values(is_active=False)
         )
+
+    def active_embedding_model(self) -> AIModel | None:
+        return self.session.scalar(
+            select(AIModel)
+            .options(joinedload(AIModel.provider))
+            .where(AIModel.is_embedding_active.is_(True))
+        )
+
+    def clear_active_embedding_models(self) -> None:
+        self.session.execute(
+            update(AIModel)
+            .where(AIModel.is_embedding_active.is_(True))
+            .values(is_embedding_active=False)
+        )

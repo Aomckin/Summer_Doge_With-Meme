@@ -4,20 +4,24 @@ import {
   confirmAIAnalysis,
   createAIModel,
   createAIProvider,
+  createTemplate,
   deleteMeme,
   deleteAIModel,
   deleteAIProvider,
+  deleteTemplate,
   getRandomMeme,
   listAIModels,
   listAIProviderPresets,
   listAIProviders,
   listMemes,
   listTags,
+  listTemplates,
   parseTagInput,
   refreshAIModels,
   testAIProvider,
   updateAIModel,
   updateAIProvider,
+  updateTemplate,
   updateMeme,
   uploadMeme,
 } from "./api";
@@ -29,6 +33,9 @@ import type {
   MemeResponse,
   MemeUpdatePayload,
   TagResponse,
+  TemplateCreatePayload,
+  TemplateResponse,
+  TemplateUpdatePayload,
   UploadMemeInput,
 } from "./types";
 import {
@@ -45,7 +52,9 @@ import {
   renderLibrary,
   renderOperationError,
   renderTags,
+  renderTemplateManager,
   renderToolbar,
+  renderUploadTemplates,
   setUploadBusy,
 } from "./ui";
 
@@ -54,6 +63,13 @@ const PAGE_SIZE = 24;
 export interface MemeApi extends AISettingsApi {
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   listTags(signal?: AbortSignal): Promise<TagResponse[]>;
+  listTemplates(): Promise<TemplateResponse[]>;
+  createTemplate(payload: TemplateCreatePayload): Promise<TemplateResponse>;
+  updateTemplate(
+    id: number,
+    payload: TemplateUpdatePayload,
+  ): Promise<TemplateResponse>;
+  deleteTemplate(id: number): Promise<void>;
   getRandomMeme(tags: string[], signal?: AbortSignal): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
   updateMeme(
@@ -72,6 +88,10 @@ export interface MemeApi extends AISettingsApi {
 const defaultApi: MemeApi = {
   listMemes,
   listTags,
+  listTemplates,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
   getRandomMeme,
   uploadMeme,
   updateMeme,
@@ -95,6 +115,7 @@ function initialState(): AppState {
   return {
     memes: [],
     availableTags: [],
+    availableTemplates: [],
     selectedMeme: null,
     query: "",
     selectedTags: [],
@@ -112,6 +133,8 @@ function initialState(): AppState {
     aiAnalysis: null,
     selectedAITags: [],
     applyAIDescription: false,
+    selectedAITemplateId: null,
+    applyAITemplate: false,
     aiError: null,
     listError: null,
     loadMoreError: null,
@@ -135,7 +158,8 @@ function value(form: HTMLFormElement, name: string): string {
   const field = form.elements.namedItem(name);
   if (
     field instanceof HTMLInputElement ||
-    field instanceof HTMLTextAreaElement
+    field instanceof HTMLTextAreaElement ||
+    field instanceof HTMLSelectElement
   ) {
     return field.value;
   }
@@ -150,6 +174,9 @@ export class MemeVaultApp {
   private editing = false;
   private editDraft: EditDraft | null = null;
   private uploadError: string | null = null;
+  private templateEditingId: number | null = null;
+  private templateBusy = false;
+  private templateError: string | null = null;
   private readonly settings: AISettingsController;
 
   constructor(
@@ -163,7 +190,11 @@ export class MemeVaultApp {
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.reloadMemes(), this.refreshTags()]);
+    await Promise.all([
+      this.reloadMemes(),
+      this.refreshTags(),
+      this.refreshTemplates(),
+    ]);
   }
 
   private bindEvents(): void {
@@ -232,6 +263,53 @@ export class MemeVaultApp {
     this.elements.openSettingsButton.addEventListener("click", () => {
       this.settings.open();
     });
+    this.elements.openTemplatesButton.addEventListener("click", () => {
+      this.openTemplateManager();
+    });
+    for (const button of document.querySelectorAll("[data-close-templates]")) {
+      button.addEventListener("click", () => {
+        if (!this.templateBusy) {
+          this.elements.templateDialog.close();
+        }
+      });
+    }
+    this.elements.templateForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.submitTemplate();
+    });
+    this.elements.templateForm
+      .querySelector("[data-cancel-template-edit]")
+      ?.addEventListener("click", () => {
+        this.templateEditingId = null;
+        this.templateError = null;
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          null,
+          false,
+          null,
+        );
+      });
+    this.elements.templateList.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      const editButton =
+        target.closest<HTMLButtonElement>("[data-edit-template]");
+      const deleteButton =
+        target.closest<HTMLButtonElement>("[data-delete-template]");
+      if (editButton) {
+        this.templateEditingId = Number(editButton.dataset.editTemplate);
+        this.templateError = null;
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          this.templateEditingId,
+          false,
+          null,
+        );
+      } else if (deleteButton) {
+        void this.removeTemplate(Number(deleteButton.dataset.deleteTemplate));
+      }
+    });
     for (const button of document.querySelectorAll("[data-close-upload]")) {
       button.addEventListener("click", () => this.closeUpload());
     }
@@ -261,6 +339,12 @@ export class MemeVaultApp {
     });
     this.elements.detailPanel.addEventListener("change", (event) => {
       const target = event.target;
+      if (target instanceof HTMLSelectElement && target.matches("[data-ai-template]")) {
+        this.state.selectedAITemplateId = target.value
+          ? Number(target.value)
+          : null;
+        return;
+      }
       if (!(target instanceof HTMLInputElement)) {
         return;
       }
@@ -271,6 +355,14 @@ export class MemeVaultApp {
           : this.state.selectedAITags.filter((name) => name !== tag);
       } else if (target.matches("[data-ai-description]")) {
         this.state.applyAIDescription = target.checked;
+      } else if (target.matches("[data-ai-apply-template]")) {
+        this.state.applyAITemplate = target.checked;
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
       }
     });
     this.elements.detailPanel.addEventListener("submit", (event) => {
@@ -302,6 +394,7 @@ export class MemeVaultApp {
 
   private render(): void {
     renderToolbar(this.elements, this.state);
+    renderUploadTemplates(this.elements, this.state);
     renderOperationError(this.elements, this.state);
     renderTags(this.elements, this.state);
     renderLibrary(this.elements, this.state);
@@ -316,6 +409,155 @@ export class MemeVaultApp {
       this.state.uploading,
       this.uploadError,
     );
+  }
+
+  private async refreshTemplates(): Promise<void> {
+    try {
+      this.state.availableTemplates = await this.api.listTemplates();
+      if (this.state.aiAnalysis?.suggested_template) {
+        const currentSuggestion = this.state.availableTemplates.find(
+          (template) =>
+            template.id === this.state.aiAnalysis?.suggested_template?.id,
+        );
+        this.state.aiAnalysis = {
+          ...this.state.aiAnalysis,
+          suggested_template: currentSuggestion ?? null,
+        };
+        if (!currentSuggestion) {
+          this.state.selectedAITemplateId = null;
+          this.state.applyAITemplate = false;
+        }
+      }
+      renderUploadTemplates(this.elements, this.state);
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+      if (this.elements.templateDialog.open) {
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          this.templateEditingId,
+          this.templateBusy,
+          this.templateError,
+        );
+      }
+    } catch (error) {
+      this.state.operationError = `模板加载失败：${readableError(error)}`;
+      renderOperationError(this.elements, this.state);
+    }
+  }
+
+  private openTemplateManager(): void {
+    this.templateEditingId = null;
+    this.templateError = null;
+    renderTemplateManager(this.elements, this.state, null, false, null);
+    this.elements.templateDialog.showModal();
+  }
+
+  private async submitTemplate(): Promise<void> {
+    if (this.templateBusy) {
+      return;
+    }
+    const name = value(this.elements.templateForm, "name").trim();
+    const description =
+      value(this.elements.templateForm, "description").trim() || null;
+    if (!name) {
+      this.templateError = "模板名称不能为空。";
+      this.elements.templateError.hidden = false;
+      this.elements.templateError.textContent = this.templateError;
+      return;
+    }
+    this.templateBusy = true;
+    this.templateError = null;
+    this.elements.templateSubmit.disabled = true;
+    this.elements.templateSubmit.textContent = "正在保存…";
+    try {
+      if (this.templateEditingId === null) {
+        await this.api.createTemplate({ name, description });
+      } else {
+        await this.api.updateTemplate(this.templateEditingId, {
+          name,
+          description,
+        });
+      }
+      this.templateEditingId = null;
+      await this.refreshTemplates();
+    } catch (error) {
+      this.templateError = readableError(error);
+    } finally {
+      this.templateBusy = false;
+      renderTemplateManager(
+        this.elements,
+        this.state,
+        this.templateEditingId,
+        false,
+        this.templateError,
+      );
+    }
+  }
+
+  private async removeTemplate(templateId: number): Promise<void> {
+    const template = this.state.availableTemplates.find(
+      (item) => item.id === templateId,
+    );
+    if (
+      !template ||
+      this.templateBusy ||
+      !confirm(`确定删除模板“${template.name}”吗？相关 Meme 将变为未归类。`)
+    ) {
+      return;
+    }
+    this.templateBusy = true;
+    this.templateError = null;
+    renderTemplateManager(
+      this.elements,
+      this.state,
+      this.templateEditingId,
+      true,
+      null,
+    );
+    try {
+      await this.api.deleteTemplate(templateId);
+      this.state.availableTemplates = this.state.availableTemplates.filter(
+        (item) => item.id !== templateId,
+      );
+      if (this.state.selectedMeme?.template?.id === templateId) {
+        this.state.selectedMeme = {
+          ...this.state.selectedMeme,
+          template: null,
+        };
+      }
+      if (this.state.aiAnalysis?.suggested_template?.id === templateId) {
+        this.state.aiAnalysis = {
+          ...this.state.aiAnalysis,
+          suggested_template: null,
+        };
+        this.state.selectedAITemplateId = null;
+        this.state.applyAITemplate = false;
+      }
+      this.templateEditingId = null;
+      await Promise.all([this.refreshTemplates(), this.reloadMemes()]);
+    } catch (error) {
+      this.templateError = readableError(error);
+    } finally {
+      this.templateBusy = false;
+      renderTemplateManager(
+        this.elements,
+        this.state,
+        this.templateEditingId,
+        false,
+        this.templateError,
+      );
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    }
   }
 
   private async reloadMemes(): Promise<void> {
@@ -487,6 +729,9 @@ export class MemeVaultApp {
         description: value(this.elements.uploadForm, "description"),
         source: value(this.elements.uploadForm, "source"),
         tags: parseTagInput(value(this.elements.uploadForm, "tags")),
+        template_id: value(this.elements.uploadForm, "template_id")
+          ? Number(value(this.elements.uploadForm, "template_id"))
+          : null,
       });
       this.elements.uploadDialog.close();
       this.elements.uploadForm.reset();
@@ -518,6 +763,7 @@ export class MemeVaultApp {
       description: meme.description ?? "",
       source: meme.source ?? "",
       tags: meme.tags.map((tag) => tag.name).join(", "),
+      templateId: meme.template ? String(meme.template.id) : "",
     };
     renderDetail(
       this.elements,
@@ -556,12 +802,16 @@ export class MemeVaultApp {
       description: value(form, "description"),
       source: value(form, "source"),
       tags: value(form, "tags"),
+      templateId: value(form, "template_id"),
     };
     const payload: MemeUpdatePayload = {
       title,
       description: this.editDraft.description.trim() || null,
       source: this.editDraft.source.trim() || null,
       tags: parseTagInput(this.editDraft.tags),
+      template_id: this.editDraft.templateId
+        ? Number(this.editDraft.templateId)
+        : null,
     };
     this.state.saving = true;
     this.state.actionError = null;
@@ -620,6 +870,8 @@ export class MemeVaultApp {
     this.state.aiAnalysis = null;
     this.state.selectedAITags = [];
     this.state.applyAIDescription = false;
+    this.state.selectedAITemplateId = null;
+    this.state.applyAITemplate = false;
     this.state.aiError = null;
   }
 
@@ -641,6 +893,9 @@ export class MemeVaultApp {
         (suggestion) => suggestion.name,
       );
       this.state.applyAIDescription = !meme.description;
+      this.state.selectedAITemplateId =
+        analysis.suggested_template?.id ?? null;
+      this.state.applyAITemplate = analysis.suggested_template !== null;
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
         this.state.aiError = readableError(error);
@@ -679,6 +934,8 @@ export class MemeVaultApp {
         {
           tags: this.state.selectedAITags,
           apply_description: this.state.applyAIDescription,
+          template_id: this.state.selectedAITemplateId,
+          apply_template: this.state.applyAITemplate,
         },
       );
       if (this.state.selectedMeme?.id !== meme.id) {
@@ -688,6 +945,8 @@ export class MemeVaultApp {
       this.state.aiAnalysis = null;
       this.state.selectedAITags = [];
       this.state.applyAIDescription = false;
+      this.state.selectedAITemplateId = null;
+      this.state.applyAITemplate = false;
       await this.refreshTags();
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {

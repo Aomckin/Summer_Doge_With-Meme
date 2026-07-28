@@ -5,13 +5,17 @@ import {
   analyzeMeme,
   confirmAIAnalysis,
   createAIProvider,
+  createTemplate,
   deleteMeme,
+  deleteTemplate,
+  listTemplates,
   listMemes,
   parseTagInput,
   testAIProvider,
   updateAIModel,
   updateAIProvider,
   updateMeme,
+  updateTemplate,
   uploadMeme,
 } from "./api";
 import type { MemeResponse } from "./types";
@@ -33,6 +37,7 @@ const meme: MemeResponse = {
   created_at: "2026-07-25T00:00:00Z",
   updated_at: "2026-07-25T00:00:00Z",
   tags: [],
+  template: null,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -77,6 +82,7 @@ describe("uploadMeme", () => {
       description: "   ",
       source: "",
       tags: [],
+      template_id: 3,
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -85,6 +91,7 @@ describe("uploadMeme", () => {
     expect(body.has("description")).toBe(false);
     expect(body.has("source")).toBe(false);
     expect(body.has("tags")).toBe(false);
+    expect(body.get("template_id")).toBe("3");
     expect([...body.values()]).not.toContain("null");
   });
 });
@@ -99,6 +106,7 @@ describe("updateMeme", () => {
       description: null,
       source: null,
       tags: [" Funny ", "cat", "funny"],
+      template_id: null,
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -109,7 +117,46 @@ describe("updateMeme", () => {
       description: null,
       source: null,
       tags: ["funny", "cat"],
+      template_id: null,
     });
+  });
+});
+
+describe("templates", () => {
+  it("lists, creates, updates and deletes templates", async () => {
+    const template = {
+      id: 3,
+      name: "Doge",
+      description: null,
+      created_at: "2026-07-28T00:00:00Z",
+      updated_at: "2026-07-28T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([template]))
+      .mockResolvedValueOnce(jsonResponse(template, 201))
+      .mockResolvedValueOnce(jsonResponse({ ...template, description: "柴犬" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listTemplates()).resolves.toEqual([template]);
+    await createTemplate({ name: "Doge", description: null });
+    await updateTemplate(3, { description: "柴犬" });
+    await expect(deleteTemplate(3)).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0]).toEqual(["/api/templates", undefined]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      name: "Doge",
+      description: null,
+    });
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/templates/3");
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+      description: "柴犬",
+    });
+    expect(fetchMock.mock.calls[3]).toEqual([
+      "/api/templates/3",
+      { method: "DELETE" },
+    ]);
   });
 });
 
@@ -136,6 +183,7 @@ describe("AI analysis", () => {
       ],
       created_at: "2026-07-27T00:00:00Z",
       confirmed_at: null,
+      suggested_template: null,
     };
     const fetchMock = vi
       .fn()
@@ -147,6 +195,8 @@ describe("AI analysis", () => {
     await confirmAIAnalysis(7, 3, {
       tags: [" Reaction ", "reaction", "NEW"],
       apply_description: true,
+      template_id: null,
+      apply_template: false,
     });
 
     expect(fetchMock.mock.calls[0]).toEqual([
@@ -159,6 +209,8 @@ describe("AI analysis", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       tags: ["reaction", "new"],
       apply_description: true,
+      template_id: null,
+      apply_template: false,
     });
   });
 });

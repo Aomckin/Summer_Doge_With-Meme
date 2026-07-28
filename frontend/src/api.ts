@@ -13,6 +13,9 @@ import type {
   MemeResponse,
   MemeUpdatePayload,
   TagResponse,
+  TemplateCreatePayload,
+  TemplateResponse,
+  TemplateUpdatePayload,
   UploadMemeInput,
 } from "./types";
 
@@ -115,6 +118,33 @@ export function listTags(signal?: AbortSignal): Promise<TagResponse[]> {
   return requestJson<TagResponse[]>("/api/tags", { signal });
 }
 
+export function listTemplates(): Promise<TemplateResponse[]> {
+  return requestJson<TemplateResponse[]>("/api/templates");
+}
+
+export function createTemplate(
+  payload: TemplateCreatePayload,
+): Promise<TemplateResponse> {
+  return requestJson<TemplateResponse>(
+    "/api/templates",
+    jsonRequest("POST", payload),
+  );
+}
+
+export function updateTemplate(
+  id: number,
+  payload: TemplateUpdatePayload,
+): Promise<TemplateResponse> {
+  return requestJson<TemplateResponse>(
+    `/api/templates/${id}`,
+    jsonRequest("PATCH", payload),
+  );
+}
+
+export function deleteTemplate(id: number): Promise<void> {
+  return requestJson<void>(`/api/templates/${id}`, { method: "DELETE" });
+}
+
 export function getRandomMeme(
   tags: string[],
   signal?: AbortSignal,
@@ -144,6 +174,9 @@ export function uploadMeme(input: UploadMemeInput): Promise<MemeResponse> {
   if (tags.length) {
     body.append("tags", tags.join(","));
   }
+  if (typeof input.template_id === "number") {
+    body.append("template_id", String(input.template_id));
+  }
 
   return requestJson<MemeResponse>("/api/memes", {
     method: "POST",
@@ -167,6 +200,9 @@ export function updateMeme(
   }
   if (Object.hasOwn(payload, "tags")) {
     body.tags = normalizeTags(payload.tags ?? []);
+  }
+  if (Object.hasOwn(payload, "template_id")) {
+    body.template_id = payload.template_id ?? null;
   }
 
   return requestJson<MemeResponse>(`/api/memes/${id}`, {
@@ -199,6 +235,8 @@ export function confirmAIAnalysis(
       body: JSON.stringify({
         tags: normalizeTags(payload.tags),
         apply_description: payload.apply_description,
+        template_id: payload.template_id,
+        apply_template: payload.apply_template,
       }),
     },
   );

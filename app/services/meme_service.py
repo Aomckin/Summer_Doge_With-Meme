@@ -18,8 +18,8 @@ from app.storage.image_storage import ImageStorage
 EDITABLE_FIELDS = {"title", "description", "source", "tags"}
 # 单独的哨兵对象用来区分“请求没传 tags”和“请求明确把 tags 清空”。
 TAGS_NOT_PROVIDED = object()
+MIN_AI_SUGGESTIONS = 2
 MAX_AI_SUGGESTIONS = 8
-MAX_AI_NEW_TAGS = 3
 
 
 class MemeNotFoundError(LookupError):
@@ -296,6 +296,11 @@ class MemeService:
         # 即使模型没有按提示排序，服务端仍保证已有标签先占建议名额。
         prioritized = [
             *existing_suggestions,
-            *new_suggestions[:MAX_AI_NEW_TAGS],
+            *new_suggestions,
         ]
-        return prioritized[:MAX_AI_SUGGESTIONS]
+        normalized = prioritized[:MAX_AI_SUGGESTIONS]
+        if len(normalized) < MIN_AI_SUGGESTIONS:
+            raise AIInvalidResponseError(
+                "AI service must suggest between 2 and 8 unique tags"
+            )
+        return normalized

@@ -60,8 +60,12 @@ class AIClient(Protocol):
 
 SYSTEM_PROMPT = (
     "你是 Meme 图片整理助手。生成简体中文图片描述，并推荐适合检索的短标签。"
-    "必须优先复用用户已有标签；只有已有标签无法表达关键信息时才建议新标签，"
-    "且新标签最多 3 个。标签使用简短的小写名称，不要输出重复项。"
+    "必须优先复用用户已有标签；只有已有标签无法准确表达关键信息时才建议新标签。"
+    "标签默认使用简体中文。仅当外语词本身是交流中常用的专用表达"
+    "（如“AI”“Be like:”“nigger”）、外语二次元梗或固定梗名"
+    "（如“Ciallo~”），或者外语比中文更能准确表达 Meme 含义时，"
+    "才保留原外语标签。标签总数必须为 2 至 8 个，名称应简短且不得重复；"
+    "固定外语表达应保留其惯用拼写和标点。"
 )
 
 
@@ -75,6 +79,7 @@ ANALYSIS_SCHEMA = {
         },
         "tags": {
             "type": "array",
+            "minItems": 2,
             "maxItems": 8,
             "items": {
                 "type": "object",
@@ -196,6 +201,8 @@ class _HTTPAIClient:
                 )
                 for item in raw_tags
             )
+            if not 2 <= len(tags) <= 8:
+                raise ValueError
             if not isinstance(response_payload, dict):
                 raise ValueError
             model_name = str(response_payload.get("model") or self.model)
@@ -356,7 +363,8 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                     "content": (
                         f"{SYSTEM_PROMPT} 必须只输出 JSON 对象，格式示例："
                         '{"description":"图片描述","tags":'
-                        '[{"name":"reaction","confidence":0.9}]}'
+                        '[{"name":"反应图","confidence":0.9},'
+                        '{"name":"震惊","confidence":0.8}]}'
                     ),
                 },
                 {

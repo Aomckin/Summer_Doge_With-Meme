@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.ai.client import AIImageResult, AITagSuggestion
+from app.ai.client import AIImageResult, AIInvalidResponseError, AITagSuggestion
 from app.database import Base
 from app.models.ai_analysis import MemeAIAnalysis
 from app.models.tag import MemeTag, Tag
@@ -99,12 +99,38 @@ def test_analysis_records_model_and_suggestions_without_applying_them(
             {"name": "reaction", "confidence": 0.91, "existing": False},
             {"name": "purple", "confidence": 0.82, "existing": False},
             {"name": "new-three", "confidence": 0.73, "existing": False},
+            {"name": "new-four", "confidence": 0.64, "existing": False},
         ]
         assert meme.description == "用户描述"
         assert [tag.name for tag in meme.tags] == ["funny"]
         assert session.scalar(select(func.count()).select_from(Tag)) == 1
         assert session.scalar(select(func.count()).select_from(MemeTag)) == 1
         assert session.get(MemeAIAnalysis, analysis.id) is analysis
+    finally:
+        session.close()
+
+
+def test_analysis_requires_at_least_two_unique_suggestions(
+    tmp_path: Path,
+) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        meme = service.create_meme(
+            "example.png",
+            make_image_bytes(),
+            title="AI 测试",
+        )
+        result = AIImageResult(
+            model_name="gpt-5.6-luna-snapshot",
+            description="一张紫色图片。",
+            tags=(
+                AITagSuggestion("震惊", 0.9),
+                AITagSuggestion(" 震惊 ", 0.8),
+            ),
+        )
+
+        with pytest.raises(AIInvalidResponseError, match="2 and 8"):
+            service.analyze_meme(meme.id, FakeAIClient(result))
     finally:
         session.close()
 

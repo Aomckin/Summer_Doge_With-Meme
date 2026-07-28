@@ -9,6 +9,7 @@ import {
   deleteAIModel,
   deleteAIProvider,
   deleteTemplate,
+  deleteTemplateReferenceImage,
   getRandomMeme,
   listAIModels,
   listAIProviderPresets,
@@ -22,6 +23,7 @@ import {
   updateAIModel,
   updateAIProvider,
   updateTemplate,
+  uploadTemplateReferenceImage,
   updateMeme,
   uploadMeme,
 } from "./api";
@@ -70,6 +72,8 @@ export interface MemeApi extends AISettingsApi {
     payload: TemplateUpdatePayload,
   ): Promise<TemplateResponse>;
   deleteTemplate(id: number): Promise<void>;
+  uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse>;
+  deleteTemplateReferenceImage(id: number): Promise<void>;
   getRandomMeme(tags: string[], signal?: AbortSignal): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
   updateMeme(
@@ -92,6 +96,8 @@ const defaultApi: MemeApi = {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  uploadTemplateReferenceImage,
+  deleteTemplateReferenceImage,
   getRandomMeme,
   uploadMeme,
   updateMeme,
@@ -464,6 +470,8 @@ export class MemeVaultApp {
     const name = value(this.elements.templateForm, "name").trim();
     const description =
       value(this.elements.templateForm, "description").trim() || null;
+    const reference = this.elements.templateForm.elements.namedItem("reference_image");
+    const file = reference instanceof HTMLInputElement ? reference.files?.[0] : undefined;
     if (!name) {
       this.templateError = "模板名称不能为空。";
       this.elements.templateError.hidden = false;
@@ -476,12 +484,14 @@ export class MemeVaultApp {
     this.elements.templateSubmit.textContent = "正在保存…";
     try {
       if (this.templateEditingId === null) {
-        await this.api.createTemplate({ name, description });
+        const template = await this.api.createTemplate({ name, description });
+        if (file) await this.api.uploadTemplateReferenceImage(template.id, file);
       } else {
         await this.api.updateTemplate(this.templateEditingId, {
           name,
           description,
         });
+        if (file) await this.api.uploadTemplateReferenceImage(this.templateEditingId, file);
       }
       this.templateEditingId = null;
       await this.refreshTemplates();

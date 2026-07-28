@@ -145,6 +145,16 @@ export function deleteTemplate(id: number): Promise<void> {
   return requestJson<void>(`/api/templates/${id}`, { method: "DELETE" });
 }
 
+export function uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return requestJson<TemplateResponse>(`/api/templates/${id}/reference-image`, { method: "POST", body });
+}
+
+export function deleteTemplateReferenceImage(id: number): Promise<void> {
+  return requestJson<void>(`/api/templates/${id}/reference-image`, { method: "DELETE" });
+}
+
 export function getRandomMeme(
   tags: string[],
   signal?: AbortSignal,

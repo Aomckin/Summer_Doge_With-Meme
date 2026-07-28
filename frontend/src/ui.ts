@@ -190,9 +190,9 @@ export function mountShell(root: HTMLElement): AppElements {
       <div class="settings-shell template-settings-shell">
         <header class="settings-header">
           <div>
-            <p class="eyebrow">TEMPLATE LIBRARY · v0.3.3</p>
+            <p class="eyebrow">TEMPLATE LIBRARY · VISUAL MATCHING</p>
             <h2 id="template-dialog-title">模板管理</h2>
-            <p>模板只保存名称与描述，不包含图片。</p>
+            <p>可选上传一张参考原图；有图模板按视觉相似度匹配，无图模板保留描述分类。</p>
           </div>
           <button class="icon-button" type="button" data-close-templates aria-label="关闭模板管理">×</button>
         </header>
@@ -203,6 +203,7 @@ export function mountShell(root: HTMLElement): AppElements {
               <span>名称</span>
               <input name="name" type="text" maxlength="100" required>
             </label>
+            <label><span>参考原图（可选）</span><input name="reference_image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label>
             <label>
               <span>描述</span>
               <textarea name="description" rows="4"></textarea>
@@ -484,6 +485,7 @@ export function renderTemplateManager(
               <div>
                 <strong>${escapeHtml(template.name)}</strong>
                 <p>${escapeHtml(template.description || "暂无描述")}</p>
+                ${template.reference_thumbnail_url ? `<img class="template-reference-preview" src="${escapeHtml(template.reference_thumbnail_url)}" alt="${escapeHtml(template.name)} 参考图">` : '<p class="muted">描述分类模板（无参考图）</p>'}
               </div>
               <div class="template-row-actions">
                 <button class="button button-secondary" type="button" data-edit-template="${template.id}" ${busy ? "disabled" : ""}>编辑</button>

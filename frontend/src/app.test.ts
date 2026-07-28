@@ -17,6 +17,11 @@ const dogeTemplate = {
   description: "经典柴犬模板",
   created_at: "2026-07-28T00:00:00Z",
   updated_at: "2026-07-28T00:00:00Z",
+  reference_image_url: null,
+  reference_thumbnail_url: null,
+  reference_mime_type: null,
+  reference_width: null,
+  reference_height: null,
 };
 
 const wojakTemplate = {
@@ -56,6 +61,8 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     createTemplate: vi.fn(),
     updateTemplate: vi.fn(),
     deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    uploadTemplateReferenceImage: vi.fn(),
+    deleteTemplateReferenceImage: vi.fn().mockResolvedValue(undefined),
     getRandomMeme: vi.fn().mockResolvedValue(makeMeme(99, "随机 Meme")),
     uploadMeme: vi.fn().mockResolvedValue(makeMeme(2, "新上传")),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),

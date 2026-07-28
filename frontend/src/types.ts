@@ -10,6 +10,11 @@ export interface TemplateResponse {
   id: number;
   name: string;
   description: string | null;
+  reference_image_url: string | null;
+  reference_thumbnail_url: string | null;
+  reference_mime_type: string | null;
+  reference_width: number | null;
+  reference_height: number | null;
   created_at: string;
   updated_at: string;
 }

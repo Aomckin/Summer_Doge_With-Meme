@@ -1,5 +1,9 @@
 # Meme Vault v0.3.3：下个对话交接说明
 
+> 历史说明：本文保留 v0.3.3 发布上下文。当前 v0.4.0 状态请以
+> [`V0.4_HANDOFF.md`](V0.4_HANDOFF.md) 和
+> [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
+
 > 目的：让新的 Codex 对话在不重读完整历史的情况下，快速恢复当前项目状态。
 >
 > 最后更新：2026-07-29。本文以当前 `main` 为准；旧的 `docs/CODEBASE_STATUS.md` 有部分 v0.3.3 前的过期描述，不应作为模板视觉检索功能的依据。

@@ -39,12 +39,19 @@ export interface AppElements {
   modelDialog: HTMLDialogElement;
   modelForm: HTMLFormElement;
   modelError: HTMLElement;
+  relationDialog: HTMLDialogElement;
+  relationSearch: HTMLInputElement;
+  relationCandidates: HTMLElement;
+  relationError: HTMLElement;
+  relationSave: HTMLButtonElement;
   imageViewerDialog: HTMLDialogElement;
   imageViewerFrame: HTMLElement;
   imageViewerImage: HTMLImageElement;
   imageViewerTitle: HTMLElement;
   imageViewerLink: HTMLAnchorElement;
   imageViewerError: HTMLElement;
+  imageViewerPrevious: HTMLButtonElement;
+  imageViewerNext: HTMLButtonElement;
 }
 
 function required<T extends Element>(root: ParentNode, selector: string): T {
@@ -223,7 +230,7 @@ export function mountShell(root: HTMLElement): AppElements {
       <div class="settings-shell">
         <header class="settings-header">
           <div>
-            <p class="eyebrow">AI CONFIGURATION · v0.3.3</p>
+            <p class="eyebrow">AI CONFIGURATION · v0.4.0</p>
             <h2 id="settings-title">API 设置</h2>
             <p>管理模型厂商、连接凭据、图片分析与模板视觉检索模型。</p>
           </div>
@@ -342,6 +349,32 @@ export function mountShell(root: HTMLElement): AppElements {
     </dialog>
 
     <dialog
+      class="modal relation-dialog"
+      data-relation-dialog
+      aria-labelledby="relation-dialog-title"
+    >
+      <div class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">DIRECT LINKS</p>
+            <h2 id="relation-dialog-title">添加相关 Meme</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-relations aria-label="关闭">×</button>
+        </div>
+        <label>
+          <span>搜索标题或描述</span>
+          <input data-relation-search type="search" autocomplete="off" placeholder="输入关键词筛选当前资料库">
+        </label>
+        <div class="relation-candidates" data-relation-candidates></div>
+        <p class="form-error" data-relation-dialog-error role="alert" hidden></p>
+        <div class="modal-actions">
+          <button class="button button-ghost" type="button" data-close-relations>取消</button>
+          <button class="button button-primary" type="button" data-save-relations>添加所选</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog
       id="image-viewer-dialog"
       class="image-viewer"
       aria-labelledby="image-viewer-title"
@@ -365,7 +398,9 @@ export function mountShell(root: HTMLElement): AppElements {
           </div>
         </header>
         <div class="image-viewer-frame" data-viewer-frame>
+          <button type="button" data-viewer-previous aria-label="上一张">‹</button>
           <img data-viewer-image alt="" hidden>
+          <button type="button" data-viewer-next aria-label="下一张">›</button>
           <p data-viewer-error role="alert" hidden>原图加载失败</p>
         </div>
       </div>
@@ -403,12 +438,19 @@ export function mountShell(root: HTMLElement): AppElements {
     modelDialog: required(document, "#model-dialog"),
     modelForm: required(document, "#model-form"),
     modelError: required(document, "#model-error"),
+    relationDialog: required(document, "[data-relation-dialog]"),
+    relationSearch: required(document, "[data-relation-search]"),
+    relationCandidates: required(document, "[data-relation-candidates]"),
+    relationError: required(document, "[data-relation-dialog-error]"),
+    relationSave: required(document, "[data-save-relations]"),
     imageViewerDialog: required(document, "#image-viewer-dialog"),
     imageViewerFrame: required(document, "[data-viewer-frame]"),
     imageViewerImage: required(document, "[data-viewer-image]"),
     imageViewerTitle: required(document, "[data-viewer-title]"),
     imageViewerLink: required(document, "[data-viewer-link]"),
     imageViewerError: required(document, "[data-viewer-error]"),
+    imageViewerPrevious: required(document, "[data-viewer-previous]"),
+    imageViewerNext: required(document, "[data-viewer-next]"),
   };
 }
 
@@ -576,6 +618,7 @@ function cardMarkup(meme: MemeResponse, selected: boolean): string {
           loading="lazy"
         >
         <span class="image-fallback" aria-hidden="true">图片不可用</span>
+        ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
       </span>
       <span class="card-overlay">
         <strong>${escapeHtml(meme.title)}</strong>
@@ -643,22 +686,117 @@ export function renderLibrary(
     : "加载更多";
 }
 
-function detailImage(meme: MemeResponse): string {
+function detailImage(meme: MemeResponse, state: AppState): string {
+  const images = meme.images.length ? meme.images : [{
+    id: 0, image_url: meme.image_url, width: meme.width, height: meme.height,
+  }];
+  const busy = state.imageOperation !== null;
   return `
-    <button
+    <section class="image-manager" aria-label="图片组管理" aria-busy="${busy}">
+      <div>
+        <strong>${images.length} 张图片</strong>
+        <span>拖拽图片可调整顺序，第一张始终是封面。</span>
+      </div>
+      <label class="button button-secondary ${busy ? "is-disabled" : ""}">
+        ${state.imageOperation === "append" ? "正在追加…" : "追加图片"}
+        <input
+          data-append-image
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          ${busy ? "disabled" : ""}
+          hidden
+        >
+      </label>
+    </section>
+    ${state.imageError ? `<p class="form-error image-operation-error" data-image-error role="alert">${escapeHtml(state.imageError)}</p>` : ""}
+  ` + images.map((image, index) => `
+    <article
       class="detail-image"
-      type="button"
-      data-open-viewer
-      aria-label="查看《${escapeHtml(meme.title)}》原图"
+      data-image-id="${image.id}"
+      draggable="${busy ? "false" : "true"}"
     >
-      <img
-        src="${escapeHtml(meme.image_url)}"
-        alt="${escapeHtml(meme.title)}"
-        width="${meme.width}"
-        height="${meme.height}"
+      <div class="detail-image-toolbar">
+        <span class="image-position">${index + 1} / ${images.length}</span>
+        ${index === 0 ? `<strong class="cover-label" data-cover-label>封面</strong>` : ""}
+        <span class="drag-hint">拖拽排序</span>
+        ${images.length > 1 ? `
+          <button
+            class="button button-danger image-delete"
+            type="button"
+            data-delete-image="${image.id}"
+            ${busy ? "disabled" : ""}
+            aria-label="删除第 ${index + 1} 张图片"
+          >${state.imageOperation === image.id ? "正在删除…" : "删除"}</button>
+        ` : ""}
+      </div>
+      <button
+        class="detail-image-view"
+        type="button"
+        data-open-viewer
+        data-image-index="${index}"
+        aria-label="查看《${escapeHtml(meme.title)}》第 ${index + 1} 张原图"
       >
-      <span class="image-fallback" aria-hidden="true">原图不可用</span>
-    </button>
+        <img
+          src="${escapeHtml(image.image_url)}"
+          alt="${escapeHtml(meme.title)}第 ${index + 1} 张"
+          width="${image.width}"
+          height="${image.height}"
+        >
+        <span class="image-fallback" aria-hidden="true">原图不可用</span>
+      </button>
+    </article>
+  `).join("");
+}
+
+function relatedMemesMarkup(state: AppState): string {
+  let content = "";
+  if (state.relationsLoading) {
+    content = `<p class="muted relation-status">正在加载直接关联…</p>`;
+  } else if (state.relatedMemes.length) {
+    content = `<div class="relation-list">${state.relatedMemes.map((item) => `
+      <article class="relation-item">
+        <button type="button" class="relation-target" data-related-meme="${item.id}">
+          <span class="relation-thumbnail">
+            <img
+              src="${escapeHtml(item.thumbnail_url || item.image_url)}"
+              alt=""
+              width="${item.width}"
+              height="${item.height}"
+            >
+          </span>
+          <span>
+            <strong>${escapeHtml(item.title)}</strong>
+            <small>${escapeHtml(item.description || "暂无描述")}</small>
+          </span>
+        </button>
+        <button
+          class="button button-ghost relation-remove"
+          type="button"
+          data-remove-relation="${item.id}"
+          ${state.relationRemovingId !== null ? "disabled" : ""}
+        >${state.relationRemovingId === item.id ? "正在移除…" : "移除"}</button>
+      </article>
+    `).join("")}</div>`;
+  } else {
+    content = `<p class="muted relation-status">暂无直接关联</p>`;
+  }
+  return `
+    <section class="related-memes" aria-labelledby="related-memes-title">
+      <div class="related-heading">
+        <div>
+          <p class="eyebrow">DIRECT ONLY</p>
+          <h3 id="related-memes-title">相关 Meme</h3>
+        </div>
+        <button
+          class="button button-secondary"
+          type="button"
+          data-open-relations
+          ${state.relationsLoading ? "disabled" : ""}
+        >添加关联</button>
+      </div>
+      ${content}
+      ${state.relationError ? `<p class="form-error relation-error" data-relation-error role="alert">${escapeHtml(state.relationError)}</p>` : ""}
+    </section>
   `;
 }
 
@@ -806,7 +944,7 @@ export function renderDetail(
   if (editing && draft) {
     elements.detailPanel.innerHTML = `
       <div class="detail-scroll">
-        ${detailImage(meme)}
+        ${detailImage(meme, state)}
         <form id="edit-form" class="edit-form">
           <div class="detail-heading">
             <div>
@@ -847,7 +985,7 @@ export function renderDetail(
   } else {
     elements.detailPanel.innerHTML = `
       <div class="detail-scroll">
-        ${detailImage(meme)}
+        ${detailImage(meme, state)}
         <div class="detail-content">
           <div class="detail-heading">
             <div>
@@ -865,6 +1003,7 @@ export function renderDetail(
             <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>
             <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
           </dl>
+          ${relatedMemesMarkup(state)}
           ${aiAnalysisMarkup(state)}
           ${detailError(state.actionError)}
           <div class="detail-actions">
@@ -884,18 +1023,23 @@ export function renderDetail(
 export function openImageViewer(
   elements: AppElements,
   meme: MemeResponse,
+  index = 0,
 ): void {
+  const images = meme.images.length ? meme.images : [{ image_url: meme.image_url, width: meme.width, height: meme.height }];
+  const image = images[index] ?? images[0];
   elements.imageViewerImage.hidden = false;
   elements.imageViewerFrame.classList.remove("is-broken");
   elements.imageViewerError.hidden = true;
   elements.imageViewerError.textContent = "";
 
-  elements.imageViewerImage.src = meme.image_url;
+  elements.imageViewerImage.src = image.image_url;
   elements.imageViewerImage.alt = meme.title;
-  elements.imageViewerImage.width = meme.width;
-  elements.imageViewerImage.height = meme.height;
+  elements.imageViewerImage.width = image.width;
+  elements.imageViewerImage.height = image.height;
   elements.imageViewerTitle.textContent = meme.title;
-  elements.imageViewerLink.href = meme.image_url;
+  elements.imageViewerLink.href = image.image_url;
+  elements.imageViewerPrevious.disabled = index <= 0;
+  elements.imageViewerNext.disabled = index >= images.length - 1;
 
   if (!elements.imageViewerDialog.open) {
     elements.imageViewerDialog.showModal();
@@ -906,6 +1050,77 @@ export function closeImageViewer(elements: AppElements): void {
   if (elements.imageViewerDialog.open) {
     elements.imageViewerDialog.close();
   }
+  elements.imageViewerImage.removeAttribute("src");
+  elements.imageViewerImage.removeAttribute("width");
+  elements.imageViewerImage.removeAttribute("height");
+  elements.imageViewerImage.alt = "";
+  elements.imageViewerLink.removeAttribute("href");
+  elements.imageViewerTitle.textContent = "";
+  elements.imageViewerPrevious.disabled = true;
+  elements.imageViewerNext.disabled = true;
+  elements.imageViewerError.hidden = true;
+  elements.imageViewerError.textContent = "";
+  elements.imageViewerFrame.classList.remove("is-broken");
+}
+
+export function renderRelationDialog(
+  elements: AppElements,
+  state: AppState,
+): void {
+  const selectedId = state.selectedMeme?.id;
+  const relatedIds = new Set(state.relatedMemes.map((item) => item.id));
+  const query = state.relationQuery.trim().toLocaleLowerCase();
+  const candidates = state.memes.filter((item) => {
+    if (item.id === selectedId || relatedIds.has(item.id)) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return `${item.title}\n${item.description || ""}`
+      .toLocaleLowerCase()
+      .includes(query);
+  });
+
+  elements.relationSearch.value = state.relationQuery;
+  elements.relationSearch.disabled = state.relationsSaving;
+  elements.relationCandidates.innerHTML = candidates.length
+    ? candidates.map((item) => `
+      <label class="relation-choice">
+        <input
+          type="checkbox"
+          data-relation-choice="${item.id}"
+          ${state.selectedRelationIds.includes(item.id) ? "checked" : ""}
+          ${state.relationsSaving ? "disabled" : ""}
+        >
+        <span class="relation-thumbnail">
+          <img
+            src="${escapeHtml(item.thumbnail_url || item.image_url)}"
+            alt=""
+            width="${item.width}"
+            height="${item.height}"
+          >
+        </span>
+        <span>
+          <strong>${escapeHtml(item.title)}</strong>
+          <small>${escapeHtml(item.description || "暂无描述")}</small>
+        </span>
+      </label>
+    `).join("")
+    : `<p class="muted relation-empty">没有符合条件的可关联 Meme。</p>`;
+  elements.relationSave.disabled =
+    state.relationsSaving || state.selectedRelationIds.length === 0;
+  elements.relationSave.textContent = state.relationsSaving
+    ? "正在添加…"
+    : `添加所选${state.selectedRelationIds.length ? `（${state.selectedRelationIds.length}）` : ""}`;
+  for (const button of elements.relationDialog.querySelectorAll<HTMLButtonElement>(
+    "[data-close-relations]",
+  )) {
+    button.disabled = state.relationsSaving;
+  }
+  elements.relationError.hidden = !state.relationError;
+  elements.relationError.textContent = state.relationError ?? "";
+  bindImageFallbacks(elements.relationCandidates);
 }
 
 export function setUploadBusy(

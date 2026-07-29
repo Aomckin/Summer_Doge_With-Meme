@@ -5,6 +5,7 @@ import pytest
 
 from app.ai.client import (
     AIConfigurationError,
+    AIInputImage,
     AIInvalidResponseError,
     AIRequestTimeoutError,
     AITemplateCandidate,
@@ -39,6 +40,106 @@ def response_payload() -> dict[str, object]:
             }
         ],
     }
+
+
+def chat_response_payload() -> dict[str, object]:
+    return {
+        "model": "qwen3.6-flash",
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "description": "一组有序反应图。",
+                            "tags": [
+                                {"name": "反应图", "confidence": 0.9},
+                                {"name": "震惊", "confidence": 0.8},
+                            ],
+                            "template_id": None,
+                        },
+                        ensure_ascii=False,
+                    )
+                }
+            }
+        ],
+    }
+
+
+def test_responses_client_sends_complete_meme_images_in_position_order() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json=response_payload())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAIResponsesClient(
+            api_key="secret",
+            http_client=http_client,
+        )
+        client.analyze_images(
+            images=[
+                AIInputImage(b"second", "image/jpeg", 1),
+                AIInputImage(b"first", "image/png", 0),
+            ],
+            existing_tags=[],
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert "一组有序" in payload["input"][0]["content"][0]["text"]
+    content = payload["input"][1]["content"]
+    meme_parts = content[2:]
+    assert [part["type"] for part in meme_parts] == [
+        "input_text",
+        "input_image",
+        "input_text",
+        "input_image",
+    ]
+    assert "第 1 张" in meme_parts[0]["text"]
+    assert meme_parts[1]["image_url"].endswith("Zmlyc3Q=")
+    assert "第 2 张" in meme_parts[2]["text"]
+    assert meme_parts[3]["image_url"].endswith("c2Vjb25k")
+
+
+def test_chat_client_sends_complete_meme_images_in_position_order() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json=chat_response_payload())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAICompatibleChatClient(
+            api_key="secret",
+            model="qwen3.6-flash",
+            base_url="https://example.test/v1",
+            timeout_seconds=10,
+            http_client=http_client,
+        )
+        client.analyze_images(
+            images=[
+                AIInputImage(b"second", "image/jpeg", 1),
+                AIInputImage(b"first", "image/png", 0),
+            ],
+            existing_tags=[],
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert "一组有序" in payload["messages"][0]["content"]
+    content = payload["messages"][1]["content"]
+    meme_parts = content[2:]
+    assert [part["type"] for part in meme_parts] == [
+        "text",
+        "image_url",
+        "text",
+        "image_url",
+    ]
+    assert "第 1 张" in meme_parts[0]["text"]
+    assert meme_parts[1]["image_url"]["url"].endswith("Zmlyc3Q=")
+    assert "第 2 张" in meme_parts[2]["text"]
+    assert meme_parts[3]["image_url"]["url"].endswith("c2Vjb25k")
 
 
 def test_client_reads_environment_and_sends_structured_image_request() -> None:

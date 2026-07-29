@@ -226,6 +226,32 @@ export function deleteMeme(id: number): Promise<void> {
   return requestJson<void>(`/api/memes/${id}`, { method: "DELETE" });
 }
 
+export function appendMemeImage(id: number, file: File): Promise<MemeResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return requestJson<MemeResponse>(`/api/memes/${id}/images`, { method: "POST", body });
+}
+
+export function reorderMemeImages(id: number, imageIds: number[]): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(`/api/memes/${id}/images/order`, jsonRequest("PATCH", { image_ids: imageIds }));
+}
+
+export function deleteMemeImage(id: number, imageId: number): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(`/api/memes/${id}/images/${imageId}`, { method: "DELETE" });
+}
+
+export function listMemeRelations(id: number): Promise<MemeResponse[]> {
+  return requestJson<MemeResponse[]>(`/api/memes/${id}/relations`);
+}
+
+export function addMemeRelations(id: number, memeIds: number[]): Promise<MemeResponse[]> {
+  return requestJson<MemeResponse[]>(`/api/memes/${id}/relations`, jsonRequest("POST", { meme_ids: memeIds }));
+}
+
+export function deleteMemeRelation(id: number, relatedId: number): Promise<void> {
+  return requestJson<void>(`/api/memes/${id}/relations/${relatedId}`, { method: "DELETE" });
+}
+
 export function analyzeMeme(id: number): Promise<AIAnalysisResponse> {
   return requestJson<AIAnalysisResponse>(`/api/memes/${id}/analyze`, {
     method: "POST",

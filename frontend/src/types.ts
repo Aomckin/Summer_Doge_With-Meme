@@ -47,6 +47,23 @@ export interface MemeResponse {
   updated_at: string;
   tags: TagResponse[];
   template: TemplateResponse | null;
+  images: MemeImageResponse[];
+  image_count: number;
+}
+
+export interface MemeImageResponse {
+  id: number;
+  original_filename: string;
+  stored_filename: string;
+  image_url: string;
+  thumbnail_url: string | null;
+  mime_type: string;
+  file_size: number;
+  width: number;
+  height: number;
+  file_hash: string;
+  position: number;
+  created_at: string;
 }
 
 export interface MemeUpdatePayload {
@@ -186,6 +203,15 @@ export interface ListMemesOptions {
 }
 
 export interface AppState {
+  relatedMemes: MemeResponse[];
+  relationQuery: string;
+  selectedRelationIds: number[];
+  relationsLoading: boolean;
+  relationsSaving: boolean;
+  relationRemovingId: number | null;
+  relationError: string | null;
+  imageOperation: "append" | "reorder" | number | null;
+  imageError: string | null;
   memes: MemeResponse[];
   availableTags: TagResponse[];
   availableTemplates: TemplateResponse[];

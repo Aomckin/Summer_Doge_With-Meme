@@ -1,7 +1,8 @@
 # 数据库基础设施层：创建 Engine、Session，并管理每次请求的数据库会话。
 from collections.abc import Generator
+from sqlite3 import Connection as SQLiteConnection
 
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import DATABASE_URL, DATA_DIR
@@ -19,6 +20,21 @@ engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+@event.listens_for(Engine, "connect")
+def enable_sqlite_foreign_keys(
+    dbapi_connection: object,
+    _connection_record: object,
+) -> None:
+    """Make SQLite enforce the foreign keys declared by the ORM models."""
+    if not isinstance(dbapi_connection, SQLiteConnection):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
+
 # 所有 ORM 模型都继承同一个 Base，它保存“有哪些表、有哪些字段”的元数据。
 class Base(DeclarativeBase):
     pass
@@ -30,6 +46,8 @@ def create_tables() -> None:
     from app.models import ai_analysis  # noqa: F401
     from app.models import ai_settings  # noqa: F401
     from app.models import meme  # noqa: F401
+    from app.models import meme_image  # noqa: F401
+    from app.models import meme_relation  # noqa: F401
     from app.models import tag  # noqa: F401
     from app.models import template  # noqa: F401
 
@@ -39,7 +57,7 @@ def create_tables() -> None:
 
 
 def run_startup_migrations(bind: Engine = engine) -> None:
-    """Add v0.3.3 columns to existing SQLite databases without rebuilding tables."""
+    """Apply additive SQLite upgrades through v0.4 without rebuilding tables."""
     if bind.dialect.name != "sqlite":
         return
 
@@ -72,6 +90,19 @@ def run_startup_migrations(bind: Engine = engine) -> None:
             }
             if column_name not in columns:
                 connection.execute(text(statement))
+        if inspector.has_table("memes") and inspector.has_table("meme_images"):
+            connection.execute(text("""
+                INSERT INTO meme_images (
+                    meme_id, original_filename, stored_filename, file_path, thumbnail_path,
+                    mime_type, file_size, width, height, file_hash, position, created_at
+                )
+                SELECT m.id, m.original_filename, m.stored_filename, m.file_path, m.thumbnail_path,
+                    m.mime_type, m.file_size, m.width, m.height, m.file_hash, 0, m.created_at
+                FROM memes AS m
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM meme_images AS i WHERE i.meme_id = m.id
+                )
+            """))
 
 
 def get_db() -> Generator[Session, None, None]:

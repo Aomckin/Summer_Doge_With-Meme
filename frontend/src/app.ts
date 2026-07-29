@@ -26,6 +26,8 @@ import {
   uploadTemplateReferenceImage,
   updateMeme,
   uploadMeme,
+  appendMemeImage, deleteMemeImage, reorderMemeImages,
+  listMemeRelations, addMemeRelations, deleteMemeRelation,
 } from "./api";
 import type {
   AIAnalysisConfirmPayload,
@@ -53,6 +55,7 @@ import {
   renderDetail,
   renderLibrary,
   renderOperationError,
+  renderRelationDialog,
   renderTags,
   renderTemplateManager,
   renderToolbar,
@@ -81,6 +84,12 @@ export interface MemeApi extends AISettingsApi {
     payload: MemeUpdatePayload,
   ): Promise<MemeResponse>;
   deleteMeme(id: number): Promise<void>;
+  appendMemeImage(id: number, file: File): Promise<MemeResponse>;
+  deleteMemeImage(id: number, imageId: number): Promise<MemeResponse>;
+  reorderMemeImages(id: number, imageIds: number[]): Promise<MemeResponse>;
+  listMemeRelations(id: number): Promise<MemeResponse[]>;
+  addMemeRelations(id: number, ids: number[]): Promise<MemeResponse[]>;
+  deleteMemeRelation(id: number, relatedId: number): Promise<void>;
   analyzeMeme(id: number): Promise<AIAnalysisResponse>;
   confirmAIAnalysis(
     memeId: number,
@@ -102,6 +111,8 @@ const defaultApi: MemeApi = {
   uploadMeme,
   updateMeme,
   deleteMeme,
+  appendMemeImage, deleteMemeImage, reorderMemeImages,
+  listMemeRelations, addMemeRelations, deleteMemeRelation,
   analyzeMeme,
   confirmAIAnalysis,
   listAIProviderPresets,
@@ -119,6 +130,15 @@ const defaultApi: MemeApi = {
 
 function initialState(): AppState {
   return {
+    relatedMemes: [],
+    relationQuery: "",
+    selectedRelationIds: [],
+    relationsLoading: false,
+    relationsSaving: false,
+    relationRemovingId: null,
+    relationError: null,
+    imageOperation: null,
+    imageError: null,
     memes: [],
     availableTags: [],
     availableTemplates: [],
@@ -183,6 +203,10 @@ export class MemeVaultApp {
   private templateEditingId: number | null = null;
   private templateBusy = false;
   private templateError: string | null = null;
+  private viewerIndex = 0;
+  private viewerMeme: MemeResponse | null = null;
+  private draggedImageId: number | null = null;
+  private relationRemovalToken: symbol | null = null;
   private readonly settings: AISettingsController;
 
   constructor(
@@ -329,7 +353,9 @@ export class MemeVaultApp {
       if (target.closest("[data-open-viewer]")) {
         const meme = this.state.selectedMeme;
         if (meme) {
-          openImageViewer(this.elements, meme);
+          this.viewerMeme = meme;
+          this.viewerIndex = Number(target.closest<HTMLElement>("[data-image-index]")?.dataset.imageIndex ?? 0);
+          openImageViewer(this.elements, meme, this.viewerIndex);
         }
       } else if (target.closest("[data-edit-meme]")) {
         this.beginEdit();
@@ -341,7 +367,61 @@ export class MemeVaultApp {
         void this.analyzeSelected();
       } else if (target.closest("[data-confirm-ai]")) {
         void this.confirmAnalysis();
+      } else if (target.closest("[data-related-meme]")) {
+        const id = Number(target.closest<HTMLElement>("[data-related-meme]")?.dataset.relatedMeme);
+        const meme = this.state.relatedMemes.find((item) => item.id === id);
+        if (meme) this.selectMeme(meme);
+      } else if (target.closest("[data-remove-relation]")) {
+        const id = Number(target.closest<HTMLElement>("[data-remove-relation]")?.dataset.removeRelation);
+        void this.removeRelation(id);
+      } else if (target.closest("[data-open-relations]")) {
+        this.openRelationDialog();
+      } else if (target.closest("[data-delete-image]")) {
+        const imageId = Number(target.closest<HTMLElement>("[data-delete-image]")?.dataset.deleteImage);
+        void this.deleteSelectedImage(imageId);
       }
+    });
+    this.elements.detailPanel.addEventListener("change", (event) => {
+      const target = event.target as HTMLInputElement;
+      if (!target.matches("[data-append-image]") || !target.files?.[0] || !this.state.selectedMeme) return;
+      void this.appendSelectedImage(target.files[0]);
+    });
+    this.elements.detailPanel.addEventListener("dragstart", (event) => {
+      const card = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      if (card && this.state.imageOperation === null) {
+        this.draggedImageId = Number(card.dataset.imageId);
+        card.classList.add("is-dragging");
+      }
+    });
+    this.elements.detailPanel.addEventListener("dragover", (event) => {
+      const card = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      if (card && this.draggedImageId !== null) {
+        event.preventDefault();
+        for (const item of this.elements.detailPanel.querySelectorAll(".is-drag-over")) {
+          item.classList.remove("is-drag-over");
+        }
+        card.classList.add("is-drag-over");
+      }
+    });
+    this.elements.detailPanel.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const target = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      const meme = this.state.selectedMeme;
+      if (!target || !meme || this.draggedImageId === null) {
+        this.clearImageDragState();
+        return;
+      }
+      const targetId = Number(target.dataset.imageId);
+      const ids = meme.images.map((image) => image.id);
+      const from = ids.indexOf(this.draggedImageId);
+      const to = ids.indexOf(targetId);
+      this.clearImageDragState();
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      void this.reorderSelectedImages(ids);
+    });
+    this.elements.detailPanel.addEventListener("dragend", () => {
+      this.clearImageDragState();
     });
     this.elements.detailPanel.addEventListener("change", (event) => {
       const target = event.target;
@@ -382,14 +462,65 @@ export class MemeVaultApp {
       void this.submitEdit(form);
     });
 
+    for (const button of this.elements.relationDialog.querySelectorAll(
+      "[data-close-relations]",
+    )) {
+      button.addEventListener("click", () => this.closeRelationDialog());
+    }
+    this.elements.relationDialog.addEventListener("click", (event) => {
+      if (event.target === this.elements.relationDialog) {
+        this.closeRelationDialog();
+      }
+    });
+    this.elements.relationSearch.addEventListener("input", () => {
+      this.state.relationQuery = this.elements.relationSearch.value;
+      renderRelationDialog(this.elements, this.state);
+    });
+    this.elements.relationCandidates.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.matches("[data-relation-choice]")) {
+        return;
+      }
+      const id = Number(target.dataset.relationChoice);
+      this.state.selectedRelationIds = target.checked
+        ? [...new Set([...this.state.selectedRelationIds, id])]
+        : this.state.selectedRelationIds.filter((item) => item !== id);
+      renderRelationDialog(this.elements, this.state);
+    });
+    this.elements.relationSave.addEventListener("click", () => {
+      void this.saveRelations();
+    });
+
+    const closeViewer = () => {
+      closeImageViewer(this.elements);
+      this.viewerMeme = null;
+      this.viewerIndex = 0;
+    };
     this.elements.imageViewerDialog.addEventListener("click", (event) => {
       if (event.target === this.elements.imageViewerDialog) {
-        closeImageViewer(this.elements);
+        closeViewer();
       }
     });
     this.elements.imageViewerDialog
       .querySelector("[data-close-viewer]")
-      ?.addEventListener("click", () => closeImageViewer(this.elements));
+      ?.addEventListener("click", closeViewer);
+    this.elements.imageViewerDialog.addEventListener("close", () => {
+      this.viewerMeme = null;
+      this.viewerIndex = 0;
+      closeImageViewer(this.elements);
+    });
+    const moveViewer = (delta: number) => {
+      const meme = this.viewerMeme;
+      const count = meme?.images.length || 1;
+      this.viewerIndex = Math.max(0, Math.min(count - 1, this.viewerIndex + delta));
+      if (meme) openImageViewer(this.elements, meme, this.viewerIndex);
+    };
+    this.elements.imageViewerPrevious.addEventListener("click", () => moveViewer(-1));
+    this.elements.imageViewerNext.addEventListener("click", () => moveViewer(1));
+    document.addEventListener("keydown", (event) => {
+      if (this.elements.imageViewerDialog.open && event.key === "ArrowLeft") moveViewer(-1);
+      if (this.elements.imageViewerDialog.open && event.key === "ArrowRight") moveViewer(1);
+    });
     this.elements.imageViewerImage.addEventListener("error", () => {
       this.elements.imageViewerImage.hidden = true;
       this.elements.imageViewerFrame.classList.add("is-broken");
@@ -410,6 +541,7 @@ export class MemeVaultApp {
       this.editing,
       this.editDraft,
     );
+    renderRelationDialog(this.elements, this.state);
     setUploadBusy(
       this.elements,
       this.state.uploading,
@@ -673,11 +805,200 @@ export class MemeVaultApp {
     this.state.selectedMeme = meme;
     this.state.actionError = null;
     this.state.operationError = null;
+    this.state.imageError = null;
+    this.state.relatedMemes = [];
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+    this.state.relationsLoading = true;
+    this.state.relationRemovingId = null;
+    this.relationRemovalToken = null;
     this.editing = false;
     this.editDraft = null;
     this.resetAIAnalysis();
     renderLibrary(this.elements, this.state);
     renderDetail(this.elements, this.state, false, null);
+    void this.loadRelations(meme.id);
+  }
+
+  private clearImageDragState(): void {
+    this.draggedImageId = null;
+    for (const item of this.elements.detailPanel.querySelectorAll(
+      ".is-dragging, .is-drag-over",
+    )) {
+      item.classList.remove("is-dragging", "is-drag-over");
+    }
+  }
+
+  private async appendSelectedImage(file: File): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = "append";
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.appendMemeImage(meme.id, file);
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async deleteSelectedImage(imageId: number): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = imageId;
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.deleteMemeImage(meme.id, imageId);
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async reorderSelectedImages(imageIds: number[]): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = "reorder";
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.reorderMemeImages(meme.id, imageIds);
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async loadRelations(memeId: number): Promise<void> {
+    try {
+      const relations = await this.api.listMemeRelations(memeId);
+      if (this.state.selectedMeme?.id !== memeId) {
+        return;
+      }
+      this.state.relatedMemes = relations;
+    } catch (error) {
+      if (this.state.selectedMeme?.id !== memeId) {
+        return;
+      }
+      this.state.relatedMemes = [];
+      this.state.relationError = readableError(error);
+    } finally {
+      if (this.state.selectedMeme?.id === memeId) {
+        this.state.relationsLoading = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
+  }
+
+  private openRelationDialog(): void {
+    if (!this.state.selectedMeme || this.state.relationsLoading) {
+      return;
+    }
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+    renderRelationDialog(this.elements, this.state);
+    this.elements.relationDialog.showModal();
+    this.elements.relationSearch.focus();
+  }
+
+  private closeRelationDialog(): void {
+    if (this.state.relationsSaving) {
+      return;
+    }
+    if (this.elements.relationDialog.open) {
+      this.elements.relationDialog.close();
+    }
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+  }
+
+  private async saveRelations(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const ids = [...this.state.selectedRelationIds];
+    if (!meme || !ids.length || this.state.relationsSaving) {
+      return;
+    }
+    this.state.relationsSaving = true;
+    this.state.relationError = null;
+    renderRelationDialog(this.elements, this.state);
+    try {
+      const relations = await this.api.addMemeRelations(meme.id, ids);
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.state.relatedMemes = relations;
+      this.state.selectedRelationIds = [];
+      this.state.relationQuery = "";
+      this.elements.relationDialog.close();
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relationError = readableError(error);
+      }
+    } finally {
+      this.state.relationsSaving = false;
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      renderRelationDialog(this.elements, this.state);
+    }
+  }
+
+  private async removeRelation(relatedId: number): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.relationRemovingId !== null) {
+      return;
+    }
+    const removalToken = Symbol("relation-removal");
+    this.relationRemovalToken = removalToken;
+    this.state.relationRemovingId = relatedId;
+    this.state.relationError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      await this.api.deleteMemeRelation(meme.id, relatedId);
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relatedMemes = this.state.relatedMemes.filter(
+          (item) => item.id !== relatedId,
+        );
+      }
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relationError = readableError(error);
+      }
+    } finally {
+      if (this.relationRemovalToken !== removalToken) {
+        return;
+      }
+      this.relationRemovalToken = null;
+      this.state.relationRemovingId = null;
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
   }
 
   private async randomize(): Promise<void> {

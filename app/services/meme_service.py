@@ -2,15 +2,19 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from math import isfinite
 
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.client import (
     AIClient,
+    AIInputImage,
     AIImageResult,
     AIInvalidResponseError,
     AITemplateCandidate,
 )
 from app.models.meme import Meme
+from app.models.meme_image import MemeImage
+from app.models.meme_relation import MemeRelation
 from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.repositories.meme_repository import MemeRepository
@@ -99,6 +103,20 @@ class MemeService:
             source=source,
             template_id=template_id,
         )
+        meme.images.append(
+            MemeImage(
+                original_filename=stored.original_filename,
+                stored_filename=stored.stored_filename,
+                file_path=stored.file_path.name,
+                thumbnail_path=stored.thumbnail_path.name,
+                mime_type=stored.mime_type,
+                file_size=stored.file_size,
+                width=stored.width,
+                height=stored.height,
+                file_hash=stored.file_hash,
+                position=0,
+            )
+        )
 
         try:
             self.repository.create(meme)
@@ -112,6 +130,127 @@ class MemeService:
             raise
 
         return meme
+
+    def append_image(self, meme_id: int, original_filename: str, content: bytes) -> Meme:
+        meme = self.get_meme(meme_id)
+        stored = self.storage.save(original_filename, content)
+        image = MemeImage(
+            meme_id=meme.id,
+            original_filename=stored.original_filename,
+            stored_filename=stored.stored_filename,
+            file_path=stored.file_path.name,
+            thumbnail_path=stored.thumbnail_path.name,
+            mime_type=stored.mime_type,
+            file_size=stored.file_size,
+            width=stored.width,
+            height=stored.height,
+            file_hash=stored.file_hash,
+            position=len(meme.images),
+        )
+        try:
+            self.session.add(image)
+            self.session.flush()
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            self.storage.delete(stored.file_path, stored.thumbnail_path)
+            raise
+        self.session.refresh(meme)
+        return meme
+
+    def reorder_images(self, meme_id: int, image_ids: Sequence[int]) -> Meme:
+        meme = self.get_meme(meme_id)
+        current = {image.id: image for image in meme.images}
+        if len(image_ids) != len(current) or set(image_ids) != set(current):
+            raise ValueError("Image order must contain every meme image exactly once")
+        try:
+            # SQLite 唯一约束不是延迟检查；先移到临时负位置才能安全交换。
+            for position, image in enumerate(meme.images, start=1):
+                image.position = -position
+            self.session.flush()
+            for position, image_id in enumerate(image_ids):
+                current[image_id].position = position
+            self.session.flush()
+            self.session.refresh(meme)
+            self._sync_cover(meme)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return meme
+
+    def delete_image(self, meme_id: int, image_id: int) -> Meme:
+        meme = self.get_meme(meme_id)
+        image = next((item for item in meme.images if item.id == image_id), None)
+        if image is None:
+            raise MemeNotFoundError(f"Image {image_id} does not exist for Meme {meme_id}")
+        if len(meme.images) == 1:
+            raise ValueError("Cannot delete the last image of a Meme")
+        file_path, thumbnail_path = image.file_path, image.thumbnail_path
+        try:
+            meme.images.remove(image)
+            self.session.flush()
+            remaining = sorted(meme.images, key=lambda item: item.position)
+            # Reorders may leave primary-key order different from position order.
+            # Move every survivor out of the unique positive range before compacting.
+            for temporary_position, item in enumerate(remaining, start=1):
+                item.position = -temporary_position
+            self.session.flush()
+            for position, item in enumerate(remaining):
+                item.position = position
+            self.session.flush()
+            self._sync_cover(meme)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        self.storage.delete(file_path, thumbnail_path)
+        return meme
+
+    def list_relations(self, meme_id: int) -> list[Meme]:
+        self.get_meme(meme_id)
+        edges = self.session.scalars(
+            select(MemeRelation).where(or_(MemeRelation.meme_a_id == meme_id, MemeRelation.meme_b_id == meme_id))
+        ).all()
+        ids = [edge.meme_b_id if edge.meme_a_id == meme_id else edge.meme_a_id for edge in edges]
+        return list(self.session.scalars(select(Meme).where(Meme.id.in_(ids)).order_by(Meme.id))) if ids else []
+
+    def add_relations(self, meme_id: int, related_ids: Sequence[int]) -> list[Meme]:
+        self.get_meme(meme_id)
+        ids = list(dict.fromkeys(item for item in related_ids if item != meme_id))
+        if any(item == meme_id for item in related_ids):
+            raise ValueError("A Meme cannot relate to itself")
+        targets = list(self.session.scalars(select(Meme).where(Meme.id.in_(ids)))) if ids else []
+        if len(targets) != len(ids):
+            raise ValueError("Every related Meme must exist")
+        existing = {(edge.meme_a_id, edge.meme_b_id) for edge in self.session.scalars(select(MemeRelation).where(or_(MemeRelation.meme_a_id == meme_id, MemeRelation.meme_b_id == meme_id)))}
+        try:
+            for other_id in ids:
+                pair = (min(meme_id, other_id), max(meme_id, other_id))
+                if pair not in existing:
+                    self.session.add(MemeRelation(meme_a_id=pair[0], meme_b_id=pair[1]))
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return self.list_relations(meme_id)
+
+    def remove_relation(self, meme_id: int, related_id: int) -> None:
+        self.get_meme(meme_id)
+        pair = (min(meme_id, related_id), max(meme_id, related_id))
+        edge = self.session.scalar(select(MemeRelation).where(MemeRelation.meme_a_id == pair[0], MemeRelation.meme_b_id == pair[1]))
+        if edge is None:
+            raise MemeNotFoundError(f"Relation between Meme {meme_id} and {related_id} does not exist")
+        self.session.delete(edge)
+        self.session.commit()
+
+    def _sync_cover(self, meme: Meme) -> None:
+        cover = min(meme.images, key=lambda item: item.position)
+        for field in (
+            "original_filename", "stored_filename", "file_path", "thumbnail_path",
+            "mime_type", "file_size", "width", "height", "file_hash",
+        ):
+            setattr(meme, field, getattr(cover, field))
 
     def get_meme(self, meme_id: int) -> Meme:
         meme = self.repository.get_by_id(meme_id)
@@ -207,14 +346,12 @@ class MemeService:
             )
             for template in templates
         ]
-        result = ai_client.analyze_image(
-            image_bytes=self.storage.read_original(meme.file_path),
-            mime_type=meme.mime_type,
-            existing_tags=[
-                tag.name for tag in self.tag_repository.list()[:200]
-            ],
-            existing_templates=candidates,
-        )
+        inputs = [AIInputImage(self.storage.read_original(image.file_path), image.mime_type, image.position) for image in meme.images]
+        kwargs = {"existing_tags": [tag.name for tag in self.tag_repository.list()[:200]], "existing_templates": candidates}
+        if hasattr(ai_client, "analyze_images"):
+            result = ai_client.analyze_images(images=inputs, **kwargs)
+        else:  # 兼容 v0.3.3 测试替身；正式客户端始终走完整有序输入。
+            result = ai_client.analyze_image(image_bytes=inputs[0].image_bytes, mime_type=inputs[0].mime_type, **kwargs)
         candidate_ids = {candidate.id for candidate in candidates}
         if result.template_id is not None and result.template_id not in candidate_ids:
             raise AIInvalidResponseError(
@@ -309,10 +446,17 @@ class MemeService:
         if meme is None:
             raise MemeNotFoundError(f"Meme {meme_id} does not exist")
         # ORM 对象删除后不应再依赖它取路径，所以提前保存普通字符串。
-        file_path = meme.file_path
-        thumbnail_path = meme.thumbnail_path
+        stored_files = [
+            (image.file_path, image.thumbnail_path)
+            for image in meme.images
+        ] or [(meme.file_path, meme.thumbnail_path)]
 
         try:
+            self.session.execute(
+                delete(MemeRelation).where(
+                    or_(MemeRelation.meme_a_id == meme_id, MemeRelation.meme_b_id == meme_id)
+                )
+            )
             self.repository.delete(meme)
             # 先确认数据库删除成功，再清理磁盘文件。
             self.session.commit()
@@ -320,11 +464,19 @@ class MemeService:
             self.session.rollback()
             raise
 
-        self.storage.delete(file_path, thumbnail_path)
+        for file_path, thumbnail_path in stored_files:
+            self.storage.delete(file_path, thumbnail_path)
 
     def _ensure_files_exist(self, meme: Meme) -> None:
         # 集中维护“数据库记录与磁盘文件必须对应”的完整性规则。
-        if not self.storage.exists(meme.file_path, meme.thumbnail_path):
+        image_references = [
+            (image.file_path, image.thumbnail_path)
+            for image in meme.images
+        ] or [(meme.file_path, meme.thumbnail_path)]
+        if any(
+            not self.storage.exists(file_path, thumbnail_path)
+            for file_path, thumbnail_path in image_references
+        ):
             raise MemeFileMissingError(f"Image file is missing for Meme {meme.id}")
 
     def _normalize_ai_suggestions(

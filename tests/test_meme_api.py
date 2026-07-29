@@ -437,3 +437,258 @@ def test_unknown_meme_returns_not_found(api_context) -> None:
 
     assert response.status_code == 404
     assert "999" in response.json()["detail"]
+
+
+def upload_api_meme(app, title: str, color: str) -> dict[str, object]:
+    response = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={
+            "file": (
+                f"{title}.png",
+                make_image_bytes(color),
+                "image/png",
+            )
+        },
+        data={"title": title},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_composite_image_api_crud_order_and_cover_projection(api_context) -> None:
+    app, _, storage = api_context
+    first = upload_api_meme(app, "第一张", "red")
+    meme_id = first["id"]
+
+    appended = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/images",
+        files={"file": ("second.png", make_image_bytes("blue"), "image/png")},
+    )
+
+    assert appended.status_code == 200
+    body = appended.json()
+    assert body["image_count"] == 2
+    assert [image["position"] for image in body["images"]] == [0, 1]
+    assert body["image_url"] == body["images"][0]["image_url"]
+    assert body["thumbnail_url"] == body["images"][0]["thumbnail_url"]
+
+    duplicate = request(
+        app,
+        "POST",
+        f"/api/memes/{meme_id}/images",
+        files={"file": ("copy.png", make_image_bytes("blue"), "image/png")},
+    )
+    assert duplicate.status_code == 409
+    assert len(list(storage.images_dir.iterdir())) == 2
+    assert len(list(storage.thumbnails_dir.iterdir())) == 2
+
+    image_ids = [image["id"] for image in body["images"]]
+    invalid_order = request(
+        app,
+        "PATCH",
+        f"/api/memes/{meme_id}/images/order",
+        json={"image_ids": [image_ids[0], image_ids[0]]},
+    )
+    assert invalid_order.status_code == 422
+
+    reordered = request(
+        app,
+        "PATCH",
+        f"/api/memes/{meme_id}/images/order",
+        json={"image_ids": list(reversed(image_ids))},
+    )
+    assert reordered.status_code == 200
+    reordered_body = reordered.json()
+    assert [image["id"] for image in reordered_body["images"]] == list(
+        reversed(image_ids)
+    )
+    assert reordered_body["image_url"] == reordered_body["images"][0]["image_url"]
+
+    deleted = request(
+        app,
+        "DELETE",
+        f"/api/memes/{meme_id}/images/{image_ids[0]}",
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["image_count"] == 1
+    assert deleted.json()["images"][0]["position"] == 0
+
+    final_delete = request(
+        app,
+        "DELETE",
+        f"/api/memes/{meme_id}/images/{image_ids[1]}",
+    )
+    assert final_delete.status_code == 422
+    assert "last image" in final_delete.json()["detail"]
+
+
+def test_meme_response_uses_first_image_as_authoritative_cover(api_context) -> None:
+    app, session, _ = api_context
+    created = upload_api_meme(app, "封面权威来源", "red")
+    meme = session.get(Meme, created["id"])
+    assert meme is not None
+    meme.original_filename = "drift.png"
+    meme.stored_filename = "drift.png"
+    meme.file_path = "drift.png"
+    meme.thumbnail_path = "drift-thumb.png"
+    meme.mime_type = "image/gif"
+    meme.file_size = 1
+    meme.width = 1
+    meme.height = 1
+    meme.file_hash = "drift-hash"
+    session.commit()
+
+    response = request(app, "GET", f"/api/memes/{created['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    cover = body["images"][0]
+    assert body["original_filename"] == cover["original_filename"]
+    assert body["stored_filename"] == cover["stored_filename"]
+    assert body["image_url"] == cover["image_url"]
+    assert body["thumbnail_url"] == cover["thumbnail_url"]
+    assert body["mime_type"] == cover["mime_type"]
+    assert body["file_size"] == cover["file_size"]
+    assert body["width"] == cover["width"]
+    assert body["height"] == cover["height"]
+    assert body["file_hash"] == cover["file_hash"]
+
+
+def test_composite_endpoints_report_missing_group_file_as_gone(
+    api_context,
+) -> None:
+    app, _, storage = api_context
+    primary = upload_api_meme(app, "缺少次图", "red")
+    peer = upload_api_meme(app, "关联对象", "green")
+    appended = request(
+        app,
+        "POST",
+        f"/api/memes/{primary['id']}/images",
+        files={"file": ("second.png", make_image_bytes("blue"), "image/png")},
+    ).json()
+    relation = request(
+        app,
+        "POST",
+        f"/api/memes/{primary['id']}/relations",
+        json={"meme_ids": [peer["id"]]},
+    )
+    assert relation.status_code == 200
+    missing = appended["images"][1]
+    storage.delete(missing["image_url"], missing["thumbnail_url"])
+
+    responses = [
+        request(
+            app,
+            "POST",
+            f"/api/memes/{primary['id']}/images",
+            files={
+                "file": ("third.png", make_image_bytes("purple"), "image/png")
+            },
+        ),
+        request(
+            app,
+            "PATCH",
+            f"/api/memes/{primary['id']}/images/order",
+            json={
+                "image_ids": [image["id"] for image in appended["images"]]
+            },
+        ),
+        request(
+            app,
+            "DELETE",
+            f"/api/memes/{primary['id']}/images/{appended['images'][0]['id']}",
+        ),
+        request(app, "GET", f"/api/memes/{primary['id']}/relations"),
+        request(
+            app,
+            "POST",
+            f"/api/memes/{primary['id']}/relations",
+            json={"meme_ids": [peer["id"]]},
+        ),
+        request(
+            app,
+            "DELETE",
+            f"/api/memes/{primary['id']}/relations/{peer['id']}",
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [410] * len(
+        responses
+    )
+
+
+def test_relation_api_is_bidirectional_non_transitive_and_removable(
+    api_context,
+) -> None:
+    app, _, _ = api_context
+    first = upload_api_meme(app, "甲", "red")
+    second = upload_api_meme(app, "乙", "blue")
+    third = upload_api_meme(app, "丙", "green")
+
+    added_first = request(
+        app,
+        "POST",
+        f"/api/memes/{first['id']}/relations",
+        json={"meme_ids": [second["id"], second["id"]]},
+    )
+    added_second = request(
+        app,
+        "POST",
+        f"/api/memes/{second['id']}/relations",
+        json={"meme_ids": [third["id"]]},
+    )
+
+    assert added_first.status_code == 200
+    assert [item["id"] for item in added_first.json()] == [second["id"]]
+    assert {item["id"] for item in added_second.json()} == {
+        first["id"],
+        third["id"],
+    }
+    assert [
+        item["id"]
+        for item in request(
+            app,
+            "GET",
+            f"/api/memes/{first['id']}/relations",
+        ).json()
+    ] == [second["id"]]
+    assert [
+        item["id"]
+        for item in request(
+            app,
+            "GET",
+            f"/api/memes/{third['id']}/relations",
+        ).json()
+    ] == [second["id"]]
+
+    invalid_batch = request(
+        app,
+        "POST",
+        f"/api/memes/{first['id']}/relations",
+        json={"meme_ids": [third["id"], 999]},
+    )
+    assert invalid_batch.status_code == 422
+    assert [
+        item["id"]
+        for item in request(
+            app,
+            "GET",
+            f"/api/memes/{first['id']}/relations",
+        ).json()
+    ] == [second["id"]]
+
+    removed = request(
+        app,
+        "DELETE",
+        f"/api/memes/{second['id']}/relations/{first['id']}",
+    )
+    assert removed.status_code == 204
+    assert request(
+        app,
+        "GET",
+        f"/api/memes/{first['id']}/relations",
+    ).json() == []

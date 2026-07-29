@@ -1,6 +1,8 @@
-# Meme Vault
+# Meme Vault v0.4.0
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.3.3，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供模板管理与归类、需要用户确认的 AI 图片描述/标签/已有模板建议、网页内的模型厂商和模型管理，以及响应式瀑布流画廊；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
+
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.4.0，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组描述/标签/已有模板建议、网页内模型管理，以及响应式瀑布流画廊；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -44,7 +46,7 @@ npm.cmd --prefix frontend install
 分别在两个终端启动后端与 Vite 开发服务器：
 
 ```powershell
-python -m uvicorn app.main:app --reload --port 8002
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ```powershell
@@ -101,7 +103,10 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 
 - 顶部工具栏提供标题/描述搜索、API 设置、模板管理、随机抽取和上传入口。
 - 左侧资料库按网格展示 Meme，并支持多标签筛选和分批加载。
-- 右侧详情面板提供原图、元数据、编辑与删除操作。
+- 瀑布流卡片只显示首图封面；多图 Meme 会显示图片数量角标。
+- 右侧详情面板按顺序纵向展示完整图片组，并提供追加、删除和拖拽排序；最后一张图片不能删除，排序后的第一张自动成为封面。
+- 原图查看器可从任意图片打开，并通过按钮或左右方向键在当前图片组内切换。
+- “相关 Meme”只显示手动建立的直接弱关联；添加对话框支持按标题/描述搜索、多选批量添加和单条移除。
 - 搜索输入使用 300ms 防抖；多标签沿用后端的“同时包含全部标签”语义。
 - 上传和编辑表单可以选择已有模板；编辑时选择“无模板”会通过 JSON `null` 清除归类。
 - 列表、上传、随机、保存和删除均提供独立的加载或错误反馈。
@@ -110,7 +115,7 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 
 ## 模板管理与归类
 
-点击顶部“模板管理”可查看、创建、编辑和删除模板。模板仅包含名称与可选描述，不保存模板图片。上传或编辑 Meme 时可以选择一个已有模板；详情页显示当前模板或“未归类”。
+点击顶部“模板管理”可查看、创建、编辑和删除模板。模板包含名称、可选描述和一张可选参考图；配置独立的图像向量模型后，参考图会用于筛选视觉候选。上传或编辑 Meme 时可以选择一个已有模板；详情页显示当前模板或“未归类”。
 
 删除模板不会删除 Meme：相关 `Meme.template_id` 会在同一事务中清空，历史 AI 分析保留，但对应的 `suggested_template_id` 也会清空，避免悬空引用。
 
@@ -150,7 +155,7 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 分析分为两个阶段：
 
-1. `POST /api/memes/{meme_id}/analyze` 读取原图、已有标签和最多 200 个已有模板，生成描述、标签建议以及一个已有 `template_id` 或 `null`，但不修改 Meme。
+1. `POST /api/memes/{meme_id}/analyze` 按 position 顺序读取 Meme 的全部原图，在一次请求中把完整图片组、已有标签和模板候选交给模型，只生成一份组级描述、标签建议以及一个已有 `template_id` 或 `null`，但不修改 Meme。
 2. 服务端再次校验 AI 返回的模板 ID 必须属于本次候选集合，并把它保存为分析快照。
 3. `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm` 在一个事务中追加用户选中的标签，并可采用描述和用户最终选择的模板。
 
@@ -160,9 +165,9 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
 
-从 v0.3.2 的旧 SQLite 数据库启动时，基础设施层会幂等检测并添加 `memes.template_id` 与 `meme_ai_analyses.suggested_template_id`。迁移不删除或重建已有表，不会丢失 Meme、标签、AI 分析或模型设置；非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
+从旧 SQLite 数据库启动时，基础设施层会幂等补齐历史版本字段，并为每条尚无 `meme_images` 记录的旧 Meme 回填一张 position=0 的首图。迁移只复制已有图片元数据，不移动或重写磁盘文件；重复启动不会重复回填，也不会删除或重建已有表。非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
 
 数据库操作封装在 Repository 中。Repository 执行查询和 `flush`，事务提交或回滚由 `MemeService` 统一控制。
 
@@ -174,6 +179,8 @@ $env:AI_TIMEOUT_SECONDS = "30"
 - 存储文件使用随机 UUID 命名，缩略图统一保存为 PNG，最大尺寸为 400×400。
 - 新数据库记录只保存文件名，不绑定项目绝对路径；读取旧记录时也兼容原先保存的 Windows 或其他绝对路径。
 - 图片内容使用 SHA-256 计算哈希；原图和缩略图文件均不会提交到 Git。
+- 每张图片在 `meme_images` 中独立保存元数据和零基 `position`；同一图片哈希不能跨 Meme 重复收录。
+- `memes` 中原有图片字段暂时保留为兼容封面投影，并始终同步为图片组的第一张。
 
 ## 业务服务
 
@@ -189,6 +196,12 @@ $env:AI_TIMEOUT_SECONDS = "30"
 - `GET /api/memes/{meme_id}`：获取详情。
 - `PATCH /api/memes/{meme_id}`：修改标题、描述、来源、标签数组或可空 `template_id`。
 - `DELETE /api/memes/{meme_id}`：删除记录、原图和缩略图。
+- `POST /api/memes/{meme_id}/images`：向现有 Meme 追加一张图片。
+- `PATCH /api/memes/{meme_id}/images/order`：提交当前 Meme 的完整图片 ID 顺序。
+- `DELETE /api/memes/{meme_id}/images/{image_id}`：删除一张图片；最后一张会被拒绝。
+- `GET /api/memes/{meme_id}/relations`：获取直接关联的 Meme。
+- `POST /api/memes/{meme_id}/relations`：用 `meme_ids` 数组批量添加双向直接关联。
+- `DELETE /api/memes/{meme_id}/relations/{related_meme_id}`：移除一条直接关联。
 - `GET /api/tags`：按名称排序获取标签列表。
 - `GET/POST /api/templates`：获取模板列表或创建模板。
 - `GET/PATCH/DELETE /api/templates/{template_id}`：获取、修改或删除模板。
@@ -199,7 +212,7 @@ $env:AI_TIMEOUT_SECONDS = "30"
 - `/api/ai-settings/providers/{id}/refresh-models`：同步厂商模型标识。
 - `/api/ai-settings/models`：模型列表、新增、修改、删除与当前视觉模型选择。
 
-Meme 响应使用 `image_url` 和可为 `null` 的 `thumbnail_url` 提供浏览器可访问地址，不会返回服务器本地的 `file_path` 或 `thumbnail_path`。
+Meme 响应使用有序 `images` 和 `image_count` 表示完整图片组；兼容字段 `image_url`、`thumbnail_url`、尺寸、哈希等始终对应第一张封面。响应不会返回服务器本地的 `file_path` 或 `thumbnail_path`。
 
 如需使用其他数据库地址，可在启动应用前设置 `DATABASE_URL` 环境变量：
 

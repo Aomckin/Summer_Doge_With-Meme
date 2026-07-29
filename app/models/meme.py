@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.ai_analysis import MemeAIAnalysis
     from app.models.tag import MemeTag, Tag
     from app.models.template import Template
+    from app.models.meme_image import MemeImage
 
 
 def utc_now() -> datetime:
@@ -69,6 +70,11 @@ class Meme(Base):
         back_populates="meme",
         cascade="all, delete-orphan",
     )
+    images: Mapped[list["MemeImage"]] = relationship(
+        back_populates="meme",
+        cascade="all, delete-orphan",
+        order_by="MemeImage.position",
+    )
     template: Mapped["Template | None"] = relationship(back_populates="memes")
 
     # association_proxy 让调用方可以写 meme.tags，而不必手动穿过 meme.tag_links。
@@ -78,3 +84,5 @@ class Meme(Base):
 # 运行时登记关联模型，确保只导入 Meme 后 SQLAlchemy 也能解析关系并建新表。
 from app.models import ai_analysis as _ai_analysis  # noqa: E402,F401
 from app.models import template as _template  # noqa: E402,F401
+from app.models import meme_image as _meme_image  # noqa: E402,F401
+from app.models import meme_relation as _meme_relation  # noqa: E402,F401

@@ -59,7 +59,15 @@ class AIImageResult:
     template_id: int | None = None
 
 
+@dataclass(frozen=True)
+class AIInputImage:
+    image_bytes: bytes
+    mime_type: str
+    position: int
+
+
 class AIClient(Protocol):
+    def analyze_images(self, *, images: Sequence[AIInputImage], existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIImageResult: ...
     def analyze_image(
         self,
         *,
@@ -72,6 +80,8 @@ class AIClient(Protocol):
 
 SYSTEM_PROMPT = (
     "你是 Meme 图片整理助手。生成简体中文图片描述，并推荐适合检索的短标签。"
+    "输入图片属于同一个完整 Meme 的一组有序图片；必须按顺序理解全部图片，"
+    "只生成一份组级描述、标签和模板判断。"
     "必须优先复用用户已有标签；只有已有标签无法准确表达关键信息时才建议新标签。"
     "标签默认使用简体中文。仅当外语词本身是交流中常用的专用表达"
     "（如“AI”“Be like:”“nigger”）、外语二次元梗或固定梗名"
@@ -317,15 +327,22 @@ class OpenAIResponsesClient(_HTTPAIClient):
             http_client=http_client,
         )
 
-    def analyze_image(
+    def analyze_images(
         self,
         *,
-        image_bytes: bytes,
-        mime_type: str,
+        images: Sequence[AIInputImage],
         existing_tags: Sequence[str],
         existing_templates: Sequence[AITemplateCandidate] = (),
     ) -> AIImageResult:
-        image_data = base64.b64encode(image_bytes).decode("ascii")
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        image_parts: list[dict[str, object]] = []
+        for image in sorted(images, key=lambda item: item.position):
+            if len(images) > 1:
+                image_parts.append({"type": "input_text", "text": f"完整 Meme 的第 {image.position + 1} 张图片："})
+            image_parts.extend([
+                {"type": "input_image", "image_url": f"data:{image.mime_type};base64,{base64.b64encode(image.image_bytes).decode('ascii')}", "detail": "auto"},
+            ])
         known_tags = ", ".join(existing_tags) if existing_tags else "（暂无已有标签）"
         payload = {
             "model": self.model,
@@ -352,11 +369,7 @@ class OpenAIResponsesClient(_HTTPAIClient):
                             "text": self._template_prompt(existing_templates),
                         },
                         *self._template_images(existing_templates, True),
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:{mime_type};base64,{image_data}",
-                            "detail": "auto",
-                        },
+                        *image_parts,
                     ],
                 },
             ],
@@ -372,6 +385,9 @@ class OpenAIResponsesClient(_HTTPAIClient):
 
         response = self._post("/responses", payload)
         return self._parse_response(response)
+
+    def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
+        return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)
 
     def _parse_response(self, response: httpx.Response) -> AIImageResult:
         try:
@@ -403,15 +419,20 @@ class OpenAIResponsesClient(_HTTPAIClient):
 class OpenAICompatibleChatClient(_HTTPAIClient):
     """OpenAI-compatible Chat Completions client used by Qwen and custom APIs."""
 
-    def analyze_image(
+    def analyze_images(
         self,
         *,
-        image_bytes: bytes,
-        mime_type: str,
+        images: Sequence[AIInputImage],
         existing_tags: Sequence[str],
         existing_templates: Sequence[AITemplateCandidate] = (),
     ) -> AIImageResult:
-        image_data = base64.b64encode(image_bytes).decode("ascii")
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        image_parts: list[dict[str, object]] = []
+        for image in sorted(images, key=lambda item: item.position):
+            if len(images) > 1:
+                image_parts.append({"type": "text", "text": f"完整 Meme 的第 {image.position + 1} 张图片："})
+            image_parts.append({"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{base64.b64encode(image.image_bytes).decode('ascii')}"}})
         known_tags = ", ".join(existing_tags) if existing_tags else "（暂无）"
         payload: dict[str, object] = {
             "model": self.model,
@@ -438,12 +459,7 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                             "text": self._template_prompt(existing_templates),
                         },
                         *self._template_images(existing_templates, False),
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{image_data}"
-                            },
-                        },
+                        *image_parts,
                     ],
                 },
             ],
@@ -464,3 +480,6 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                 "AI service returned no structured output"
             ) from error
         return self._parse_result(response_payload, output_text)
+
+    def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
+        return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)

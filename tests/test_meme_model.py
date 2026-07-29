@@ -31,6 +31,20 @@ def test_meme_table_is_created_on_app_startup() -> None:
     assert inspect(database.engine).has_table("memes")
 
 
+def test_composite_image_and_relation_tables_are_registered() -> None:
+    _, _, database = load_meme_components()
+    database.create_tables()
+
+    inspector = inspect(database.engine)
+    assert inspector.has_table("meme_images")
+    assert inspector.has_table("meme_relations")
+
+    image_columns = {
+        column["name"] for column in inspector.get_columns("meme_images")
+    }
+    assert {"meme_id", "file_hash", "position"} <= image_columns
+
+
 def test_meme_record_can_be_written_and_read() -> None:
     model_module, _, database = load_meme_components()
     database.create_tables()

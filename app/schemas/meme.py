@@ -60,3 +60,28 @@ class MemeResponse(MemeCreate):
     updated_at: datetime
     tags: list[TagResponse] = Field(default_factory=list)
     template: TemplateResponse | None = None
+    images: list["MemeImageResponse"] = Field(default_factory=list)
+    image_count: int = 1
+
+
+class MemeImageResponse(BaseModel):
+    id: int
+    original_filename: str
+    stored_filename: str
+    image_url: str
+    thumbnail_url: str | None
+    mime_type: str
+    file_size: int
+    width: int
+    height: int
+    file_hash: str
+    position: int
+    created_at: datetime
+
+
+class ImageOrderRequest(BaseModel):
+    image_ids: list[int] = Field(min_length=1)
+
+
+class MemeRelationRequest(BaseModel):
+    meme_ids: list[int]

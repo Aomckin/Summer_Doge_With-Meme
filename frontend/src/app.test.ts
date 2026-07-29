@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemeVaultApp, type MemeApi } from "./app";
-import type { MemeResponse, TagResponse } from "./types";
+import type { MemeImageResponse, MemeResponse, TagResponse } from "./types";
 
 const funnyTag: TagResponse = {
   id: 1,
@@ -50,6 +50,50 @@ function makeMeme(id: number, title = `Meme ${id}`): MemeResponse {
     updated_at: "2026-07-25T00:00:00Z",
     tags: [funnyTag],
     template: null,
+    images: [],
+    image_count: 1,
+  };
+}
+
+function makeMemeImage(
+  id: number,
+  position: number,
+  name = `image-${id}`,
+): MemeImageResponse {
+  return {
+    id,
+    original_filename: `${name}.png`,
+    stored_filename: `stored-${name}.png`,
+    image_url: `/media/images/stored-${name}.png`,
+    thumbnail_url: `/media/thumbnails/stored-${name}.png`,
+    mime_type: "image/png",
+    file_size: 1024 + id,
+    width: 320,
+    height: 240,
+    file_hash: `image-hash-${id}`,
+    position,
+    created_at: "2026-07-29T00:00:00Z",
+  };
+}
+
+function makeCompositeMeme(id = 1): MemeResponse {
+  const images = [
+    makeMemeImage(11, 0, "first"),
+    makeMemeImage(12, 1, "second"),
+    makeMemeImage(13, 2, "third"),
+  ];
+  return {
+    ...makeMeme(id, "复合 Meme"),
+    original_filename: images[0].original_filename,
+    stored_filename: images[0].stored_filename,
+    image_url: images[0].image_url,
+    thumbnail_url: images[0].thumbnail_url,
+    file_size: images[0].file_size,
+    width: images[0].width,
+    height: images[0].height,
+    file_hash: images[0].file_hash,
+    images,
+    image_count: images.length,
   };
 }
 
@@ -67,6 +111,12 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     uploadMeme: vi.fn().mockResolvedValue(makeMeme(2, "新上传")),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),
     deleteMeme: vi.fn().mockResolvedValue(undefined),
+    appendMemeImage: vi.fn().mockResolvedValue(makeMeme(1)),
+    deleteMemeImage: vi.fn().mockResolvedValue(makeMeme(1)),
+    reorderMemeImages: vi.fn().mockResolvedValue(makeMeme(1)),
+    listMemeRelations: vi.fn().mockResolvedValue([]),
+    addMemeRelations: vi.fn().mockResolvedValue([]),
+    deleteMemeRelation: vi.fn().mockResolvedValue(undefined),
     analyzeMeme: vi.fn().mockResolvedValue({
       id: 1,
       meme_id: 1,
@@ -1244,5 +1294,285 @@ describe("MemeVaultApp", () => {
     trigger?.click();
 
     expect(showModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders only the cover in cards and the ordered group in detail", async () => {
+    const meme = makeCompositeMeme();
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }),
+    );
+
+    await app.start();
+
+    const card = document.querySelector<HTMLElement>('[data-meme-id="1"]');
+    expect(card?.querySelectorAll(".card-image img")).toHaveLength(1);
+    expect(card?.querySelector(".card-image img")?.getAttribute("src")).toBe(
+      meme.thumbnail_url,
+    );
+    expect(card?.querySelector(".image-count-badge")?.textContent).toContain(
+      "3 张",
+    );
+
+    card?.click();
+    const detailImages = [
+      ...document.querySelectorAll<HTMLImageElement>(".detail-image img"),
+    ];
+    expect(detailImages.map((image) => image.getAttribute("src"))).toEqual(
+      meme.images.map((image) => image.image_url),
+    );
+    expect(document.querySelector("[data-cover-label]")?.textContent).toContain(
+      "封面",
+    );
+  });
+
+  it("navigates the complete image group and clears the viewer on close", async () => {
+    const meme = makeCompositeMeme();
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }),
+    );
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    document
+      .querySelector<HTMLButtonElement>('[data-image-index="1"]')
+      ?.click();
+    const dialog =
+      document.querySelector<HTMLDialogElement>("#image-viewer-dialog");
+    const viewer = dialog?.querySelector<HTMLImageElement>("[data-viewer-image]");
+    const previous =
+      dialog?.querySelector<HTMLButtonElement>("[data-viewer-previous]");
+    const next = dialog?.querySelector<HTMLButtonElement>("[data-viewer-next]");
+    expect(viewer?.getAttribute("src")).toBe(meme.images[1].image_url);
+    expect(previous?.disabled).toBe(false);
+    expect(next?.disabled).toBe(false);
+
+    next?.click();
+    expect(viewer?.getAttribute("src")).toBe(meme.images[2].image_url);
+    expect(next?.disabled).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+    expect(viewer?.getAttribute("src")).toBe(meme.images[1].image_url);
+
+    dialog
+      ?.querySelector<HTMLButtonElement>("[data-close-viewer]")
+      ?.click();
+    expect(dialog?.open).toBe(false);
+    expect(viewer?.hasAttribute("src")).toBe(false);
+  });
+
+  it("appends, deletes and reorders images with busy and error feedback", async () => {
+    const meme = makeCompositeMeme();
+    const appended = {
+      ...meme,
+      images: [...meme.images, makeMemeImage(14, 3, "fourth")],
+      image_count: 4,
+    };
+    const appendResult = deferred<MemeResponse>();
+    const reorderResult = deferred<MemeResponse>();
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([meme]),
+      appendMemeImage: vi.fn(() => appendResult.promise),
+      reorderMemeImages: vi.fn(() => reorderResult.promise),
+      deleteMemeImage: vi.fn().mockRejectedValue(new Error("删除失败")),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    const file = new File(["fourth"], "fourth.png", { type: "image/png" });
+    const input =
+      document.querySelector<HTMLInputElement>("[data-append-image]");
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [file],
+    });
+    input?.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(api.appendMemeImage).toHaveBeenCalledWith(meme.id, file);
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector<HTMLInputElement>("[data-append-image]")
+          ?.disabled,
+      ).toBe(true);
+    });
+    appendResult.resolve(appended);
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll("[data-image-id]")).toHaveLength(4);
+    });
+
+    const firstCard =
+      document.querySelector<HTMLElement>('[data-image-id="11"]');
+    const thirdCard =
+      document.querySelector<HTMLElement>('[data-image-id="13"]');
+    firstCard?.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    thirdCard?.dispatchEvent(new Event("dragover", { bubbles: true }));
+    thirdCard?.dispatchEvent(new Event("drop", { bubbles: true }));
+    expect(api.reorderMemeImages).toHaveBeenCalledWith(meme.id, [12, 13, 11, 14]);
+    reorderResult.resolve({
+      ...appended,
+      images: [
+        appended.images[1],
+        appended.images[2],
+        appended.images[0],
+        appended.images[3],
+      ].map((image, position) => ({ ...image, position })),
+    });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector<HTMLInputElement>("[data-append-image]")
+          ?.disabled,
+      ).toBe(false);
+    });
+
+    document
+      .querySelector<HTMLButtonElement>('[data-delete-image="12"]')
+      ?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-image-error]")?.textContent).toContain(
+        "网络请求失败",
+      );
+    });
+  });
+
+  it("searches and batch-adds relations, then removes one relation", async () => {
+    const selected = makeMeme(1, "当前");
+    const related = makeMeme(2, "已关联");
+    const third = { ...makeMeme(3, "候选甲"), description: "目标 alpha" };
+    const fourth = { ...makeMeme(4, "候选乙"), description: "目标 beta" };
+    const addResult = deferred<MemeResponse[]>();
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([selected, related, third, fourth]),
+      listMemeRelations: vi.fn().mockResolvedValue([related]),
+      addMemeRelations: vi.fn(() => addResult.promise),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-related-meme=\"2\"]")).not.toBeNull();
+    });
+
+    document
+      .querySelector<HTMLButtonElement>("[data-open-relations]")
+      ?.click();
+    const dialog =
+      document.querySelector<HTMLDialogElement>("[data-relation-dialog]");
+    expect(dialog?.open).toBe(true);
+    const search =
+      dialog?.querySelector<HTMLInputElement>("[data-relation-search]");
+    if (search) {
+      search.value = "目标";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    expect(dialog?.querySelector('[data-relation-choice="1"]')).toBeNull();
+    expect(dialog?.querySelector('[data-relation-choice="2"]')).toBeNull();
+    expect(dialog?.querySelector('[data-relation-choice="3"]')).not.toBeNull();
+    expect(dialog?.querySelector('[data-relation-choice="4"]')).not.toBeNull();
+
+    for (const id of [3, 4]) {
+      const choice = dialog?.querySelector<HTMLInputElement>(
+        `[data-relation-choice="${id}"]`,
+      );
+      choice?.click();
+    }
+    dialog
+      ?.querySelector<HTMLButtonElement>("[data-save-relations]")
+      ?.click();
+    expect(api.addMemeRelations).toHaveBeenCalledWith(1, [3, 4]);
+    expect(
+      dialog?.querySelector<HTMLButtonElement>("[data-save-relations]")?.disabled,
+    ).toBe(true);
+
+    addResult.resolve([related, third, fourth]);
+    await vi.waitFor(() => {
+      expect(dialog?.open).toBe(false);
+      expect(document.querySelector("[data-related-meme=\"4\"]")).not.toBeNull();
+    });
+
+    document
+      .querySelector<HTMLButtonElement>('[data-remove-relation="2"]')
+      ?.click();
+    await vi.waitFor(() => {
+      expect(api.deleteMemeRelation).toHaveBeenCalledWith(1, 2);
+      expect(document.querySelector("[data-related-meme=\"2\"]")).toBeNull();
+    });
+  });
+
+  it("keeps a newer relation removal busy when an older request settles", async () => {
+    const first = makeMeme(1, "甲");
+    const second = makeMeme(2, "乙");
+    const third = makeMeme(3, "丙");
+    const firstRemoval = deferred<void>();
+    const secondRemoval = deferred<void>();
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([first, second, third]),
+      listMemeRelations: vi.fn((id: number) =>
+        Promise.resolve(id === 1 ? [second] : id === 2 ? [third] : []),
+      ),
+      deleteMemeRelation: vi
+        .fn()
+        .mockImplementationOnce(() => firstRemoval.promise)
+        .mockImplementationOnce(() => secondRemoval.promise),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-remove-relation="2"]')).not.toBeNull();
+    });
+    document
+      .querySelector<HTMLButtonElement>('[data-remove-relation="2"]')
+      ?.click();
+
+    document.querySelector<HTMLButtonElement>('[data-meme-id="2"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-remove-relation="3"]')).not.toBeNull();
+    });
+    document
+      .querySelector<HTMLButtonElement>('[data-remove-relation="3"]')
+      ?.click();
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector<HTMLButtonElement>(
+          '[data-remove-relation="3"]',
+        )?.textContent,
+      ).toContain("正在移除");
+    });
+
+    firstRemoval.resolve();
+    await vi.waitFor(() => {
+      expect(api.deleteMemeRelation).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      document.querySelector<HTMLButtonElement>('[data-remove-relation="3"]')
+        ?.textContent,
+    ).toContain("正在移除");
+    expect(
+      document.querySelector<HTMLButtonElement>('[data-remove-relation="3"]')
+        ?.disabled,
+    ).toBe(true);
+
+    secondRemoval.resolve();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-related-meme="3"]')).toBeNull();
+    });
+  });
+
+  it("shows relation loading failures without stale peers", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1), makeMeme(2)]),
+      listMemeRelations: vi.fn().mockRejectedValue(new Error("关联加载失败")),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector("[data-relation-error]")?.textContent,
+      ).toContain("网络请求失败");
+    });
+    expect(document.querySelector("[data-related-meme]")).toBeNull();
   });
 });

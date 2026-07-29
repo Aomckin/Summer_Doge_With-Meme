@@ -48,6 +48,28 @@ class FakeAIClient:
         return self.result
 
 
+class OrderedImageFakeAIClient:
+    def __init__(self, result: AIImageResult) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    def analyze_images(
+        self,
+        *,
+        images: list[object],
+        existing_tags: list[str],
+        existing_templates: list[AITemplateCandidate],
+    ) -> AIImageResult:
+        self.calls.append(
+            {
+                "images": images,
+                "existing_tags": existing_tags,
+                "existing_templates": existing_templates,
+            }
+        )
+        return self.result
+
+
 def make_image_bytes() -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (320, 240), color="purple").save(buffer, format="PNG")
@@ -114,6 +136,49 @@ def test_analysis_records_model_and_suggestions_without_applying_them(
         assert session.scalar(select(func.count()).select_from(Tag)) == 1
         assert session.scalar(select(func.count()).select_from(MemeTag)) == 1
         assert session.get(MemeAIAnalysis, analysis.id) is analysis
+    finally:
+        session.close()
+
+
+def test_analysis_sends_the_complete_ordered_image_group_once(
+    tmp_path: Path,
+) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        meme = service.create_meme(
+            "first.png",
+            make_image_bytes(),
+            title="多图 AI",
+            description="用户描述",
+        )
+        second = BytesIO()
+        Image.new("RGB", (320, 240), color="blue").save(second, format="PNG")
+        third = BytesIO()
+        Image.new("RGB", (320, 240), color="green").save(third, format="PNG")
+        service.append_image(meme.id, "second.png", second.getvalue())
+        updated = service.append_image(meme.id, "third.png", third.getvalue())
+        reordered = service.reorder_images(
+            meme.id,
+            [updated.images[2].id, updated.images[0].id, updated.images[1].id],
+        )
+        expected_bytes = [
+            service.storage.read_original(image.file_path)
+            for image in reordered.images
+        ]
+        client = OrderedImageFakeAIClient(ai_result())
+
+        analysis = service.analyze_meme(meme.id, client)
+
+        assert len(client.calls) == 1
+        inputs = client.calls[0]["images"]
+        assert [image.position for image in inputs] == [0, 1, 2]
+        assert [image.image_bytes for image in inputs] == expected_bytes
+        assert analysis.meme_id == meme.id
+        assert (
+            session.scalar(select(func.count()).select_from(MemeAIAnalysis))
+            == 1
+        )
+        assert meme.description == "用户描述"
     finally:
         session.close()
 

@@ -27,7 +27,7 @@ from app.models.meme import Meme
 from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.schemas.ai_analysis import AIAnalysisConfirm, AIAnalysisResponse
-from app.schemas.meme import MemeResponse, MemeUpdate, TagResponse
+from app.schemas.meme import ImageOrderRequest, MemeImageResponse, MemeRelationRequest, MemeResponse, MemeUpdate, TagResponse
 from app.schemas.template import TemplateResponse
 from app.services.meme_service import (
     AIAnalysisAlreadyConfirmedError,
@@ -107,30 +107,43 @@ def _parse_template_id(value: str | None) -> int | None:
 
 def _to_meme_response(meme: Meme) -> MemeResponse:
     """把内部 ORM 对象统一转换为不会泄露服务器路径的公开响应。"""
-    image_name = ImageStorage.filename_from_reference(meme.file_path)
+    image_records = list(meme.images)
+    cover = image_records[0] if image_records else meme
+    image_name = ImageStorage.filename_from_reference(cover.file_path)
     thumbnail_name = (
-        ImageStorage.filename_from_reference(meme.thumbnail_path)
-        if meme.thumbnail_path is not None
+        ImageStorage.filename_from_reference(cover.thumbnail_path)
+        if cover.thumbnail_path is not None
         else None
     )
+    images = [
+        MemeImageResponse(
+            id=item.id, original_filename=item.original_filename,
+            stored_filename=item.stored_filename,
+            image_url=f"{IMAGES_URL_PREFIX}/{ImageStorage.filename_from_reference(item.file_path)}",
+            thumbnail_url=(f"{THUMBNAILS_URL_PREFIX}/{ImageStorage.filename_from_reference(item.thumbnail_path)}" if item.thumbnail_path else None),
+            mime_type=item.mime_type, file_size=item.file_size, width=item.width,
+            height=item.height, file_hash=item.file_hash, position=item.position,
+            created_at=item.created_at,
+        ) for item in image_records
+    ]
     return MemeResponse(
         id=meme.id,
         title=meme.title,
         description=meme.description,
         source=meme.source,
-        original_filename=meme.original_filename,
-        stored_filename=meme.stored_filename,
+        original_filename=cover.original_filename,
+        stored_filename=cover.stored_filename,
         image_url=f"{IMAGES_URL_PREFIX}/{image_name}",
         thumbnail_url=(
             f"{THUMBNAILS_URL_PREFIX}/{thumbnail_name}"
             if thumbnail_name is not None
             else None
         ),
-        mime_type=meme.mime_type,
-        file_size=meme.file_size,
-        width=meme.width,
-        height=meme.height,
-        file_hash=meme.file_hash,
+        mime_type=cover.mime_type,
+        file_size=cover.file_size,
+        width=cover.width,
+        height=cover.height,
+        file_hash=cover.file_hash,
         created_at=meme.created_at,
         updated_at=meme.updated_at,
         tags=[TagResponse.model_validate(tag) for tag in meme.tags],
@@ -139,6 +152,8 @@ def _to_meme_response(meme: Meme) -> MemeResponse:
             if meme.template is not None
             else None
         ),
+        images=images,
+        image_count=len(images),
     )
 
 
@@ -258,6 +273,79 @@ def analyze_meme(
     except (AIUpstreamError, AIInvalidResponseError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return _to_ai_analysis_response(analysis, service)
+
+
+@router.post("/{meme_id}/images", response_model=MemeResponse)
+async def append_meme_image(meme_id: int, service: ServiceDependency, file: Annotated[UploadFile, File()]) -> MemeResponse:
+    try:
+        return _to_meme_response(service.append_image(meme_id, file.filename or "upload", await file.read()))
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except IntegrityError as error:
+        raise HTTPException(status_code=409, detail="Image already exists") from error
+    except ImageTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except InvalidImageError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+
+
+@router.patch("/{meme_id}/images/order", response_model=MemeResponse)
+def reorder_meme_images(meme_id: int, payload: ImageOrderRequest, service: ServiceDependency) -> MemeResponse:
+    try:
+        return _to_meme_response(service.reorder_images(meme_id, payload.image_ids))
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.delete("/{meme_id}/images/{image_id}", response_model=MemeResponse)
+def delete_meme_image(meme_id: int, image_id: int, service: ServiceDependency) -> MemeResponse:
+    try:
+        return _to_meme_response(service.delete_image(meme_id, image_id))
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get("/{meme_id}/relations", response_model=list[MemeResponse])
+def list_meme_relations(meme_id: int, service: ServiceDependency) -> list[MemeResponse]:
+    try:
+        return [_to_meme_response(meme) for meme in service.list_relations(meme_id)]
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+
+
+@router.post("/{meme_id}/relations", response_model=list[MemeResponse])
+def add_meme_relations(meme_id: int, payload: MemeRelationRequest, service: ServiceDependency) -> list[MemeResponse]:
+    try:
+        return [_to_meme_response(meme) for meme in service.add_relations(meme_id, payload.meme_ids)]
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.delete("/{meme_id}/relations/{related_meme_id}", status_code=204)
+def delete_meme_relation(meme_id: int, related_meme_id: int, service: ServiceDependency) -> Response:
+    try:
+        service.remove_relation(meme_id, related_meme_id)
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+    return Response(status_code=204)
 
 
 @router.post(

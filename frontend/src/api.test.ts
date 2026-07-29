@@ -2,15 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  addMemeRelations,
   analyzeMeme,
+  appendMemeImage,
   confirmAIAnalysis,
   createAIProvider,
   createTemplate,
   deleteMeme,
+  deleteMemeImage,
+  deleteMemeRelation,
   deleteTemplate,
   listTemplates,
   listMemes,
+  listMemeRelations,
   parseTagInput,
+  reorderMemeImages,
   testAIProvider,
   updateAIModel,
   updateAIProvider,
@@ -38,6 +44,8 @@ const meme: MemeResponse = {
   updated_at: "2026-07-25T00:00:00Z",
   tags: [],
   template: null,
+  images: [],
+  image_count: 1,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -168,6 +176,62 @@ describe("deleteMeme", () => {
     );
 
     await expect(deleteMeme(7)).resolves.toBeUndefined();
+  });
+});
+
+describe("composite images and direct relations", () => {
+  it("uses the image lifecycle endpoint contracts", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(meme))
+      .mockResolvedValueOnce(jsonResponse(meme))
+      .mockResolvedValueOnce(jsonResponse(meme));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["image"], "next.png", { type: "image/png" });
+
+    await appendMemeImage(7, file);
+    await reorderMemeImages(7, [4, 2, 9]);
+    await deleteMemeImage(7, 4);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/memes/7/images");
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+    expect(fetchMock.mock.calls[0][1].body.get("file")).toBe(file);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/memes/7/images/order");
+    expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      image_ids: [4, 2, 9],
+    });
+    expect(fetchMock.mock.calls[2]).toEqual([
+      "/api/memes/7/images/4",
+      { method: "DELETE" },
+    ]);
+  });
+
+  it("uses the direct relation endpoint contracts", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([meme]))
+      .mockResolvedValueOnce(jsonResponse([meme]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listMemeRelations(7);
+    await addMemeRelations(7, [2, 3]);
+    await deleteMemeRelation(7, 2);
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/api/memes/7/relations",
+      undefined,
+    ]);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/memes/7/relations");
+    expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      meme_ids: [2, 3],
+    });
+    expect(fetchMock.mock.calls[2]).toEqual([
+      "/api/memes/7/relations/2",
+      { method: "DELETE" },
+    ]);
   });
 });
 

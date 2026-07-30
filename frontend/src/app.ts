@@ -55,6 +55,7 @@ import {
   openImageViewer,
   renderDetail,
   renderLibrary,
+  renderMemeCard,
   renderOperationError,
   renderRelationDialog,
   renderTags,
@@ -157,6 +158,7 @@ function initialState(): AppState {
     aiAnalysis: null,
     selectedAITags: [],
     applyAIDescription: false,
+    applyAITitle: false,
     selectedAITemplateId: null,
     applyAITemplate: false,
     aiError: null,
@@ -441,6 +443,8 @@ export class MemeVaultApp {
           : this.state.selectedAITags.filter((name) => name !== tag);
       } else if (target.matches("[data-ai-description]")) {
         this.state.applyAIDescription = target.checked;
+      } else if (target.matches("[data-ai-title]")) {
+        this.state.applyAITitle = target.checked;
       } else if (target.matches("[data-ai-apply-template]")) {
         this.state.applyAITemplate = target.checked;
         renderDetail(
@@ -1096,11 +1100,16 @@ export class MemeVaultApp {
       const targetId = meme.id;
       const updated = await this.api.updateMeme(targetId, payload);
       this.replaceMeme(updated);
+      renderMemeCard(
+        this.elements,
+        updated,
+        this.state.selectedMeme?.id === targetId,
+      );
       if (this.state.selectedMeme?.id === targetId) {
         this.editing = false;
         this.editDraft = null;
       }
-      await Promise.all([this.refreshTags(), this.reloadMemes()]);
+      await this.refreshTags();
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
         this.state.actionError = readableError(error);
@@ -1110,7 +1119,6 @@ export class MemeVaultApp {
     } finally {
       this.state.saving = false;
       renderOperationError(this.elements, this.state);
-      renderLibrary(this.elements, this.state);
       renderDetail(
         this.elements,
         this.state,
@@ -1138,6 +1146,7 @@ export class MemeVaultApp {
     this.state.aiAnalysis = null;
     this.state.selectedAITags = [];
     this.state.applyAIDescription = false;
+    this.state.applyAITitle = false;
     this.state.selectedAITemplateId = null;
     this.state.applyAITemplate = false;
     this.state.aiError = null;
@@ -1161,6 +1170,7 @@ export class MemeVaultApp {
         (suggestion) => suggestion.name,
       );
       this.state.applyAIDescription = !meme.description;
+      this.state.applyAITitle = false;
       this.state.selectedAITemplateId =
         analysis.suggested_template?.id ?? null;
       this.state.applyAITemplate = analysis.suggested_template !== null;
@@ -1202,6 +1212,7 @@ export class MemeVaultApp {
         {
           tags: this.state.selectedAITags,
           apply_description: this.state.applyAIDescription,
+          apply_title: this.state.applyAITitle,
           template_id: this.state.selectedAITemplateId,
           apply_template: this.state.applyAITemplate,
         },
@@ -1213,6 +1224,7 @@ export class MemeVaultApp {
       this.state.aiAnalysis = null;
       this.state.selectedAITags = [];
       this.state.applyAIDescription = false;
+      this.state.applyAITitle = false;
       this.state.selectedAITemplateId = null;
       this.state.applyAITemplate = false;
       await this.refreshTags();

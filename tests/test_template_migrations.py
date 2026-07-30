@@ -33,6 +33,10 @@ def test_old_sqlite_database_is_upgraded_idempotently(tmp_path) -> None:
         column["name"]
         for column in inspector.get_columns("meme_ai_analyses")
     }
+    assert "suggested_title" in {
+        column["name"]
+        for column in inspector.get_columns("meme_ai_analyses")
+    }
     with engine.connect() as connection:
         assert connection.execute(
             text("SELECT title FROM memes WHERE id = 1")

@@ -23,6 +23,10 @@ class MemeAIAnalysis(Base):
         index=True,
     )
     model_name: Mapped[str] = mapped_column(String(100))
+    suggested_title: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
     description: Mapped[str] = mapped_column(Text)
     suggestions_json: Mapped[str] = mapped_column(Text)
     suggested_template_id: Mapped[int | None] = mapped_column(nullable=True)

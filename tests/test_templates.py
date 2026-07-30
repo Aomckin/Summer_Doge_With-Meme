@@ -233,6 +233,7 @@ def test_ai_template_suggestion_is_previewed_then_confirmed(tmp_path: Path) -> N
         def analyze_image(self, **_: object) -> AIImageResult:
             return AIImageResult(
                 model_name="fake",
+                title="看到需求时的我",
                 description="AI 描述",
                 tags=(
                     AITagSuggestion("反应图", 0.9),

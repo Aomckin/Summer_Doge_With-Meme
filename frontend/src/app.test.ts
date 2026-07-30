@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemeVaultApp, type MemeApi } from "./app";
-import type { MemeImageResponse, MemeResponse, TagResponse } from "./types";
+import type {
+  AppState,
+  MemeImageResponse,
+  MemeResponse,
+  TagResponse,
+} from "./types";
 
 const funnyTag: TagResponse = {
   id: 1,
@@ -121,6 +126,7 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
       id: 1,
       meme_id: 1,
       model_name: "gpt-5.6-luna-test",
+      suggested_title: "看到需求时的我",
       description: "AI 描述",
       suggestions: [
         { name: "funny", confidence: 0.95, existing: true },
@@ -669,7 +675,7 @@ describe("MemeVaultApp", () => {
 
     pendingUpdate.resolve(updated);
     await vi.waitFor(() => {
-      expect(api.listMemes).toHaveBeenCalledTimes(2);
+      expect(api.listMemes).toHaveBeenCalledTimes(1);
       expect(api.listTags).toHaveBeenCalledTimes(2);
       expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
         "第二个",
@@ -677,22 +683,22 @@ describe("MemeVaultApp", () => {
     });
   });
 
-  it("reapplies filters after editing and reloads pagination after delete", async () => {
+  it("preserves two loaded pages and card order after editing one Meme", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),
     );
+    const secondPage = Array.from({ length: 24 }, (_, index) =>
+      makeMeme(index + 25),
+    );
     const updated = {
-      ...firstPage[0],
+      ...secondPage[5],
+      title: "第二页已编辑",
       tags: [{ ...funnyTag, name: "reaction" }],
     };
-    const shiftedPage = Array.from({ length: 24 }, (_, index) =>
-      makeMeme(index + 2),
-    );
     const listMemes = vi
       .fn()
       .mockResolvedValueOnce(firstPage)
-      .mockResolvedValueOnce(firstPage)
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce(secondPage);
     const api = makeApi({
       listMemes,
       updateMeme: vi.fn().mockResolvedValue(updated),
@@ -700,32 +706,67 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), api);
     await app.start();
 
-    button("funny").click();
+    button("加载更多").click();
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(24);
+      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(48);
     });
-    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    document
+      .querySelector<HTMLElement>('[data-meme-id="30"]')
+      ?.click();
     button("编辑").click();
-    const filteredEditForm =
-      document.querySelector<HTMLFormElement>("#edit-form");
-    if (!filteredEditForm) {
-      throw new Error("Missing filtered edit form");
+    const orderBefore = [
+      ...document.querySelectorAll<HTMLElement>("[data-meme-id]"),
+    ].map((card) => Number(card.dataset.memeId));
+    const untouchedCard =
+      document.querySelector<HTMLElement>('[data-meme-id="29"]');
+    const editedCard =
+      document.querySelector<HTMLElement>('[data-meme-id="30"]');
+    document.documentElement.scrollTop = 420;
+    const editForm = document.querySelector<HTMLFormElement>("#edit-form");
+    if (!editForm) {
+      throw new Error("Missing edit form");
     }
-    (filteredEditForm.elements.namedItem("tags") as HTMLInputElement).value =
+    (editForm.elements.namedItem("title") as HTMLInputElement).value =
+      "第二页已编辑";
+    (editForm.elements.namedItem("tags") as HTMLInputElement).value =
       "reaction";
-    filteredEditForm.dispatchEvent(
+    editForm.dispatchEvent(
       new SubmitEvent("submit", { bubbles: true, cancelable: true }),
     );
 
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(0);
+      expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
+        "第二页已编辑",
+      );
     });
-    expect(listMemes).toHaveBeenLastCalledWith(
-      expect.objectContaining({ offset: 0, tags: ["funny"] }),
-    );
+    const state = (app as unknown as { state: AppState }).state;
+    const orderAfter = [
+      ...document.querySelectorAll<HTMLElement>("[data-meme-id]"),
+    ].map((card) => Number(card.dataset.memeId));
+    expect(listMemes).toHaveBeenCalledTimes(2);
+    expect(api.listTags).toHaveBeenCalledTimes(2);
+    expect(state.memes).toHaveLength(48);
+    expect(state.offset).toBe(48);
+    expect(state.hasMore).toBe(true);
+    expect(state.memes[29]).toEqual(updated);
+    expect(state.selectedMeme).toEqual(updated);
+    expect(orderAfter).toEqual(orderBefore);
+    expect(
+      document.querySelector<HTMLElement>('[data-meme-id="29"]'),
+    ).toBe(untouchedCard);
+    expect(
+      document.querySelector<HTMLElement>('[data-meme-id="30"]'),
+    ).not.toBe(editedCard);
+    expect(document.documentElement.scrollTop).toBe(420);
+  });
 
-    // Recreate the app to isolate delete pagination from the filter scenario.
-    document.body.innerHTML = '<div id="app"></div>';
+  it("reloads the first page after deleting a Meme", async () => {
+    const firstPage = Array.from({ length: 24 }, (_, index) =>
+      makeMeme(index + 1),
+    );
+    const shiftedPage = Array.from({ length: 24 }, (_, index) =>
+      makeMeme(index + 2),
+    );
     const deleteApi = makeApi({
       listMemes: vi
         .fn()
@@ -861,6 +902,9 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector(".ai-panel .eyebrow")?.textContent).toContain(
       "gpt-5.6-luna-test",
     );
+    expect(document.querySelector(".ai-panel")?.textContent).toContain(
+      "看到需求时的我",
+    );
     expect(
       [...document.querySelectorAll(".detail-tags .tag")].map(
         (element) => element.textContent,
@@ -876,9 +920,12 @@ describe("MemeVaultApp", () => {
       document.querySelector<HTMLInputElement>('[data-ai-tag="funny"]');
     const descriptionChoice =
       document.querySelector<HTMLInputElement>("[data-ai-description]");
-    if (!funnyChoice || !descriptionChoice) {
+    const titleChoice =
+      document.querySelector<HTMLInputElement>("[data-ai-title]");
+    if (!funnyChoice || !descriptionChoice || !titleChoice) {
       throw new Error("Missing AI confirmation controls");
     }
+    expect(titleChoice.checked).toBe(false);
     funnyChoice.checked = false;
     funnyChoice.dispatchEvent(new Event("change", { bubbles: true }));
     descriptionChoice.checked = true;
@@ -889,6 +936,7 @@ describe("MemeVaultApp", () => {
       expect(api.confirmAIAnalysis).toHaveBeenCalledWith(1, 1, {
         tags: ["reaction"],
         apply_description: true,
+        apply_title: false,
         template_id: null,
         apply_template: false,
       });
@@ -905,6 +953,73 @@ describe("MemeVaultApp", () => {
     expect(button("reaction")).toBeTruthy();
   });
 
+  it("applies the AI suggested title only after explicit selection", async () => {
+    const original = makeMeme(1, "原始标题");
+    const updated = { ...original, title: "看到需求时的我" };
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([original]),
+      confirmAIAnalysis: vi.fn().mockResolvedValue(updated),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    button("AI 分析").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-ai-title]")).not.toBeNull();
+    });
+
+    const titleChoice =
+      document.querySelector<HTMLInputElement>("[data-ai-title]");
+    if (!titleChoice) {
+      throw new Error("Missing AI title choice");
+    }
+    titleChoice.checked = true;
+    titleChoice.dispatchEvent(new Event("change", { bubbles: true }));
+    button("确认采用").click();
+
+    await vi.waitFor(() => {
+      expect(api.confirmAIAnalysis).toHaveBeenCalledWith(
+        1,
+        1,
+        expect.objectContaining({ apply_title: true }),
+      );
+      expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
+        "看到需求时的我",
+      );
+    });
+  });
+
+  it("hides the title choice for legacy AI analyses", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1)]),
+      analyzeMeme: vi.fn().mockResolvedValue({
+        id: 1,
+        meme_id: 1,
+        model_name: "legacy",
+        suggested_title: null,
+        description: "AI 描述",
+        suggestions: [
+          { name: "funny", confidence: 0.95, existing: true },
+          { name: "reaction", confidence: 0.87, existing: false },
+        ],
+        created_at: "2026-07-27T00:00:00Z",
+        confirmed_at: null,
+        suggested_template: null,
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    button("AI 分析").click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".ai-description")?.textContent).toBe(
+        "AI 描述",
+      );
+    });
+    expect(document.querySelector("[data-ai-title]")).toBeNull();
+  });
+
   it("defaults to the AI template suggestion and allows choosing another template", async () => {
     const original = makeMeme(1, "模板建议");
     const updated = { ...original, template: wojakTemplate };
@@ -917,6 +1032,7 @@ describe("MemeVaultApp", () => {
         id: 9,
         meme_id: 1,
         model_name: "fake",
+        suggested_title: "看到需求时的我",
         description: "AI 描述",
         suggestions: [
           { name: "funny", confidence: 0.9, existing: true },
@@ -980,6 +1096,13 @@ describe("MemeVaultApp", () => {
     await vi.waitFor(() => {
       expect(document.querySelector('[data-ai-tag="reaction"]')).not.toBeNull();
     });
+    const titleChoice =
+      document.querySelector<HTMLInputElement>("[data-ai-title]");
+    if (!titleChoice) {
+      throw new Error("Missing AI title choice");
+    }
+    titleChoice.checked = true;
+    titleChoice.dispatchEvent(new Event("change", { bubbles: true }));
 
     button("确认采用").click();
     await vi.waitFor(() => {
@@ -994,6 +1117,9 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector(".ai-description")?.textContent).toBe(
       "AI 描述",
     );
+    expect(
+      document.querySelector<HTMLInputElement>("[data-ai-title]")?.checked,
+    ).toBe(true);
   });
 
   it("opens API settings and fills common provider presets", async () => {

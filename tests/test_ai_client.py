@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from app.ai.client import (
+    ANALYSIS_SCHEMA,
     AIConfigurationError,
     AIInputImage,
     AIInvalidResponseError,
@@ -26,6 +27,7 @@ def response_payload() -> dict[str, object]:
                         "type": "output_text",
                         "text": json.dumps(
                             {
+                                "title": "看到需求时的我",
                                 "description": "一只猫正在表达震惊。",
                                 "tags": [
                                     {"name": "反应图", "confidence": 0.93},
@@ -50,6 +52,7 @@ def chat_response_payload() -> dict[str, object]:
                 "message": {
                     "content": json.dumps(
                         {
+                            "title": "看到需求时的我",
                             "description": "一组有序反应图。",
                             "tags": [
                                 {"name": "反应图", "confidence": 0.9},
@@ -178,6 +181,18 @@ def test_client_reads_environment_and_sends_structured_image_request() -> None:
     assert payload["model"] == "gpt-5.6-luna"
     assert payload["store"] is False
     assert payload["text"]["format"]["type"] == "json_schema"
+    title_schema = payload["text"]["format"]["schema"]["properties"]["title"]
+    assert title_schema == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255,
+    }
+    assert ANALYSIS_SCHEMA["required"] == [
+        "title",
+        "description",
+        "tags",
+        "template_id",
+    ]
     tag_schema = payload["text"]["format"]["schema"]["properties"]["tags"]
     assert tag_schema["minItems"] == 2
     assert tag_schema["maxItems"] == 8
@@ -199,6 +214,7 @@ def test_client_reads_environment_and_sends_structured_image_request() -> None:
     assert user_content[2]["type"] == "input_image"
     assert user_content[2]["image_url"].startswith("data:image/png;base64,")
     assert result.model_name == "gpt-5.6-luna-2026-07-01"
+    assert result.title == "看到需求时的我"
     assert result.description == "一只猫正在表达震惊。"
     assert result.tags[0].name == "反应图"
     assert result.tags[0].confidence == 0.93
@@ -252,6 +268,7 @@ def test_client_rejects_fewer_than_two_tags() -> None:
     payload = response_payload()
     payload["output"][0]["content"][0]["text"] = json.dumps(
         {
+            "title": "看到需求时的我",
             "description": "一只猫正在表达震惊。",
             "tags": [{"name": "震惊", "confidence": 0.9}],
             "template_id": None,
@@ -313,6 +330,7 @@ def test_chat_compatible_client_sends_image_and_parses_json() -> None:
                         "message": {
                             "content": json.dumps(
                                 {
+                                    "title": "看到需求时的我",
                                     "description": "一张惊讶反应图。",
                                     "tags": [
                                         {
@@ -360,6 +378,7 @@ def test_chat_compatible_client_sends_image_and_parses_json() -> None:
         "data:image/png;base64,"
     )
     assert result.model_name == "qwen3.6-flash"
+    assert result.title == "看到需求时的我"
     assert result.tags[0].name == "反应图"
     assert len(result.tags) == 2
 
@@ -368,6 +387,7 @@ def test_client_rejects_non_integer_template_id() -> None:
     payload = response_payload()
     payload["output"][0]["content"][0]["text"] = json.dumps(
         {
+            "title": "看到需求时的我",
             "description": "描述",
             "tags": [
                 {"name": "反应图", "confidence": 0.9},
@@ -417,3 +437,34 @@ def test_client_retries_retryable_status_only() -> None:
         )
 
     assert calls == 2
+
+
+@pytest.mark.parametrize("title", ["", "   ", "题" * 256])
+def test_client_rejects_invalid_suggested_title(title: str) -> None:
+    payload = response_payload()
+    payload["output"][0]["content"][0]["text"] = json.dumps(
+        {
+            "title": title,
+            "description": "一只猫正在表达震惊。",
+            "tags": [
+                {"name": "反应图", "confidence": 0.9},
+                {"name": "震惊", "confidence": 0.8},
+            ],
+            "template_id": None,
+        },
+        ensure_ascii=False,
+    )
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(200, json=payload)
+    )
+    with httpx.Client(transport=transport) as http_client:
+        client = OpenAIResponsesClient(
+            api_key="secret",
+            http_client=http_client,
+        )
+        with pytest.raises(AIInvalidResponseError, match="invalid response"):
+            client.analyze_image(
+                image_bytes=b"image",
+                mime_type="image/png",
+                existing_tags=[],
+            )

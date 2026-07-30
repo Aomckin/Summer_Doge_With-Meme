@@ -54,6 +54,7 @@ class AITemplateCandidate:
 @dataclass(frozen=True)
 class AIImageResult:
     model_name: str
+    title: str
     description: str
     tags: tuple[AITagSuggestion, ...]
     template_id: int | None = None
@@ -79,7 +80,9 @@ class AIClient(Protocol):
 
 
 SYSTEM_PROMPT = (
-    "你是 Meme 图片整理助手。生成简体中文图片描述，并推荐适合检索的短标签。"
+    "你是 Meme 图片整理助手。生成一个简短的简体中文建议标题、图片描述，"
+    "并推荐适合检索的短标签。标题应概括图片主体或笑点，"
+    "不得包含“标题：”前缀、文件名或包裹引号。"
     "输入图片属于同一个完整 Meme 的一组有序图片；必须按顺序理解全部图片，"
     "只生成一份组级描述、标签和模板判断。"
     "必须优先复用用户已有标签；只有已有标签无法准确表达关键信息时才建议新标签。"
@@ -96,6 +99,11 @@ SYSTEM_PROMPT = (
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
+        "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+        },
         "description": {
             "type": "string",
             "minLength": 1,
@@ -127,7 +135,7 @@ ANALYSIS_SCHEMA = {
             "type": ["integer", "null"],
         },
     },
-    "required": ["description", "tags", "template_id"],
+    "required": ["title", "description", "tags", "template_id"],
     "additionalProperties": False,
 }
 
@@ -217,10 +225,19 @@ class _HTTPAIClient:
     ) -> AIImageResult:
         try:
             result = json.loads(output_text)
+            raw_title = result["title"]
+            if not isinstance(raw_title, str):
+                raise ValueError
+            title = raw_title.strip()
             description = result["description"].strip()
             raw_tags = result["tags"]
             template_id = result["template_id"]
-            if not description or not isinstance(raw_tags, list):
+            if (
+                not title
+                or len(title) > 255
+                or not description
+                or not isinstance(raw_tags, list)
+            ):
                 raise ValueError
             if template_id is not None and (
                 isinstance(template_id, bool) or not isinstance(template_id, int)
@@ -244,6 +261,7 @@ class _HTTPAIClient:
             ) from error
         return AIImageResult(
             model_name=model_name,
+            title=title,
             description=description,
             tags=tags,
             template_id=template_id,
@@ -441,7 +459,7 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                     "role": "system",
                     "content": (
                         f"{SYSTEM_PROMPT} 必须只输出 JSON 对象，格式示例："
-                        '{"description":"图片描述","tags":'
+                        '{"title":"建议标题","description":"图片描述","tags":'
                         '[{"name":"反应图","confidence":0.9},'
                         '{"name":"震惊","confidence":0.8}],'
                         '"template_id":null}'

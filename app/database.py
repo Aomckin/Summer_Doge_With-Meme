@@ -57,7 +57,7 @@ def create_tables() -> None:
 
 
 def run_startup_migrations(bind: Engine = engine) -> None:
-    """Apply additive SQLite upgrades through v0.4 without rebuilding tables."""
+    """Apply additive SQLite upgrades without rebuilding tables."""
     if bind.dialect.name != "sqlite":
         return
 
@@ -68,6 +68,11 @@ def run_startup_migrations(bind: Engine = engine) -> None:
             "meme_ai_analyses",
             "suggested_template_id",
             "ALTER TABLE meme_ai_analyses ADD COLUMN suggested_template_id INTEGER",
+        ),
+        (
+            "meme_ai_analyses",
+            "suggested_title",
+            "ALTER TABLE meme_ai_analyses ADD COLUMN suggested_title VARCHAR(255)",
         ),
         ("templates", "reference_stored_filename", "ALTER TABLE templates ADD COLUMN reference_stored_filename VARCHAR(255)"),
         ("templates", "reference_thumbnail_filename", "ALTER TABLE templates ADD COLUMN reference_thumbnail_filename VARCHAR(255)"),

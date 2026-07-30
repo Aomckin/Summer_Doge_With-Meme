@@ -241,6 +241,7 @@ describe("AI analysis", () => {
       id: 3,
       meme_id: 7,
       model_name: "gpt-5.6-luna-test",
+      suggested_title: "看到需求时的我",
       description: "AI 描述",
       suggestions: [
         { name: "reaction", confidence: 0.91, existing: true },
@@ -259,6 +260,7 @@ describe("AI analysis", () => {
     await confirmAIAnalysis(7, 3, {
       tags: [" Reaction ", "reaction", "NEW"],
       apply_description: true,
+      apply_title: true,
       template_id: null,
       apply_template: false,
     });
@@ -273,6 +275,7 @@ describe("AI analysis", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       tags: ["reaction", "new"],
       apply_description: true,
+      apply_title: true,
       template_id: null,
       apply_template: false,
     });

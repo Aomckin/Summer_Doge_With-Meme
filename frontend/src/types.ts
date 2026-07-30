@@ -93,6 +93,7 @@ export interface AIAnalysisResponse {
   id: number;
   meme_id: number;
   model_name: string;
+  suggested_title: string | null;
   description: string;
   suggestions: AITagSuggestionResponse[];
   created_at: string;
@@ -103,6 +104,7 @@ export interface AIAnalysisResponse {
 export interface AIAnalysisConfirmPayload {
   tags: string[];
   apply_description: boolean;
+  apply_title: boolean;
   template_id: number | null;
   apply_template: boolean;
 }
@@ -231,6 +233,7 @@ export interface AppState {
   aiAnalysis: AIAnalysisResponse | null;
   selectedAITags: string[];
   applyAIDescription: boolean;
+  applyAITitle: boolean;
   selectedAITemplateId: number | null;
   applyAITemplate: boolean;
   aiError: string | null;

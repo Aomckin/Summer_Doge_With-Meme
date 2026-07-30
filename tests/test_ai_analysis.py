@@ -91,6 +91,7 @@ def create_service(tmp_path: Path) -> tuple[MemeService, Session]:
 def ai_result() -> AIImageResult:
     return AIImageResult(
         model_name="gpt-5.6-luna-snapshot",
+        title="看到需求时的我",
         description="  一张适合作为反应图的紫色图片。  ",
         tags=(
             AITagSuggestion("reaction", 0.91),
@@ -123,6 +124,7 @@ def test_analysis_records_model_and_suggestions_without_applying_them(
         assert client.calls[0]["mime_type"] == "image/png"
         assert client.calls[0]["existing_tags"] == ["funny"]
         assert analysis.model_name == "gpt-5.6-luna-snapshot"
+        assert analysis.suggested_title == "看到需求时的我"
         assert analysis.description == "一张适合作为反应图的紫色图片。"
         assert suggestions == [
             {"name": "funny", "confidence": 1.0, "existing": True},
@@ -195,6 +197,7 @@ def test_analysis_requires_at_least_two_unique_suggestions(
         )
         result = AIImageResult(
             model_name="gpt-5.6-luna-snapshot",
+            title="看到需求时的我",
             description="一张紫色图片。",
             tags=(
                 AITagSuggestion("震惊", 0.9),
@@ -231,6 +234,7 @@ def test_confirmation_adds_ai_tags_and_optionally_applies_description(
 
         links = {link.tag.name: link for link in updated.tag_links}
         assert updated.description == "一张适合作为反应图的紫色图片。"
+        assert updated.title == "AI 测试"
         assert links["funny"].source == "user"
         assert links["funny"].confidence is None
         assert links["reaction"].source == "ai"
@@ -242,6 +246,57 @@ def test_confirmation_adds_ai_tags_and_optionally_applies_description(
                 analysis.id,
                 tags=[],
                 apply_description=False,
+            )
+    finally:
+        session.close()
+
+
+def test_confirmation_applies_suggested_title_only_when_requested(
+    tmp_path: Path,
+) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        meme = service.create_meme(
+            "example.png",
+            make_image_bytes(),
+            title="原始标题",
+        )
+        analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
+
+        updated = service.confirm_ai_analysis(
+            meme.id,
+            analysis.id,
+            tags=[],
+            apply_description=False,
+            apply_title=True,
+        )
+
+        assert updated.title == "看到需求时的我"
+    finally:
+        session.close()
+
+
+def test_confirmation_rejects_applying_title_from_legacy_analysis(
+    tmp_path: Path,
+) -> None:
+    service, session = create_service(tmp_path)
+    try:
+        meme = service.create_meme(
+            "example.png",
+            make_image_bytes(),
+            title="原始标题",
+        )
+        analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
+        analysis.suggested_title = None
+        session.flush()
+
+        with pytest.raises(ValueError, match="does not have a suggested title"):
+            service.confirm_ai_analysis(
+                meme.id,
+                analysis.id,
+                tags=[],
+                apply_description=False,
+                apply_title=True,
             )
     finally:
         session.close()
@@ -284,6 +339,7 @@ def test_ai_template_match_is_validated_and_applied_only_on_confirmation(
         )
         result = AIImageResult(
             model_name="fake",
+            title="看到需求时的我",
             description="描述",
             tags=(
                 AITagSuggestion("反应图", 0.9),
@@ -325,6 +381,7 @@ def test_ai_template_match_rejects_id_outside_candidates(tmp_path: Path) -> None
         )
         result = AIImageResult(
             model_name="fake",
+            title="看到需求时的我",
             description="描述",
             tags=(
                 AITagSuggestion("反应图", 0.9),

@@ -37,6 +37,7 @@ class FakeAIClient:
 def fake_ai_result() -> AIImageResult:
     return AIImageResult(
         model_name="gpt-5.6-luna-test",
+        title="看到需求时的我",
         description="AI 生成的图片描述",
         tags=(
             AITagSuggestion("funny", 0.94),
@@ -162,6 +163,7 @@ def test_ai_analysis_requires_confirmation_before_applying_tags(
     assert analysis_response.status_code == 200
     analysis = analysis_response.json()
     assert analysis["model_name"] == "gpt-5.6-luna-test"
+    assert analysis["suggested_title"] == "看到需求时的我"
     assert analysis["description"] == "AI 生成的图片描述"
     assert analysis["suggestions"] == [
         {"name": "funny", "confidence": 0.94, "existing": True},
@@ -184,6 +186,7 @@ def test_ai_analysis_requires_confirmation_before_applying_tags(
     )
 
     assert confirmed.status_code == 200
+    assert confirmed.json()["title"] == "AI API 测试"
     assert confirmed.json()["description"] == "AI 生成的图片描述"
     assert [tag["name"] for tag in confirmed.json()["tags"]] == [
         "funny",
@@ -200,6 +203,78 @@ def test_ai_analysis_requires_confirmation_before_applying_tags(
     assert stored_analysis is not None
     assert stored_analysis.confirmed_at is not None
     assert repeated.status_code == 409
+
+
+def test_ai_analysis_applies_suggested_title_when_requested(api_context) -> None:
+    app, _, _ = api_context
+    api_module, _ = load_api_components()
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        fake_ai_result()
+    )
+    uploaded = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("title.png", make_image_bytes(), "image/png")},
+        data={"title": "原始标题"},
+    ).json()
+    analysis = request(
+        app,
+        "POST",
+        f"/api/memes/{uploaded['id']}/analyze",
+    ).json()
+
+    confirmed = request(
+        app,
+        "POST",
+        f"/api/memes/{uploaded['id']}/analyses/{analysis['id']}/confirm",
+        json={
+            "tags": [],
+            "apply_description": False,
+            "apply_title": True,
+        },
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["title"] == "看到需求时的我"
+
+
+def test_ai_analysis_rejects_applying_missing_legacy_title(api_context) -> None:
+    app, session, _ = api_context
+    api_module, _ = load_api_components()
+    app.dependency_overrides[api_module.get_ai_client] = lambda: FakeAIClient(
+        fake_ai_result()
+    )
+    uploaded = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("legacy.png", make_image_bytes(), "image/png")},
+        data={"title": "原始标题"},
+    ).json()
+    analysis = request(
+        app,
+        "POST",
+        f"/api/memes/{uploaded['id']}/analyze",
+    ).json()
+    stored = session.get(MemeAIAnalysis, analysis["id"])
+    assert stored is not None
+    stored.suggested_title = None
+    session.flush()
+
+    confirmed = request(
+        app,
+        "POST",
+        f"/api/memes/{uploaded['id']}/analyses/{analysis['id']}/confirm",
+        json={
+            "tags": [],
+            "apply_description": False,
+            "apply_title": True,
+        },
+    )
+
+    assert confirmed.status_code == 422
+    assert "does not have a suggested title" in confirmed.json()["detail"]
 
 
 def test_ai_analysis_maps_configuration_timeout_and_invalid_confirmation(

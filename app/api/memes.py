@@ -170,6 +170,7 @@ def _to_ai_analysis_response(
         id=analysis.id,
         meme_id=analysis.meme_id,
         model_name=analysis.model_name,
+        suggested_title=analysis.suggested_title,
         description=analysis.description,
         suggestions=AIAnalysisRepository.load_suggestions(analysis),
         created_at=analysis.created_at,
@@ -364,6 +365,7 @@ def confirm_ai_analysis(
             analysis_id,
             tags=payload.tags,
             apply_description=payload.apply_description,
+            apply_title=payload.apply_title,
             template_id=payload.template_id,
             apply_template=payload.apply_template,
         )

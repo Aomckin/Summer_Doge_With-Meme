@@ -358,6 +358,11 @@ class MemeService:
                 "AI template_id is not in the provided template candidates"
             )
         suggestions = self._normalize_ai_suggestions(result)
+        suggested_title = result.title.strip()
+        if not suggested_title or len(suggested_title) > 255:
+            raise AIInvalidResponseError(
+                "AI title must contain 1 to 255 characters"
+            )
         description = result.description.strip()
         if not description:
             raise AIInvalidResponseError("AI description cannot be empty")
@@ -366,6 +371,7 @@ class MemeService:
             analysis = self.ai_analysis_repository.create(
                 meme,
                 model_name=result.model_name[:100],
+                suggested_title=suggested_title,
                 description=description,
                 suggestions=suggestions,
                 suggested_template_id=result.template_id,
@@ -383,6 +389,7 @@ class MemeService:
         *,
         tags: Sequence[str],
         apply_description: bool,
+        apply_title: bool = False,
         template_id: int | None = None,
         apply_template: bool = False,
     ) -> Meme:
@@ -395,6 +402,10 @@ class MemeService:
         if analysis.confirmed_at is not None:
             raise AIAnalysisAlreadyConfirmedError(
                 f"AI analysis {analysis_id} has already been confirmed"
+            )
+        if apply_title and analysis.suggested_title is None:
+            raise ValueError(
+                f"AI analysis {analysis_id} does not have a suggested title"
             )
 
         suggestions = self.ai_analysis_repository.load_suggestions(analysis)
@@ -430,6 +441,8 @@ class MemeService:
             )
             if apply_description:
                 self.repository.update(meme, {"description": analysis.description})
+            if apply_title:
+                self.repository.update(meme, {"title": analysis.suggested_title})
             if apply_template:
                 self.repository.update(meme, {"template_id": template_id})
             analysis.confirmed_at = datetime.now(UTC)

@@ -621,6 +621,27 @@ export function renderLibrary(
     : "加载更多";
 }
 
+export function renderMemeCard(
+  elements: AppElements,
+  meme: MemeResponse,
+  selected: boolean,
+): void {
+  const current = elements.memeGrid.querySelector<HTMLElement>(
+    `[data-meme-id="${meme.id}"]`,
+  );
+  if (!current) {
+    return;
+  }
+  const template = document.createElement("template");
+  template.innerHTML = cardMarkup(meme, selected).trim();
+  const replacement = template.content.firstElementChild;
+  if (!(replacement instanceof HTMLElement)) {
+    return;
+  }
+  current.replaceWith(replacement);
+  bindImageFallbacks(replacement);
+}
+
 function detailImage(meme: MemeResponse, state: AppState): string {
   const images = meme.images.length ? meme.images : [{
     id: 0, image_url: meme.image_url, width: meme.width, height: meme.height,
@@ -753,7 +774,7 @@ function aiAnalysisMarkup(state: AppState): string {
         <div class="ai-panel-heading">
           <div>
             <p class="eyebrow">AI ASSIST</p>
-            <h3 id="ai-panel-title">智能描述与标签</h3>
+            <h3 id="ai-panel-title">智能标题、描述与标签</h3>
           </div>
           <button
             class="button button-primary"
@@ -762,7 +783,7 @@ function aiAnalysisMarkup(state: AppState): string {
             ${state.analyzing ? "disabled" : ""}
           >${state.analyzing ? "正在分析…" : "AI 分析"}</button>
         </div>
-        <p class="ai-hint">分析结果仅供预览，确认前不会修改描述、标签或模板。</p>
+        <p class="ai-hint">分析结果仅供预览，确认前不会修改标题、描述、标签或模板。</p>
         ${error}
       </section>
     `;
@@ -794,6 +815,22 @@ function aiAnalysisMarkup(state: AppState): string {
       ${analysis.suggested_template.description ? `<p class="muted">${escapeHtml(analysis.suggested_template.description)}</p>` : ""}
     `
     : '<p class="muted">模板匹配：未找到合适的已有模板</p>';
+  const suggestedTitle = analysis.suggested_title
+    ? `
+      <div class="ai-title-suggestion">
+        <p><strong>建议标题：${escapeHtml(analysis.suggested_title)}</strong></p>
+        <label class="check-row">
+          <input
+            type="checkbox"
+            data-ai-title
+            ${state.applyAITitle ? "checked" : ""}
+            ${state.confirmingAnalysis ? "disabled" : ""}
+          >
+          <span>采用建议标题</span>
+        </label>
+      </div>
+    `
+    : "";
 
   return `
     <section class="ai-panel has-result" aria-labelledby="ai-panel-title">
@@ -809,6 +846,7 @@ function aiAnalysisMarkup(state: AppState): string {
           ${state.analyzing || state.confirmingAnalysis ? "disabled" : ""}
         >${state.analyzing ? "正在分析…" : "重新分析"}</button>
       </div>
+      ${suggestedTitle}
       <p class="ai-description">${escapeHtml(analysis.description)}</p>
       <label class="ai-description-choice">
         <input

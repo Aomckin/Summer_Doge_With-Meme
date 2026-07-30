@@ -271,6 +271,7 @@ export function confirmAIAnalysis(
       body: JSON.stringify({
         tags: normalizeTags(payload.tags),
         apply_description: payload.apply_description,
+        apply_title: payload.apply_title,
         template_id: payload.template_id,
         apply_template: payload.apply_template,
       }),

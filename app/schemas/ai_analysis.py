@@ -15,6 +15,7 @@ class AIAnalysisResponse(BaseModel):
     id: int
     meme_id: int
     model_name: str
+    suggested_title: str | None
     description: str
     suggestions: list[AITagSuggestionResponse]
     created_at: datetime
@@ -25,5 +26,6 @@ class AIAnalysisResponse(BaseModel):
 class AIAnalysisConfirm(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=8)
     apply_description: bool = False
+    apply_title: bool = False
     template_id: int | None = None
     apply_template: bool = False

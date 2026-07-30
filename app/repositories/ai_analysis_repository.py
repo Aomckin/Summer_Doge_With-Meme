@@ -17,6 +17,7 @@ class AIAnalysisRepository:
         meme: Meme,
         *,
         model_name: str,
+        suggested_title: str,
         description: str,
         suggestions: Sequence[dict[str, object]],
         suggested_template_id: int | None = None,
@@ -24,6 +25,7 @@ class AIAnalysisRepository:
         analysis = MemeAIAnalysis(
             meme=meme,
             model_name=model_name,
+            suggested_title=suggested_title,
             description=description,
             suggestions_json=json.dumps(
                 list(suggestions),

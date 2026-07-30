@@ -223,7 +223,6 @@ export interface AppState {
   hasMore: boolean;
   loadingList: boolean;
   loadingMore: boolean;
-  uploading: boolean;
   saving: boolean;
   deleting: boolean;
   randomizing: boolean;

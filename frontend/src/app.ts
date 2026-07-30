@@ -42,6 +42,7 @@ import type {
   TemplateUpdatePayload,
   UploadMemeInput,
 } from "./types";
+import { BatchUploadController } from "./batch-upload";
 import {
   AISettingsController,
   type AISettingsApi,
@@ -59,8 +60,6 @@ import {
   renderTags,
   renderTemplateManager,
   renderToolbar,
-  renderUploadTemplates,
-  setUploadBusy,
 } from "./ui";
 
 const PAGE_SIZE = 24;
@@ -150,7 +149,6 @@ function initialState(): AppState {
     hasMore: false,
     loadingList: false,
     loadingMore: false,
-    uploading: false,
     saving: false,
     deleting: false,
     randomizing: false,
@@ -199,7 +197,6 @@ export class MemeVaultApp {
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private editing = false;
   private editDraft: EditDraft | null = null;
-  private uploadError: string | null = null;
   private templateEditingId: number | null = null;
   private templateBusy = false;
   private templateError: string | null = null;
@@ -208,6 +205,7 @@ export class MemeVaultApp {
   private draggedImageId: number | null = null;
   private relationRemovalToken: symbol | null = null;
   private readonly settings: AISettingsController;
+  private readonly batchUpload: BatchUploadController;
 
   constructor(
     root: HTMLElement,
@@ -215,6 +213,16 @@ export class MemeVaultApp {
   ) {
     this.elements = mountShell(root);
     this.settings = new AISettingsController(this.elements, this.api);
+    this.batchUpload = new BatchUploadController({
+      uploadMeme: (input) => this.api.uploadMeme(input),
+      onComplete: async () => {
+        await Promise.all([
+          this.reloadMemes(),
+          this.refreshTags(),
+          this.refreshTemplates(),
+        ]);
+      },
+    });
     this.bindEvents();
     this.render();
   }
@@ -288,7 +296,7 @@ export class MemeVaultApp {
       void this.randomize();
     });
     this.elements.openUploadButton.addEventListener("click", () => {
-      this.openUpload();
+      this.batchUpload.open(this.state.availableTemplates);
     });
     this.elements.openSettingsButton.addEventListener("click", () => {
       this.settings.open();
@@ -340,14 +348,6 @@ export class MemeVaultApp {
         void this.removeTemplate(Number(deleteButton.dataset.deleteTemplate));
       }
     });
-    for (const button of document.querySelectorAll("[data-close-upload]")) {
-      button.addEventListener("click", () => this.closeUpload());
-    }
-    this.elements.uploadForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void this.submitUpload();
-    });
-
     this.elements.detailPanel.addEventListener("click", (event) => {
       const target = event.target as Element;
       if (target.closest("[data-open-viewer]")) {
@@ -531,7 +531,6 @@ export class MemeVaultApp {
 
   private render(): void {
     renderToolbar(this.elements, this.state);
-    renderUploadTemplates(this.elements, this.state);
     renderOperationError(this.elements, this.state);
     renderTags(this.elements, this.state);
     renderLibrary(this.elements, this.state);
@@ -542,11 +541,6 @@ export class MemeVaultApp {
       this.editDraft,
     );
     renderRelationDialog(this.elements, this.state);
-    setUploadBusy(
-      this.elements,
-      this.state.uploading,
-      this.uploadError,
-    );
   }
 
   private async refreshTemplates(): Promise<void> {
@@ -566,7 +560,7 @@ export class MemeVaultApp {
           this.state.applyAITemplate = false;
         }
       }
-      renderUploadTemplates(this.elements, this.state);
+      this.batchUpload.setTemplates(this.state.availableTemplates);
       renderDetail(
         this.elements,
         this.state,
@@ -1021,63 +1015,6 @@ export class MemeVaultApp {
       );
     } finally {
       this.state.randomizing = false;
-      renderToolbar(this.elements, this.state);
-    }
-  }
-
-  private openUpload(): void {
-    this.uploadError = null;
-    this.elements.uploadForm.reset();
-    setUploadBusy(this.elements, false, null);
-    this.elements.uploadDialog.showModal();
-  }
-
-  private closeUpload(): void {
-    if (!this.state.uploading) {
-      this.elements.uploadDialog.close();
-    }
-  }
-
-  private async submitUpload(): Promise<void> {
-    if (this.state.uploading) {
-      return;
-    }
-    const file = this.elements.uploadFile.files?.[0];
-    const title = value(this.elements.uploadForm, "title").trim();
-    if (!file || !title) {
-      this.uploadError = "请选择图片并填写标题。";
-      setUploadBusy(this.elements, false, this.uploadError);
-      return;
-    }
-
-    this.state.uploading = true;
-    this.uploadError = null;
-    setUploadBusy(this.elements, true, null);
-    try {
-      const created = await this.api.uploadMeme({
-        file,
-        title,
-        description: value(this.elements.uploadForm, "description"),
-        source: value(this.elements.uploadForm, "source"),
-        tags: parseTagInput(value(this.elements.uploadForm, "tags")),
-        template_id: value(this.elements.uploadForm, "template_id")
-          ? Number(value(this.elements.uploadForm, "template_id"))
-          : null,
-      });
-      this.elements.uploadDialog.close();
-      this.elements.uploadForm.reset();
-      this.selectMeme(created);
-      await Promise.all([this.refreshTags(), this.reloadMemes()]);
-      this.selectMeme(created);
-    } catch (error) {
-      this.uploadError = readableError(error);
-    } finally {
-      this.state.uploading = false;
-      setUploadBusy(
-        this.elements,
-        false,
-        this.uploadError,
-      );
       renderToolbar(this.elements, this.state);
     }
   }

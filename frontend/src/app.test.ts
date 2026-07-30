@@ -351,7 +351,7 @@ describe("MemeVaultApp", () => {
     );
   });
 
-  it("uploads, edits and deletes the selected Meme", async () => {
+  it("opens batch upload, refreshes page data, then edits and deletes", async () => {
     const created = makeMeme(2, "新上传");
     const edited = {
       ...created,
@@ -373,29 +373,31 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), api);
     await app.start();
 
-    button("上传 Meme").click();
-    const dialog = document.querySelector<HTMLDialogElement>("#upload-dialog");
-    const uploadForm = document.querySelector<HTMLFormElement>("#upload-form");
+    button("图片上传").click();
+    const dialog = document.querySelector<HTMLDialogElement>(
+      "[data-batch-dialog]",
+    );
     const fileInput =
-      document.querySelector<HTMLInputElement>("#upload-file");
-    if (!dialog || !uploadForm || !fileInput) {
+      document.querySelector<HTMLInputElement>('[name="batch_files"]');
+    if (!dialog || !fileInput) {
       throw new Error("Missing upload controls");
     }
-    const file = new File(["image"], "new.png", { type: "image/png" });
+    const file = new File(["image"], "新上传.png", { type: "image/png" });
     Object.defineProperty(fileInput, "files", { value: [file] });
-    const titleInput = uploadForm.elements.namedItem("title") as HTMLInputElement;
-    titleInput.value = "新上传";
-    uploadForm.dispatchEvent(
-      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
-    );
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    button("开始上传").click();
 
     await vi.waitFor(() => {
       expect(dialog.open).toBe(false);
-      expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
-        "新上传",
-      );
+      expect(document.querySelector('[data-meme-id="2"]')).not.toBeNull();
     });
+    expect(api.uploadMeme).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "新上传" }),
+    );
+    expect(api.listTags).toHaveBeenCalledTimes(2);
+    expect(api.listTemplates).toHaveBeenCalledTimes(2);
 
+    document.querySelector<HTMLButtonElement>('[data-meme-id="2"]')?.click();
     button("编辑").click();
     const editForm = document.querySelector<HTMLFormElement>("#edit-form");
     if (!editForm) {
@@ -458,13 +460,14 @@ describe("MemeVaultApp", () => {
     document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
     expect(document.querySelector(".metadata")?.textContent).toContain("Doge");
 
-    button("上传 Meme").click();
-    const uploadForm = document.querySelector<HTMLFormElement>("#upload-form");
+    button("图片上传").click();
     const fileInput =
-      document.querySelector<HTMLInputElement>("#upload-file");
+      document.querySelector<HTMLInputElement>('[name="batch_files"]');
     const uploadTemplate =
-      document.querySelector<HTMLSelectElement>("#upload-template");
-    if (!uploadForm || !fileInput || !uploadTemplate) {
+      document.querySelector<HTMLSelectElement>(
+        '[data-batch-dialog] [name="template_id"]',
+      );
+    if (!fileInput || !uploadTemplate) {
       throw new Error("Missing upload template controls");
     }
     expect(uploadTemplate.textContent).toContain("Doge");
@@ -472,17 +475,18 @@ describe("MemeVaultApp", () => {
     Object.defineProperty(fileInput, "files", {
       value: [new File(["image"], "doge.png", { type: "image/png" })],
     });
-    (uploadForm.elements.namedItem("title") as HTMLInputElement).value =
-      "上传模板 Meme";
-    uploadForm.dispatchEvent(
-      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
-    );
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    button("开始上传").click();
     await vi.waitFor(() => {
       expect(api.uploadMeme).toHaveBeenCalledWith(
         expect.objectContaining({ template_id: 3 }),
       );
     });
 
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-meme-id="2"]')).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>('[data-meme-id="2"]')?.click();
     button("编辑").click();
     const editForm = document.querySelector<HTMLFormElement>("#edit-form");
     const editTemplate = editForm?.elements.namedItem(

@@ -20,12 +20,6 @@ export interface AppElements {
   memeGrid: HTMLElement;
   loadMoreButton: HTMLButtonElement;
   detailPanel: HTMLElement;
-  uploadDialog: HTMLDialogElement;
-  uploadForm: HTMLFormElement;
-  uploadFile: HTMLInputElement;
-  uploadError: HTMLElement;
-  uploadSubmit: HTMLButtonElement;
-  uploadTemplateSelect: HTMLSelectElement;
   templateDialog: HTMLDialogElement;
   templateForm: HTMLFormElement;
   templateList: HTMLElement;
@@ -125,7 +119,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
-          <button id="open-upload" class="button button-primary" type="button">上传 Meme</button>
+          <button id="open-upload" class="button button-primary" type="button">图片上传</button>
         </div>
       </header>
 
@@ -148,50 +142,6 @@ export function mountShell(root: HTMLElement): AppElements {
         <aside id="detail-panel" class="detail-panel" aria-label="Meme 详情"></aside>
       </main>
     </div>
-
-    <dialog id="upload-dialog" class="modal" aria-labelledby="upload-dialog-title">
-      <form id="upload-form" class="modal-card">
-        <div class="modal-heading">
-          <div>
-            <p class="eyebrow">NEW MEME</p>
-            <h2 id="upload-dialog-title">上传 Meme</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-upload aria-label="关闭">×</button>
-        </div>
-        <label>
-          <span>图片</span>
-          <input id="upload-file" name="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required>
-        </label>
-        <label>
-          <span>标题</span>
-          <input name="title" type="text" maxlength="255" required>
-        </label>
-        <label>
-          <span>描述</span>
-          <textarea name="description" rows="3"></textarea>
-        </label>
-        <label>
-          <span>来源</span>
-          <input name="source" type="text" maxlength="500">
-        </label>
-        <label>
-          <span>标签</span>
-          <input name="tags" type="text" placeholder="funny, reaction">
-          <small>使用英文逗号分隔</small>
-        </label>
-        <label>
-          <span>模板</span>
-          <select id="upload-template" name="template_id">
-            <option value="">无模板</option>
-          </select>
-        </label>
-        <p id="upload-error" class="form-error" role="alert" hidden></p>
-        <div class="modal-actions">
-          <button class="button button-ghost" type="button" data-close-upload>取消</button>
-          <button id="upload-submit" class="button button-primary" type="submit">开始上传</button>
-        </div>
-      </form>
-    </dialog>
 
     <dialog id="template-dialog" class="settings-dialog" aria-labelledby="template-dialog-title">
       <div class="settings-shell template-settings-shell">
@@ -419,12 +369,6 @@ export function mountShell(root: HTMLElement): AppElements {
     memeGrid: required(root, "#meme-grid"),
     loadMoreButton: required(root, "#load-more"),
     detailPanel: required(root, "#detail-panel"),
-    uploadDialog: required(document, "#upload-dialog"),
-    uploadForm: required(document, "#upload-form"),
-    uploadFile: required(document, "#upload-file"),
-    uploadError: required(document, "#upload-error"),
-    uploadSubmit: required(document, "#upload-submit"),
-    uploadTemplateSelect: required(document, "#upload-template"),
     templateDialog: required(document, "#template-dialog"),
     templateForm: required(document, "#template-form"),
     templateList: required(document, "#template-list"),
@@ -462,7 +406,6 @@ export function renderToolbar(
   elements.randomButton.textContent = state.randomizing
     ? "正在抽取…"
     : "随机一个";
-  elements.openUploadButton.disabled = state.uploading;
 }
 
 function templateOptions(
@@ -476,14 +419,6 @@ function templateOptions(
         `<option value="${template.id}"${selectedId === String(template.id) ? " selected" : ""}>${escapeHtml(template.name)}</option>`,
     ),
   ].join("");
-}
-
-export function renderUploadTemplates(
-  elements: AppElements,
-  state: AppState,
-): void {
-  const selected = elements.uploadTemplateSelect.value;
-  elements.uploadTemplateSelect.innerHTML = templateOptions(state, selected);
 }
 
 export function renderTemplateManager(
@@ -1121,15 +1056,4 @@ export function renderRelationDialog(
   elements.relationError.hidden = !state.relationError;
   elements.relationError.textContent = state.relationError ?? "";
   bindImageFallbacks(elements.relationCandidates);
-}
-
-export function setUploadBusy(
-  elements: AppElements,
-  busy: boolean,
-  error: string | null,
-): void {
-  elements.uploadSubmit.disabled = busy;
-  elements.uploadSubmit.textContent = busy ? "正在上传…" : "开始上传";
-  elements.uploadError.hidden = !error;
-  elements.uploadError.textContent = error ?? "";
 }

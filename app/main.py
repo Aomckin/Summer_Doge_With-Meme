@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.ai_settings import router as ai_settings_router
+from app.api.captions import router as caption_router
 from app.api.memes import router as meme_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
@@ -55,7 +56,11 @@ def create_app(
     resolved_template_images.mkdir(parents=True, exist_ok=True)
     resolved_template_thumbnails.mkdir(parents=True, exist_ok=True)
 
-    application = FastAPI(title="Meme Vault", lifespan=lifespan)
+    application = FastAPI(
+        title="Meme Vault",
+        version="0.5.1",
+        lifespan=lifespan,
+    )
     application.state.images_dir = resolved_images
     application.state.thumbnails_dir = resolved_thumbnails
     application.state.template_images_dir = resolved_template_images
@@ -76,6 +81,7 @@ def create_app(
 
     # 各业务路由在独立模块中定义，入口文件只负责把它们挂到应用上。
     application.include_router(meme_router)
+    application.include_router(caption_router)
     application.include_router(tag_router)
     application.include_router(ai_settings_router)
     application.include_router(template_router)

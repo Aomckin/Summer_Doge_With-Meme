@@ -12,6 +12,7 @@ from app.database import Base
 # 这些类型只帮助编辑器理解注解；运行时不导入，可避免 Meme 与 Tag 循环导入。
 if TYPE_CHECKING:
     from app.models.ai_analysis import MemeAIAnalysis
+    from app.models.caption import Caption
     from app.models.tag import MemeTag, Tag
     from app.models.template import Template
     from app.models.meme_image import MemeImage
@@ -70,6 +71,10 @@ class Meme(Base):
         back_populates="meme",
         cascade="all, delete-orphan",
     )
+    captions: Mapped[list["Caption"]] = relationship(
+        back_populates="meme",
+        cascade="all, delete-orphan",
+    )
     images: Mapped[list["MemeImage"]] = relationship(
         back_populates="meme",
         cascade="all, delete-orphan",
@@ -83,6 +88,7 @@ class Meme(Base):
 
 # 运行时登记关联模型，确保只导入 Meme 后 SQLAlchemy 也能解析关系并建新表。
 from app.models import ai_analysis as _ai_analysis  # noqa: E402,F401
+from app.models import caption as _caption  # noqa: E402,F401
 from app.models import template as _template  # noqa: E402,F401
 from app.models import meme_image as _meme_image  # noqa: E402,F401
 from app.models import meme_relation as _meme_relation  # noqa: E402,F401

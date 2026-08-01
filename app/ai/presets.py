@@ -35,6 +35,18 @@ PROVIDER_PRESETS: Final[tuple[dict[str, object], ...]] = (
         "description": "阿里云百炼多模态图像向量 API。",
         "models": (
             {
+                "model_id": "qwen3-vl-embedding",
+                "display_name": "Qwen3 VL Embedding",
+                "supports_vision": False,
+                "supports_image_embedding": True,
+            },
+            {
+                "model_id": "tongyi-embedding-vision-plus",
+                "display_name": "Tongyi Embedding Vision Plus",
+                "supports_vision": False,
+                "supports_image_embedding": True,
+            },
+            {
                 "model_id": "multimodal-embedding-v1",
                 "display_name": "Multimodal Embedding V1",
                 "supports_vision": False,

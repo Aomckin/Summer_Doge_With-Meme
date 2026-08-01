@@ -9,6 +9,12 @@ import type {
   AIProviderPreset,
   AIProviderResponse,
   AIProviderUpdatePayload,
+  CaptionCandidatesResponse,
+  CaptionCreatePayload,
+  CaptionGeneratePayload,
+  CaptionResponse,
+  CaptionRewritePayload,
+  CaptionUpdatePayload,
   ListMemesOptions,
   MemeResponse,
   MemeUpdatePayload,
@@ -145,6 +151,22 @@ export function deleteTemplate(id: number): Promise<void> {
   return requestJson<void>(`/api/templates/${id}`, { method: "DELETE" });
 }
 
+export function createTemplateWithReferenceImage(
+  payload: TemplateCreatePayload,
+  file: File,
+): Promise<TemplateResponse> {
+  const body = new FormData();
+  body.append("name", payload.name);
+  if (payload.description) {
+    body.append("description", payload.description);
+  }
+  body.append("file", file);
+  return requestJson<TemplateResponse>(
+    "/api/templates/with-reference-image",
+    { method: "POST", body },
+  );
+}
+
 export function uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse> {
   const body = new FormData();
   body.append("file", file);
@@ -224,6 +246,86 @@ export function updateMeme(
 
 export function deleteMeme(id: number): Promise<void> {
   return requestJson<void>(`/api/memes/${id}`, { method: "DELETE" });
+}
+
+function normalizeCaptionMetadata<T extends {
+  content?: string;
+  scene?: string | null;
+  tone?: string | null;
+}>(payload: T): T {
+  return {
+    ...payload,
+    ...(Object.hasOwn(payload, "content")
+      ? { content: payload.content?.trim() }
+      : {}),
+    ...(Object.hasOwn(payload, "scene")
+      ? { scene: payload.scene?.trim() || null }
+      : {}),
+    ...(Object.hasOwn(payload, "tone")
+      ? { tone: payload.tone?.trim() || null }
+      : {}),
+  };
+}
+
+export function listCaptions(
+  memeId: number,
+  signal?: AbortSignal,
+): Promise<CaptionResponse[]> {
+  return requestJson<CaptionResponse[]>(
+    `/api/memes/${memeId}/captions`,
+    { signal },
+  );
+}
+
+export function createCaption(
+  memeId: number,
+  payload: CaptionCreatePayload,
+): Promise<CaptionResponse> {
+  return requestJson<CaptionResponse>(
+    `/api/memes/${memeId}/captions`,
+    jsonRequest("POST", normalizeCaptionMetadata(payload)),
+  );
+}
+
+export function updateCaption(
+  memeId: number,
+  captionId: number,
+  payload: CaptionUpdatePayload,
+): Promise<CaptionResponse> {
+  return requestJson<CaptionResponse>(
+    `/api/memes/${memeId}/captions/${captionId}`,
+    jsonRequest("PATCH", normalizeCaptionMetadata(payload)),
+  );
+}
+
+export function deleteCaption(
+  memeId: number,
+  captionId: number,
+): Promise<void> {
+  return requestJson<void>(
+    `/api/memes/${memeId}/captions/${captionId}`,
+    { method: "DELETE" },
+  );
+}
+
+export function generateCaptions(
+  memeId: number,
+  payload: CaptionGeneratePayload,
+): Promise<CaptionCandidatesResponse> {
+  return requestJson<CaptionCandidatesResponse>(
+    `/api/memes/${memeId}/captions/generate`,
+    jsonRequest("POST", normalizeCaptionMetadata(payload)),
+  );
+}
+
+export function rewriteCaption(
+  memeId: number,
+  payload: CaptionRewritePayload,
+): Promise<CaptionCandidatesResponse> {
+  return requestJson<CaptionCandidatesResponse>(
+    `/api/memes/${memeId}/captions/rewrite`,
+    jsonRequest("POST", normalizeCaptionMetadata(payload)),
+  );
 }
 
 export function appendMemeImage(id: number, file: File): Promise<MemeResponse> {

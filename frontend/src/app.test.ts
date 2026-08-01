@@ -108,6 +108,7 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     listTags: vi.fn().mockResolvedValue([funnyTag]),
     listTemplates: vi.fn().mockResolvedValue([]),
     createTemplate: vi.fn(),
+    createTemplateWithReferenceImage: vi.fn(),
     updateTemplate: vi.fn(),
     deleteTemplate: vi.fn().mockResolvedValue(undefined),
     uploadTemplateReferenceImage: vi.fn(),
@@ -116,6 +117,12 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     uploadMeme: vi.fn().mockResolvedValue(makeMeme(2, "新上传")),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),
     deleteMeme: vi.fn().mockResolvedValue(undefined),
+    listCaptions: vi.fn().mockResolvedValue([]),
+    createCaption: vi.fn(),
+    updateCaption: vi.fn(),
+    deleteCaption: vi.fn().mockResolvedValue(undefined),
+    generateCaptions: vi.fn(),
+    rewriteCaption: vi.fn(),
     appendMemeImage: vi.fn().mockResolvedValue(makeMeme(1)),
     deleteMemeImage: vi.fn().mockResolvedValue(makeMeme(1)),
     reorderMemeImages: vi.fn().mockResolvedValue(makeMeme(1)),
@@ -681,6 +688,96 @@ describe("MemeVaultApp", () => {
         "第二个",
       );
     });
+  });
+
+  it("creates a template and its reference image in one request", async () => {
+    const referencedTemplate = {
+      ...dogeTemplate,
+      reference_image_url: "/media/template-images/doge.png",
+      reference_thumbnail_url: "/media/template-thumbnails/doge.png",
+      reference_mime_type: "image/png",
+      reference_width: 320,
+      reference_height: 240,
+    };
+    const listTemplates = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([referencedTemplate]);
+    const createTemplateWithReferenceImage = vi
+      .fn()
+      .mockResolvedValue(referencedTemplate);
+    const api = makeApi({
+      listTemplates,
+      createTemplateWithReferenceImage,
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    button("模板管理").click();
+    const form = document.querySelector<HTMLFormElement>("#template-form");
+    const fileInput = form?.elements.namedItem(
+      "reference_image",
+    ) as HTMLInputElement | null;
+    if (!form || !fileInput) {
+      throw new Error("Missing template form controls");
+    }
+    const file = new File(["image"], "doge.png", { type: "image/png" });
+    (form.elements.namedItem("name") as HTMLInputElement).value = "Doge";
+    Object.defineProperty(fileInput, "files", { value: [file] });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => {
+      const preview = document.querySelector<HTMLImageElement>(
+        "#template-reference-input-preview img",
+      );
+      expect(preview?.src).toMatch(/^data:image\/png;base64,/);
+      expect(preview?.alt).toContain("doge.png");
+    });
+    form.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+
+    await vi.waitFor(() => {
+      expect(createTemplateWithReferenceImage).toHaveBeenCalledWith(
+        { name: "Doge", description: null },
+        file,
+      );
+      expect(api.createTemplate).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shows the reference image thumbnail in template management", async () => {
+    const referencedTemplate = {
+      ...dogeTemplate,
+      reference_image_url: "/media/template-images/doge.png",
+      reference_thumbnail_url: "/media/template-thumbnails/doge-thumb.png",
+      reference_mime_type: "image/png",
+      reference_width: 320,
+      reference_height: 240,
+    };
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listTemplates: vi.fn().mockResolvedValue([referencedTemplate]) }),
+    );
+    await app.start();
+
+    button("模板管理").click();
+    const preview = document.querySelector<HTMLImageElement>(
+      '[data-template-reference-preview="3"]',
+    );
+    expect(preview?.getAttribute("src")).toBe(
+      "/media/template-thumbnails/doge-thumb.png",
+    );
+    expect(preview?.getAttribute("alt")).toContain("Doge");
+
+    document
+      .querySelector<HTMLButtonElement>('[data-edit-template="3"]')
+      ?.click();
+    const formPreview = document.querySelector<HTMLImageElement>(
+      "#template-reference-input-preview img",
+    );
+    expect(formPreview?.getAttribute("src")).toBe(
+      "/media/template-thumbnails/doge-thumb.png",
+    );
   });
 
   it("preserves two loaded pages and card order after editing one Meme", async () => {

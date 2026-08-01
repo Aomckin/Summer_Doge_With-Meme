@@ -1,8 +1,8 @@
-# Meme Vault v0.4.2
+# Meme Vault v0.5.1
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.4.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供固定入口的串行批量上传、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理，以及响应式瀑布流画廊。编辑 Meme 时会原地更新对应状态和卡片，保持已加载分页、顺序、滚动位置及其他卡片不变；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.1，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供固定入口的串行批量上传、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室，以及响应式瀑布流画廊。编辑 Meme 时会原地更新对应状态和卡片，保持已加载分页、顺序、滚动位置及其他卡片不变；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -114,10 +114,20 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 - 列表、批量上传、随机、保存和删除均提供独立的加载或错误反馈。
 - 详情面板可发起 AI 图片分析，预览描述、标签建议、已有模板建议、置信度和使用的模型。
 - AI 建议只有在用户选择并点击“确认采用”后才会写入；用户可拒绝模板建议、改选其他模板或清除归类。
+- 文案实验室在 Meme 详情页内默认折叠，支持手写、编辑、复制、删除多条独立文案，并在切换 Meme、折叠或离开页面前提醒未保存草稿。
+- AI 可结合完整有序图片组、标题、描述、标签、模板及场景/语气/长度生成 3、5 或 8 条临时候选，也可润色、缩短、扩写或换一种语气；候选只有主动保存后才入库。
+
+## 文案实验室
+
+选择 Meme 后展开“文案实验室”即可使用统一编辑器。场景和语气既可选常用预设，也可自由输入；长度可选短、中、长。已保存文案按更新时间倒序显示，默认收起较早记录。
+
+AI 灵感生成和草稿改写复用当前激活的视觉模型、厂商、密钥、超时和重试设置，不新增独立文案模型。AI 候选仅存在于当前页面状态：替换草稿不会自动保存，直接“保存为新文案”时来源记录为 `ai`；编辑已有文案则始终保留原来源。聊天场景推荐 Meme 顺延至 v0.6.1，在 v0.6 向量化完成后实现。
 
 ## 模板管理与归类
 
-点击顶部“模板管理”可查看、创建、编辑和删除模板。模板包含名称、可选描述和一张可选参考图；配置独立的图像向量模型后，参考图会用于筛选视觉候选。上传或编辑 Meme 时可以选择一个已有模板；详情页显示当前模板或“未归类”。
+点击顶部“模板管理”可查看、创建、编辑和删除模板。模板包含名称、可选描述和一张可选参考图；选择文件后左侧立即显示本地预览，已有模板在管理列表和编辑表单中显示参考图缩略图。配置独立的图像向量模型后，参考图会用于筛选视觉候选。上传或编辑 Meme 时可以选择一个已有模板；详情页显示当前模板或“未归类”。
+
+使用 `qwen3-vl-embedding` 时，模板参考图会转换为 Base64 Data URI 并以独立图片向量请求百炼，不启用融合向量；同时保留旧 `tongyi-embedding-vision` 响应兼容。新建含参考图模板使用原子接口，图片向量化失败时会回滚数据库和文件，不产生空壳模板。
 
 删除模板不会删除 Meme：相关 `Meme.template_id` 会在同一事务中清空，历史 AI 分析保留，但对应的 `suggested_template_id` 也会清空，避免悬空引用。
 
@@ -167,7 +177,7 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`captions`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers` 和 `ai_models`。删除 Meme 时其 Caption 通过外键和 ORM 关系级联删除。
 
 从旧 SQLite 数据库启动时，基础设施层会幂等补齐历史版本字段，并为每条尚无 `meme_images` 记录的旧 Meme 回填一张 position=0 的首图。迁移只复制已有图片元数据，不移动或重写磁盘文件；重复启动不会重复回填，也不会删除或重建已有表。非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
 
@@ -206,9 +216,14 @@ $env:AI_TIMEOUT_SECONDS = "30"
 - `DELETE /api/memes/{meme_id}/relations/{related_meme_id}`：移除一条直接关联。
 - `GET /api/tags`：按名称排序获取标签列表。
 - `GET/POST /api/templates`：获取模板列表或创建模板。
+- `POST /api/templates/with-reference-image`：原子创建模板、保存参考图并生成独立图片向量。
 - `GET/PATCH/DELETE /api/templates/{template_id}`：获取、修改或删除模板。
 - `POST /api/memes/{meme_id}/analyze`：生成并记录 AI 描述、标签和已有模板建议，不直接修改 Meme。
 - `POST /api/memes/{meme_id}/analyses/{analysis_id}/confirm`：确认选中的 AI 标签，并可采用描述和最终模板选择。
+- `GET/POST /api/memes/{meme_id}/captions`：读取当前 Meme 的文案或保存一条手写/AI 文案。
+- `PATCH/DELETE /api/memes/{meme_id}/captions/{caption_id}`：编辑或删除属于当前 Meme 的文案。
+- `POST /api/memes/{meme_id}/captions/generate`：基于完整图片组和可选元数据生成临时候选，不写数据库。
+- `POST /api/memes/{meme_id}/captions/rewrite`：润色、缩短、扩写或换语气，不写数据库。
 - `/api/ai-settings/providers`：模型厂商的列表、新增、修改与删除。
 - `/api/ai-settings/providers/{id}/test`：验证密钥和 `/models` 连接。
 - `/api/ai-settings/providers/{id}/refresh-models`：同步厂商模型标识。

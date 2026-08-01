@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.4.2 实现状态（2026-07-31）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.5.1 实现状态（2026-08-02）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -9,13 +9,14 @@
 - 图片管理：向已有 Meme 追加单图、删除非最后图片、HTML 拖拽排序；完整删除会清理整组图片文件。
 - 桌面优先的原生 TypeScript 前端：瀑布流封面卡片、图片数量角标、纵向图片组详情、可前后切换的原图查看器，以及明确的忙碌/错误状态。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
-- Template 系统：网页 CRUD、Meme 手动归类、单张参考图、独立图像向量模型和 Top-10 视觉候选。
+- Template 系统：网页 CRUD、Meme 手动归类、单张参考图、管理界面双侧缩略图预览、原子创建、独立图像向量模型和 Top-10 视觉候选。
 - AI 组级分析：一次请求按顺序读取完整图片组，生成一条中文建议标题、一份中文描述、2 至 8 个标签建议和一个已有模板 ID 或 `null`；用户确认后才写入所选内容，建议标题默认不采用。
 - 网页内 API 设置：维护 AI 提供商、图片分析模型和独立的模板视觉检索模型；密钥加密落盘。
+- 文案实验室：每个 Meme 可保存多条独立文案；详情页支持统一编辑器、场景/语气/长度、复制、编辑、删除、未保存提醒，以及 AI 临时生成和草稿改写。
 
 ## 明确尚未实现
 
-- 尚未实现 AI 文案实验室、语义搜索、Meme 制作器、用户系统、分享权限或云端对象存储。
+- 尚未实现聊天场景推荐 Meme、语义搜索、Meme 制作器、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - 批量上传仍逐张复用单图 API，每个文件创建独立 Meme；不提供后端批量接口，也不在上传时组成复合 Meme。
 
@@ -26,13 +27,14 @@ app/
   api/             FastAPI 路由与 HTTP 错误转换
   services/        业务编排与事务控制（核心是 MemeService）
   repositories/    SQLAlchemy 查询与 flush
-  models/          Meme、MemeImage、MemeRelation、Template、Tag、AI 设置/分析
+  models/          Meme、MemeImage、MemeRelation、Caption、Template、Tag、AI 设置/分析
   schemas/         Pydantic 请求与响应模型
   storage/         Meme 与模板参考图的本地原图/缩略图存储
   ai/              Responses、兼容 Chat、图像向量、预设与密钥处理
 frontend/
   src/app.ts       页面状态与交互编排
   src/batch-upload.ts 批量上传对话框、文件队列与串行流程
+  src/caption-lab.ts 文案编辑、已保存列表、AI 候选与脏状态
   src/ui.ts        DOM 渲染、对话框、图片组和原图查看器
   src/settings.ts  API 设置子界面
   src/api.ts       集中式 API 客户端
@@ -64,9 +66,18 @@ SQLite 启动时先由 ORM 创建新表，再以 `INSERT ... SELECT ... WHERE NO
 
 - `tags` 与 `meme_tags` 保存标签及用户/AI 来源。
 - `templates` 与 Meme 一对多；模板可有一张参考图和可选图像向量。
+- 新建含参考图模板通过单次事务完成文件保存、独立图片向量化和模板写入；任一步失败都会回滚记录并清理新文件。
+- `qwen3-vl-embedding` 请求只发送 Base64 Data URI，独立图片模式不启用融合，接受单个 `type=image` 或 `type=vl` 向量；旧 `tongyi-embedding-vision` 保持兼容。通用 `embed_multimodal` 为后续 Meme 融合向量保留独立入口。
 - `meme_ai_analyses` 保存一条完整 Meme 对应的一次组级建议快照；`suggested_title` 可空以兼容升级前的历史分析。
 - `ai_providers`、`ai_models` 保存提供商、图片分析模型和独立图像向量模型设置。
 - API Key 使用 Fernet 加密；密钥默认位于被忽略的 `data/.ai_settings.key`。
+
+### Caption
+
+- `captions` 通过 `meme_id` 归属单个 Meme，包含正文、可空场景/语气/长度、`manual`/`ai` 来源及创建/更新时间。
+- 正文去除首尾空白且最长 2000 字；场景和语气最长 100 字；长度仅允许 `short`、`medium`、`long`。
+- `Meme.captions` 使用 delete-orphan，外键同时声明 `ON DELETE CASCADE`。删除 Meme 会级联删除 Caption。
+- AI 候选和完整提示词不入库；编辑已保存 Caption 时不允许修改来源。
 
 ## 主要调用链
 
@@ -131,7 +142,24 @@ POST /api/memes/{meme_id}/analyze
 
 分析快照的建议标题通过 `suggested_title` 返回。确认请求的 `apply_title` 默认为 `false`，只有用户显式勾选后才会在同一事务中更新 Meme 标题；历史快照没有建议标题时仍可继续使用描述、标签和模板确认。未配置模型/密钥返回 503，超时返回 504，上游或结构化输出错误返回 502。
 
-## v0.4 API
+### 文案实验室与 AI 文案
+
+```text
+GET/POST/PATCH/DELETE /api/memes/{meme_id}/captions...
+  -> CaptionService
+  -> CaptionRepository
+  -> captions
+
+POST .../captions/generate 或 .../rewrite
+  -> CaptionService 按 position 读取全部 MemeImage
+  -> 当前激活 AIClient 的 Responses/Chat 实现
+  -> 去空白、去重并校验候选数量
+  -> 只返回前端，不写数据库
+```
+
+`CaptionLabController` 独立维护当前 Meme 的列表、草稿快照、编辑状态、候选、错误和请求代次。`app.ts` 仅在选择 Meme 时调用 `setMeme`；详情重绘后由挂载事件恢复实验室。切换 Meme 会中止列表请求并通过代次忽略已经返回的旧列表或 AI 结果。非空脏草稿在新建、切换、折叠和离开页面前确认；临时候选本身不触发确认。
+
+## v0.5 API
 
 - `POST /api/memes/{meme_id}/images`
 - `PATCH /api/memes/{meme_id}/images/order`
@@ -139,6 +167,13 @@ POST /api/memes/{meme_id}/analyze
 - `GET /api/memes/{meme_id}/relations`
 - `POST /api/memes/{meme_id}/relations`
 - `DELETE /api/memes/{meme_id}/relations/{related_meme_id}`
+- `GET /api/memes/{meme_id}/captions`
+- `POST /api/memes/{meme_id}/captions`
+- `PATCH /api/memes/{meme_id}/captions/{caption_id}`
+- `DELETE /api/memes/{meme_id}/captions/{caption_id}`
+- `POST /api/memes/{meme_id}/captions/generate`
+- `POST /api/memes/{meme_id}/captions/rewrite`
+- `POST /api/templates/with-reference-image`
 
 所有 Meme 响应包含有序 `images` 与 `image_count`；旧 `image_url`、`thumbnail_url`、尺寸、哈希等字段直接从 `images[0]` 派生并继续对应首图。
 
@@ -160,10 +195,10 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.4.2 发布验证基线：前端 55 项测试通过，后端 112 项测试通过，TypeScript 类型检查和 Vite 生产构建通过。
+v0.5.1 发布验证基线：前端 66 项测试通过，后端 133 项测试通过，TypeScript 类型检查和 Vite 生产构建通过。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
 ## 下一阶段
 
-下一阶段为 v0.5 Meme 文案实验室。语义搜索顺延至 v0.6，Meme 制作器顺延至 v0.7。
+下一阶段为 v0.6 语义搜索与向量化；聊天场景推荐 Meme 在向量化完成后于 v0.6.1 实现，Meme 制作器顺延至 v0.7。

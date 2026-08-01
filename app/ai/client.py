@@ -67,6 +67,12 @@ class AIInputImage:
     position: int
 
 
+@dataclass(frozen=True)
+class AICaptionResult:
+    model_name: str
+    captions: tuple[str, ...]
+
+
 class AIClient(Protocol):
     def analyze_images(self, *, images: Sequence[AIInputImage], existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIImageResult: ...
     def analyze_image(
@@ -77,6 +83,33 @@ class AIClient(Protocol):
         existing_tags: Sequence[str],
         existing_templates: Sequence[AITemplateCandidate],
     ) -> AIImageResult: ...
+    def generate_captions(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+        count: int,
+    ) -> AICaptionResult: ...
+    def rewrite_caption(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        content: str,
+        action: str,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+    ) -> AICaptionResult: ...
 
 
 SYSTEM_PROMPT = (
@@ -138,6 +171,32 @@ ANALYSIS_SCHEMA = {
     "required": ["title", "description", "tags", "template_id"],
     "additionalProperties": False,
 }
+
+CAPTION_SYSTEM_PROMPT = (
+    "你是中文 Meme 文案创作助手。根据用户提供的完整有序图片组和资料生成"
+    "可直接用于 Meme 的简体中文文案。文案要自然、具体、有梗，不要解释创作过程，"
+    "不要添加序号、引号或“文案：”前缀。严格遵循场景、语气和长度条件。"
+)
+
+
+def _caption_schema(count: int) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "captions": {
+                "type": "array",
+                "minItems": count,
+                "maxItems": count,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                },
+            },
+        },
+        "required": ["captions"],
+        "additionalProperties": False,
+    }
 
 
 class _HTTPAIClient:
@@ -217,6 +276,59 @@ class _HTTPAIClient:
             if self.retry_delay_seconds:
                 time.sleep(self.retry_delay_seconds * (attempt + 1))
         raise AIUpstreamError("AI service is unavailable") from last_error
+
+    @staticmethod
+    def _caption_context(
+        *,
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+    ) -> str:
+        length_names = {"short": "短", "medium": "中", "long": "长"}
+        return "\n".join(
+            (
+                f"标题：{title}",
+                f"描述：{description or '（无）'}",
+                f"标签：{', '.join(tags) if tags else '（无）'}",
+                f"模板：{template or '（无）'}",
+                f"使用场景：{scene or '（不限）'}",
+                f"语气：{tone or '（不限）'}",
+                f"长度：{length_names.get(length or '', '不限')}",
+            )
+        )
+
+    @staticmethod
+    def _parse_caption_result(
+        response_payload: object,
+        output_text: str,
+    ) -> AICaptionResult:
+        try:
+            parsed = json.loads(output_text)
+            if not isinstance(parsed, dict):
+                raise TypeError
+            captions = parsed["captions"]
+            if (
+                not isinstance(captions, list)
+                or not all(isinstance(item, str) for item in captions)
+            ):
+                raise TypeError
+            model_name = (
+                str(response_payload.get("model") or "").strip()
+                if isinstance(response_payload, dict)
+                else ""
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned an invalid caption response"
+            ) from error
+        return AICaptionResult(
+            model_name=model_name,
+            captions=tuple(captions),
+        )
 
     def _parse_result(
         self,
@@ -407,6 +519,141 @@ class OpenAIResponsesClient(_HTTPAIClient):
     def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
         return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)
 
+    def generate_captions(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+        count: int,
+    ) -> AICaptionResult:
+        return self._caption_request(
+            images=images,
+            instruction=f"请生成 {count} 条彼此不同的候选文案。",
+            context=self._caption_context(
+                title=title,
+                description=description,
+                tags=tags,
+                template=template,
+                scene=scene,
+                tone=tone,
+                length=length,
+            ),
+            count=count,
+        )
+
+    def rewrite_caption(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        content: str,
+        action: str,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+    ) -> AICaptionResult:
+        actions = {
+            "polish": "润色",
+            "shorten": "缩短",
+            "expand": "扩写",
+            "retone": "换一种语气",
+        }
+        return self._caption_request(
+            images=images,
+            instruction=(
+                f"请对草稿执行“{actions[action]}”，只返回 1 条改写结果。\n"
+                f"原草稿：{content}"
+            ),
+            context=self._caption_context(
+                title=title,
+                description=description,
+                tags=tags,
+                template=template,
+                scene=scene,
+                tone=tone,
+                length=length,
+            ),
+            count=1,
+        )
+
+    def _caption_request(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        instruction: str,
+        context: str,
+        count: int,
+    ) -> AICaptionResult:
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        image_parts: list[dict[str, object]] = []
+        for image in sorted(images, key=lambda item: item.position):
+            if len(images) > 1:
+                image_parts.append(
+                    {
+                        "type": "input_text",
+                        "text": f"完整 Meme 的第 {image.position + 1} 张图片：",
+                    }
+                )
+            image_parts.append(
+                {
+                    "type": "input_image",
+                    "image_url": (
+                        f"data:{image.mime_type};base64,"
+                        f"{base64.b64encode(image.image_bytes).decode('ascii')}"
+                    ),
+                    "detail": "auto",
+                }
+            )
+        response = self._post(
+            "/responses",
+            {
+                "model": self.model,
+                "store": False,
+                "input": [
+                    {
+                        "role": "system",
+                        "content": [
+                            {"type": "input_text", "text": CAPTION_SYSTEM_PROMPT}
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": context},
+                            {"type": "input_text", "text": instruction},
+                            *image_parts,
+                        ],
+                    },
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "meme_caption_candidates",
+                        "strict": True,
+                        "schema": _caption_schema(count),
+                    }
+                },
+            },
+        )
+        try:
+            payload = response.json()
+            output_text = self._extract_output_text(payload)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned an invalid caption response"
+            ) from error
+        return self._parse_caption_result(payload, output_text)
+
     def _parse_response(self, response: httpx.Response) -> AIImageResult:
         try:
             response_payload = response.json()
@@ -501,3 +748,134 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
 
     def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
         return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)
+
+    def generate_captions(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+        count: int,
+    ) -> AICaptionResult:
+        return self._caption_request(
+            images=images,
+            instruction=f"请生成 {count} 条彼此不同的候选文案。",
+            context=self._caption_context(
+                title=title,
+                description=description,
+                tags=tags,
+                template=template,
+                scene=scene,
+                tone=tone,
+                length=length,
+            ),
+        )
+
+    def rewrite_caption(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        title: str,
+        description: str | None,
+        tags: Sequence[str],
+        template: str | None,
+        content: str,
+        action: str,
+        scene: str | None,
+        tone: str | None,
+        length: str | None,
+    ) -> AICaptionResult:
+        actions = {
+            "polish": "润色",
+            "shorten": "缩短",
+            "expand": "扩写",
+            "retone": "换一种语气",
+        }
+        return self._caption_request(
+            images=images,
+            instruction=(
+                f"请对草稿执行“{actions[action]}”，只返回 1 条改写结果。\n"
+                f"原草稿：{content}"
+            ),
+            context=self._caption_context(
+                title=title,
+                description=description,
+                tags=tags,
+                template=template,
+                scene=scene,
+                tone=tone,
+                length=length,
+            ),
+        )
+
+    def _caption_request(
+        self,
+        *,
+        images: Sequence[AIInputImage],
+        instruction: str,
+        context: str,
+    ) -> AICaptionResult:
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        image_parts: list[dict[str, object]] = []
+        for image in sorted(images, key=lambda item: item.position):
+            if len(images) > 1:
+                image_parts.append(
+                    {
+                        "type": "text",
+                        "text": f"完整 Meme 的第 {image.position + 1} 张图片：",
+                    }
+                )
+            image_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": (
+                            f"data:{image.mime_type};base64,"
+                            f"{base64.b64encode(image.image_bytes).decode('ascii')}"
+                        )
+                    },
+                }
+            )
+        response = self._post(
+            "/chat/completions",
+            {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"{CAPTION_SYSTEM_PROMPT} 必须只输出 JSON 对象："
+                            '{"captions":["候选文案"]}'
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": context},
+                            {"type": "text", "text": instruction},
+                            *image_parts,
+                        ],
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 2400,
+            },
+        )
+        try:
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise TypeError
+            output_text = payload["choices"][0]["message"]["content"]
+            if not isinstance(output_text, str):
+                raise TypeError
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned an invalid caption response"
+            ) from error
+        return self._parse_caption_result(payload, output_text)

@@ -6,21 +6,28 @@ import {
   analyzeMeme,
   appendMemeImage,
   confirmAIAnalysis,
+  createCaption,
   createAIProvider,
   createTemplate,
+  createTemplateWithReferenceImage,
   deleteMeme,
   deleteMemeImage,
   deleteMemeRelation,
+  deleteCaption,
   deleteTemplate,
   listTemplates,
   listMemes,
   listMemeRelations,
+  listCaptions,
   parseTagInput,
+  generateCaptions,
   reorderMemeImages,
   testAIProvider,
+  rewriteCaption,
   updateAIModel,
   updateAIProvider,
   updateMeme,
+  updateCaption,
   updateTemplate,
   uploadMeme,
 } from "./api";
@@ -176,6 +183,113 @@ describe("deleteMeme", () => {
     );
 
     await expect(deleteMeme(7)).resolves.toBeUndefined();
+  });
+});
+
+describe("caption API", () => {
+  it("uses the nested Meme caption endpoints and preserves null metadata", async () => {
+    const caption = {
+      id: 4,
+      meme_id: 7,
+      content: "测试文案",
+      scene: null,
+      tone: "吐槽",
+      length: "short" as const,
+      source: "manual" as const,
+      created_at: "2026-07-31T00:00:00Z",
+      updated_at: "2026-07-31T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([caption]))
+      .mockResolvedValueOnce(jsonResponse(caption, 201))
+      .mockResolvedValueOnce(jsonResponse(caption))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listCaptions(7);
+    await createCaption(7, {
+      content: " 测试文案 ",
+      scene: null,
+      tone: " 吐槽 ",
+      length: "short",
+      source: "manual",
+    });
+    await updateCaption(7, 4, { content: " 修改 " });
+    await deleteCaption(7, 4);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/memes/7/captions");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/memes/7/captions");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      content: "测试文案",
+      scene: null,
+      tone: "吐槽",
+      length: "short",
+      source: "manual",
+    });
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/memes/7/captions/4");
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).toEqual({
+      content: "修改",
+    });
+    expect(fetchMock.mock.calls[3][1].method).toBe("DELETE");
+  });
+
+  it("sends generate and rewrite options as JSON", async () => {
+    const result = { model_name: "vision", captions: ["候选"] };
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () => jsonResponse(result));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateCaptions(7, {
+      count: 5,
+      scene: "群聊",
+      tone: null,
+      length: "medium",
+    });
+    await rewriteCaption(7, {
+      content: "草稿",
+      action: "polish",
+      scene: null,
+      tone: "冷幽默",
+      length: null,
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/memes/7/captions/generate",
+    );
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/memes/7/captions/rewrite",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toMatchObject({
+      content: "草稿",
+      action: "polish",
+      tone: "冷幽默",
+    });
+  });
+
+  it("creates a referenced template with multipart form data", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ id: 3, name: "Doge" }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["image"], "doge.png", { type: "image/png" });
+
+    await createTemplateWithReferenceImage(
+      { name: "Doge", description: "classic" },
+      file,
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/templates/with-reference-image",
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    const body = init.body as FormData;
+    expect(body.get("name")).toBe("Doge");
+    expect(body.get("description")).toBe("classic");
+    expect(body.get("file")).toBe(file);
   });
 });
 

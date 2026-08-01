@@ -68,6 +68,26 @@ def chat_response_payload() -> dict[str, object]:
     }
 
 
+def caption_response_payload(captions: list[str]) -> dict[str, object]:
+    return {
+        "model": "gpt-5.6-luna-2026-07-01",
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(
+                            {"captions": captions},
+                            ensure_ascii=False,
+                        ),
+                    }
+                ],
+            }
+        ],
+    }
+
+
 def test_responses_client_sends_complete_meme_images_in_position_order() -> None:
     captured: dict[str, object] = {}
 
@@ -143,6 +163,107 @@ def test_chat_client_sends_complete_meme_images_in_position_order() -> None:
     assert meme_parts[1]["image_url"]["url"].endswith("Zmlyc3Q=")
     assert "第 2 张" in meme_parts[2]["text"]
     assert meme_parts[3]["image_url"]["url"].endswith("c2Vjb25k")
+
+
+def test_responses_client_generates_captions_with_context_and_ordered_images() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json=caption_response_payload(["候选一", "候选二", "候选三"]),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAIResponsesClient(
+            api_key="secret",
+            http_client=http_client,
+        )
+        result = client.generate_captions(
+            images=[
+                AIInputImage(b"second", "image/jpeg", 1),
+                AIInputImage(b"first", "image/png", 0),
+            ],
+            title="标题",
+            description="描述",
+            tags=["反应图"],
+            template="Doge",
+            scene="群聊",
+            tone="冷幽默",
+            length="short",
+            count=3,
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    schema = payload["text"]["format"]["schema"]["properties"]["captions"]
+    assert schema["minItems"] == 3
+    assert schema["maxItems"] == 3
+    content = payload["input"][1]["content"]
+    assert all(
+        value in content[0]["text"]
+        for value in ("标题", "描述", "反应图", "Doge", "群聊", "冷幽默")
+    )
+    assert [part["type"] for part in content[2:]] == [
+        "input_text",
+        "input_image",
+        "input_text",
+        "input_image",
+    ]
+    assert result.captions == ("候选一", "候选二", "候选三")
+
+
+def test_chat_client_rewrites_caption_without_mutating_upstream_state() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.6-flash",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"captions": ["润色结果"]},
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAICompatibleChatClient(
+            api_key="secret",
+            model="qwen3.6-flash",
+            base_url="https://example.test/v1",
+            timeout_seconds=10,
+            http_client=http_client,
+        )
+        result = client.rewrite_caption(
+            images=[AIInputImage(b"image", "image/png", 0)],
+            title="标题",
+            description=None,
+            tags=[],
+            template=None,
+            content="原始草稿",
+            action="polish",
+            scene=None,
+            tone="轻松",
+            length=None,
+        )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    content = payload["messages"][1]["content"]
+    assert "原始草稿" in content[1]["text"]
+    assert "润色" in content[1]["text"]
+    assert content[2]["type"] == "image_url"
+    assert result.captions == ("润色结果",)
 
 
 def test_client_reads_environment_and_sends_structured_image_request() -> None:

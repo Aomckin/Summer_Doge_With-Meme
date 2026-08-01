@@ -2,14 +2,17 @@ import {
   ApiError,
   analyzeMeme,
   confirmAIAnalysis,
+  createCaption,
   createAIModel,
   createAIProvider,
   createTemplate,
+  createTemplateWithReferenceImage,
   deleteMeme,
   deleteAIModel,
   deleteAIProvider,
   deleteTemplate,
   deleteTemplateReferenceImage,
+  deleteCaption,
   getRandomMeme,
   listAIModels,
   listAIProviderPresets,
@@ -17,12 +20,16 @@ import {
   listMemes,
   listTags,
   listTemplates,
+  listCaptions,
   parseTagInput,
   refreshAIModels,
+  generateCaptions,
+  rewriteCaption,
   testAIProvider,
   updateAIModel,
   updateAIProvider,
   updateTemplate,
+  updateCaption,
   uploadTemplateReferenceImage,
   updateMeme,
   uploadMeme,
@@ -44,6 +51,10 @@ import type {
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import {
+  CaptionLabController,
+  type CaptionLabApi,
+} from "./caption-lab";
+import {
   AISettingsController,
   type AISettingsApi,
 } from "./settings";
@@ -60,16 +71,21 @@ import {
   renderRelationDialog,
   renderTags,
   renderTemplateManager,
+  renderTemplateReferenceInputPreview,
   renderToolbar,
 } from "./ui";
 
 const PAGE_SIZE = 24;
 
-export interface MemeApi extends AISettingsApi {
+export interface MemeApi extends AISettingsApi, CaptionLabApi {
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   listTags(signal?: AbortSignal): Promise<TagResponse[]>;
   listTemplates(): Promise<TemplateResponse[]>;
   createTemplate(payload: TemplateCreatePayload): Promise<TemplateResponse>;
+  createTemplateWithReferenceImage(
+    payload: TemplateCreatePayload,
+    file: File,
+  ): Promise<TemplateResponse>;
   updateTemplate(
     id: number,
     payload: TemplateUpdatePayload,
@@ -103,6 +119,7 @@ const defaultApi: MemeApi = {
   listTags,
   listTemplates,
   createTemplate,
+  createTemplateWithReferenceImage,
   updateTemplate,
   deleteTemplate,
   uploadTemplateReferenceImage,
@@ -111,6 +128,12 @@ const defaultApi: MemeApi = {
   uploadMeme,
   updateMeme,
   deleteMeme,
+  listCaptions,
+  createCaption,
+  updateCaption,
+  deleteCaption,
+  generateCaptions,
+  rewriteCaption,
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
   analyzeMeme,
@@ -208,6 +231,8 @@ export class MemeVaultApp {
   private relationRemovalToken: symbol | null = null;
   private readonly settings: AISettingsController;
   private readonly batchUpload: BatchUploadController;
+  private readonly captionLab: CaptionLabController;
+  private templateReferencePreviewToken = 0;
 
   constructor(
     root: HTMLElement,
@@ -215,6 +240,7 @@ export class MemeVaultApp {
   ) {
     this.elements = mountShell(root);
     this.settings = new AISettingsController(this.elements, this.api);
+    this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
     this.batchUpload = new BatchUploadController({
       uploadMeme: (input) => this.api.uploadMeme(input),
       onComplete: async () => {
@@ -318,10 +344,22 @@ export class MemeVaultApp {
       void this.submitTemplate();
     });
     this.elements.templateForm
+      .querySelector<HTMLInputElement>('[name="reference_image"]')
+      ?.addEventListener("change", (event) => {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        if (file) {
+          this.previewTemplateReference(file);
+        } else {
+          this.renderCurrentTemplateReference();
+        }
+      });
+    this.elements.templateForm
       .querySelector("[data-cancel-template-edit]")
       ?.addEventListener("click", () => {
         this.templateEditingId = null;
         this.templateError = null;
+        this.clearTemplateReferenceInput();
         renderTemplateManager(
           this.elements,
           this.state,
@@ -339,6 +377,7 @@ export class MemeVaultApp {
       if (editButton) {
         this.templateEditingId = Number(editButton.dataset.editTemplate);
         this.templateError = null;
+        this.clearTemplateReferenceInput();
         renderTemplateManager(
           this.elements,
           this.state,
@@ -589,6 +628,7 @@ export class MemeVaultApp {
   private openTemplateManager(): void {
     this.templateEditingId = null;
     this.templateError = null;
+    this.clearTemplateReferenceInput();
     renderTemplateManager(this.elements, this.state, null, false, null);
     this.elements.templateDialog.showModal();
   }
@@ -614,8 +654,14 @@ export class MemeVaultApp {
     this.elements.templateSubmit.textContent = "正在保存…";
     try {
       if (this.templateEditingId === null) {
-        const template = await this.api.createTemplate({ name, description });
-        if (file) await this.api.uploadTemplateReferenceImage(template.id, file);
+        if (file) {
+          await this.api.createTemplateWithReferenceImage(
+            { name, description },
+            file,
+          );
+        } else {
+          await this.api.createTemplate({ name, description });
+        }
       } else {
         await this.api.updateTemplate(this.templateEditingId, {
           name,
@@ -624,6 +670,7 @@ export class MemeVaultApp {
         if (file) await this.api.uploadTemplateReferenceImage(this.templateEditingId, file);
       }
       this.templateEditingId = null;
+      this.clearTemplateReferenceInput();
       await this.refreshTemplates();
     } catch (error) {
       this.templateError = readableError(error);
@@ -636,7 +683,49 @@ export class MemeVaultApp {
         false,
         this.templateError,
       );
+      if (this.templateError && file) {
+        this.previewTemplateReference(file);
+      }
     }
+  }
+
+  private clearTemplateReferenceInput(): void {
+    this.templateReferencePreviewToken += 1;
+    const input = this.elements.templateForm.elements.namedItem(
+      "reference_image",
+    );
+    if (input instanceof HTMLInputElement) {
+      input.value = "";
+    }
+  }
+
+  private renderCurrentTemplateReference(): void {
+    this.templateReferencePreviewToken += 1;
+    const template = this.state.availableTemplates.find(
+      (item) => item.id === this.templateEditingId,
+    );
+    renderTemplateReferenceInputPreview(
+      this.elements,
+      template?.reference_thumbnail_url ?? null,
+      template ? `${template.name} 当前参考图` : "参考图预览",
+    );
+  }
+
+  private previewTemplateReference(file: File): void {
+    const token = ++this.templateReferencePreviewToken;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (token !== this.templateReferencePreviewToken) {
+        return;
+      }
+      const source = typeof reader.result === "string" ? reader.result : null;
+      renderTemplateReferenceInputPreview(
+        this.elements,
+        source,
+        `${file.name} 预览`,
+      );
+    });
+    reader.readAsDataURL(file);
   }
 
   private async removeTemplate(templateId: number): Promise<void> {
@@ -800,6 +889,9 @@ export class MemeVaultApp {
   }
 
   private selectMeme(meme: MemeResponse): void {
+    if (!this.captionLab.setMeme(meme.id)) {
+      return;
+    }
     this.state.selectedMeme = meme;
     this.state.actionError = null;
     this.state.operationError = null;
@@ -1266,6 +1358,7 @@ export class MemeVaultApp {
       const targetId = meme.id;
       await this.api.deleteMeme(targetId);
       if (this.state.selectedMeme?.id === targetId) {
+        this.captionLab.clear();
         this.state.selectedMeme = null;
         this.editing = false;
         this.editDraft = null;

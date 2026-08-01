@@ -109,6 +109,53 @@ export interface AIAnalysisConfirmPayload {
   apply_template: boolean;
 }
 
+export type CaptionLength = "short" | "medium" | "long";
+export type CaptionSource = "manual" | "ai";
+export type CaptionRewriteAction = "polish" | "shorten" | "expand" | "retone";
+
+export interface CaptionResponse {
+  id: number;
+  meme_id: number;
+  content: string;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+  source: CaptionSource;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaptionCreatePayload {
+  content: string;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+  source: CaptionSource;
+}
+
+export type CaptionUpdatePayload = Omit<
+  Partial<CaptionCreatePayload>,
+  "source"
+>;
+
+export interface CaptionGeneratePayload {
+  count: 3 | 5 | 8;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+}
+
+export interface CaptionRewritePayload
+  extends Omit<CaptionGeneratePayload, "count"> {
+  content: string;
+  action: CaptionRewriteAction;
+}
+
+export interface CaptionCandidatesResponse {
+  model_name: string;
+  captions: string[];
+}
+
 export type AIProviderProtocol =
   | "openai_responses"
   | "openai_chat_completions"

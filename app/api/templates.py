@@ -1,7 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, Request
-from app.ai.client import AIConfigurationError
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, Request
+from app.ai.client import (
+    AIConfigurationError,
+    AIInvalidResponseError,
+    AIRequestTimeoutError,
+    AIUpstreamError,
+)
 from app.services.ai_settings_service import AISettingsService
 from sqlalchemy.orm import Session
 
@@ -64,6 +69,43 @@ def create_template(
     return _response(template)
 
 
+@router.post(
+    "/with-reference-image",
+    response_model=TemplateResponse,
+    status_code=201,
+)
+async def create_template_with_reference_image(
+    request: Request,
+    name: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+    service: ServiceDependency,
+    description: Annotated[str | None, Form()] = None,
+) -> TemplateResponse:
+    try:
+        embedding_client = AISettingsService(
+            service.session,
+            request.app.state.ai_settings_key_file,
+        ).build_active_embedding_client()
+        template = service.create_template_with_reference_image(
+            name,
+            description,
+            file.filename or "reference",
+            await file.read(),
+            embedding_client,
+        )
+    except TemplateNameConflictError as error:
+        _translate_error(error)
+    except ValueError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    except AIConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except AIRequestTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except (AIUpstreamError, AIInvalidResponseError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return _response(template)
+
+
 @router.get("/{template_id}", response_model=TemplateResponse)
 def get_template(
     template_id: int,
@@ -105,6 +147,10 @@ async def upload_reference_image(template_id: int, request: Request, file: Uploa
         raise HTTPException(status_code=415, detail=str(error)) from error
     except AIConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except AIRequestTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except (AIUpstreamError, AIInvalidResponseError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     return _response(template)
 
 

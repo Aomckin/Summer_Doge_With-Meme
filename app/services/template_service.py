@@ -30,9 +30,12 @@ class TemplateService:
     def set_reference_image(self, template_id: int, filename: str, content: bytes, embedding_client: ImageEmbeddingClient) -> Template:
         template = self.get_template(template_id)
         stored = self.storage.save(filename, content)
-        embedding = embedding_client.embed_image(stored.thumbnail_path.read_bytes(), "image/png")
         old = (template.reference_stored_filename, template.reference_thumbnail_filename)
         try:
+            embedding = embedding_client.embed_image(
+                stored.thumbnail_path.read_bytes(),
+                "image/png",
+            )
             self.repository.update(template, {
                 "reference_stored_filename": stored.file_path.name, "reference_thumbnail_filename": stored.thumbnail_path.name,
                 "reference_mime_type": stored.mime_type, "reference_file_size": stored.file_size,
@@ -43,6 +46,48 @@ class TemplateService:
         except Exception:
             self.session.rollback(); self.storage.delete(stored.file_path, stored.thumbnail_path); raise
         if old[0]: self.storage.delete(old[0], old[1])
+        return template
+
+    def create_template_with_reference_image(
+        self,
+        name: str,
+        description: str | None,
+        filename: str,
+        content: bytes,
+        embedding_client: ImageEmbeddingClient,
+    ) -> Template:
+        normalized_name = self._normalize_name(name)
+        if self.repository.get_by_name(normalized_name) is not None:
+            raise TemplateNameConflictError(
+                f'Template name "{normalized_name}" already exists'
+            )
+
+        stored = self.storage.save(filename, content)
+        try:
+            embedding = embedding_client.embed_image(
+                stored.thumbnail_path.read_bytes(),
+                "image/png",
+            )
+            template = self.repository.create(
+                Template(
+                    name=normalized_name,
+                    description=self._normalize_description(description),
+                    reference_stored_filename=stored.file_path.name,
+                    reference_thumbnail_filename=stored.thumbnail_path.name,
+                    reference_mime_type=stored.mime_type,
+                    reference_file_size=stored.file_size,
+                    reference_width=stored.width,
+                    reference_height=stored.height,
+                    reference_file_hash=stored.file_hash,
+                    reference_embedding_json=json.dumps(embedding.vector),
+                    reference_embedding_model_id=embedding.model_id,
+                )
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            self.storage.delete(stored.file_path, stored.thumbnail_path)
+            raise
         return template
 
     def delete_reference_image(self, template_id: int) -> None:

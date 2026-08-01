@@ -1,4 +1,5 @@
 import asyncio
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -9,8 +10,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.ai.client import AIImageResult, AITagSuggestion
+from app.ai.client import AIImageResult, AITagSuggestion, AIUpstreamError
+from app.ai.embedding_client import ImageEmbeddingResult
 from app.api.memes import get_ai_client
+from app.api.templates import get_template_service
 from app.database import Base, get_db
 from app.main import create_app
 from app.models.ai_analysis import MemeAIAnalysis
@@ -18,12 +21,14 @@ from app.models.meme import Meme
 from app.models.template import Template
 from app.repositories.template_repository import TemplateRepository
 from app.services.meme_service import MemeService
+from app.services.ai_settings_service import AISettingsService
 from app.services.template_service import (
     TemplateNameConflictError,
     TemplateNotFoundError,
     TemplateService,
 )
 from app.storage.image_storage import ImageStorage
+from app.storage.template_image_storage import TemplateImageStorage
 
 
 def create_session() -> Session:
@@ -87,6 +92,168 @@ def test_template_service_normalizes_and_rejects_conflicts() -> None:
         with pytest.raises(TemplateNotFoundError):
             service.get_template(999)
     finally:
+        session.close()
+
+
+def test_template_reference_uses_thumbnail_bytes_for_independent_embedding(
+    tmp_path: Path,
+) -> None:
+    class FakeEmbeddingClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[bytes, str]] = []
+
+        def embed_image(
+            self,
+            image_bytes: bytes,
+            mime_type: str,
+        ) -> ImageEmbeddingResult:
+            self.calls.append((image_bytes, mime_type))
+            return ImageEmbeddingResult("qwen3-vl-embedding", (0.1, 0.2))
+
+    session = create_session()
+    storage = TemplateImageStorage(
+        tmp_path / "template-images",
+        tmp_path / "template-thumbnails",
+    )
+    service = TemplateService(session, storage)
+    embedding_client = FakeEmbeddingClient()
+    try:
+        template = service.create_template("Doge")
+
+        updated = service.set_reference_image(
+            template.id,
+            "doge.png",
+            image_bytes(),
+            embedding_client,
+        )
+
+        embedded_bytes, embedded_mime = embedding_client.calls[0]
+        assert embedded_mime == "image/png"
+        assert embedded_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+        assert not isinstance(embedded_bytes, (str, Path))
+        assert json.loads(updated.reference_embedding_json) == [0.1, 0.2]
+        assert updated.reference_embedding_model_id == "qwen3-vl-embedding"
+    finally:
+        session.close()
+
+
+def test_template_reference_cleans_new_files_when_embedding_fails(
+    tmp_path: Path,
+) -> None:
+    class FailingEmbeddingClient:
+        def embed_image(
+            self,
+            image_bytes: bytes,
+            mime_type: str,
+        ) -> ImageEmbeddingResult:
+            raise AIUpstreamError("InvalidParameter: bad image")
+
+    session = create_session()
+    images = tmp_path / "template-images"
+    thumbnails = tmp_path / "template-thumbnails"
+    storage = TemplateImageStorage(images, thumbnails)
+    service = TemplateService(session, storage)
+    try:
+        template = service.create_template("Doge")
+
+        with pytest.raises(AIUpstreamError, match="InvalidParameter"):
+            service.set_reference_image(
+                template.id,
+                "doge.png",
+                image_bytes(),
+                FailingEmbeddingClient(),
+            )
+
+        assert list(images.iterdir()) == []
+        assert list(thumbnails.iterdir()) == []
+        assert template.reference_stored_filename is None
+        assert template.reference_embedding_json is None
+    finally:
+        session.close()
+
+
+def test_atomic_template_creation_leaves_no_template_or_files_when_embedding_fails(
+    tmp_path: Path,
+) -> None:
+    class FailingEmbeddingClient:
+        def embed_image(
+            self,
+            image_bytes: bytes,
+            mime_type: str,
+        ) -> ImageEmbeddingResult:
+            raise AIUpstreamError("InvalidParameter: bad image")
+
+    session = create_session()
+    images = tmp_path / "template-images"
+    thumbnails = tmp_path / "template-thumbnails"
+    service = TemplateService(
+        session,
+        TemplateImageStorage(images, thumbnails),
+    )
+    try:
+        with pytest.raises(AIUpstreamError, match="InvalidParameter"):
+            service.create_template_with_reference_image(
+                "Doge",
+                "classic",
+                "doge.png",
+                image_bytes(),
+                FailingEmbeddingClient(),
+            )
+
+        assert service.list_templates() == []
+        assert list(images.iterdir()) == []
+        assert list(thumbnails.iterdir()) == []
+    finally:
+        session.close()
+
+
+def test_atomic_template_api_returns_upstream_error_without_ghost_template(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingEmbeddingClient:
+        def embed_image(
+            self,
+            image_bytes: bytes,
+            mime_type: str,
+        ) -> ImageEmbeddingResult:
+            raise AIUpstreamError("InvalidParameter: bad image")
+
+    session = create_session()
+    images = tmp_path / "template-images"
+    thumbnails = tmp_path / "template-thumbnails"
+    service = TemplateService(
+        session,
+        TemplateImageStorage(images, thumbnails),
+    )
+    app = create_app(
+        tmp_path / "images",
+        tmp_path / "thumbnails",
+        ai_settings_key_file=tmp_path / "ai.key",
+    )
+    app.dependency_overrides[get_db] = lambda: session
+    app.dependency_overrides[get_template_service] = lambda: service
+    monkeypatch.setattr(
+        AISettingsService,
+        "build_active_embedding_client",
+        lambda self: FailingEmbeddingClient(),
+    )
+    try:
+        response = request(
+            app,
+            "POST",
+            "/api/templates/with-reference-image",
+            files={"file": ("doge.png", image_bytes(), "image/png")},
+            data={"name": "Doge", "description": "classic"},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == "InvalidParameter: bad image"
+        assert service.list_templates() == []
+        assert list(images.iterdir()) == []
+        assert list(thumbnails.iterdir()) == []
+    finally:
+        app.dependency_overrides.clear()
         session.close()
 
 

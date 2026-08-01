@@ -22,6 +22,7 @@ export interface AppElements {
   detailPanel: HTMLElement;
   templateDialog: HTMLDialogElement;
   templateForm: HTMLFormElement;
+  templateReferencePreview: HTMLElement;
   templateList: HTMLElement;
   templateError: HTMLElement;
   templateSubmit: HTMLButtonElement;
@@ -161,6 +162,9 @@ export function mountShell(root: HTMLElement): AppElements {
               <input name="name" type="text" maxlength="100" required>
             </label>
             <label><span>参考原图（可选）</span><input name="reference_image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label>
+            <div id="template-reference-input-preview" class="template-reference-input-preview" aria-live="polite">
+              <span>选择图片后在这里预览</span>
+            </div>
             <label>
               <span>描述</span>
               <textarea name="description" rows="4"></textarea>
@@ -371,6 +375,10 @@ export function mountShell(root: HTMLElement): AppElements {
     detailPanel: required(root, "#detail-panel"),
     templateDialog: required(document, "#template-dialog"),
     templateForm: required(document, "#template-form"),
+    templateReferencePreview: required(
+      document,
+      "#template-reference-input-preview",
+    ),
     templateList: required(document, "#template-list"),
     templateError: required(document, "#template-error"),
     templateSubmit: required(document, "#template-submit"),
@@ -459,6 +467,11 @@ export function renderTemplateManager(
       : "创建模板";
   elements.templateError.hidden = !error;
   elements.templateError.textContent = error ?? "";
+  renderTemplateReferenceInputPreview(
+    elements,
+    editing?.reference_thumbnail_url ?? null,
+    editing ? `${editing.name} 当前参考图` : "参考图预览",
+  );
   elements.templateList.innerHTML = state.availableTemplates.length
     ? state.availableTemplates
         .map(
@@ -467,7 +480,7 @@ export function renderTemplateManager(
               <div>
                 <strong>${escapeHtml(template.name)}</strong>
                 <p>${escapeHtml(template.description || "暂无描述")}</p>
-                ${template.reference_thumbnail_url ? `<img class="template-reference-preview" src="${escapeHtml(template.reference_thumbnail_url)}" alt="${escapeHtml(template.name)} 参考图">` : '<p class="muted">描述分类模板（无参考图）</p>'}
+                ${template.reference_thumbnail_url ? `<figure class="template-reference"><img class="template-reference-preview" data-template-reference-preview="${template.id}" src="${escapeHtml(template.reference_thumbnail_url)}" alt="${escapeHtml(template.name)} 参考图" loading="lazy"><figcaption>参考图</figcaption></figure>` : '<p class="muted">描述分类模板（无参考图）</p>'}
               </div>
               <div class="template-row-actions">
                 <button class="button button-secondary" type="button" data-edit-template="${template.id}" ${busy ? "disabled" : ""}>编辑</button>
@@ -478,6 +491,16 @@ export function renderTemplateManager(
         )
         .join("")
     : '<p class="muted">还没有模板，可以先创建一个。</p>';
+}
+
+export function renderTemplateReferenceInputPreview(
+  elements: AppElements,
+  source: string | null,
+  alt: string,
+): void {
+  elements.templateReferencePreview.innerHTML = source
+    ? `<img src="${escapeHtml(source)}" alt="${escapeHtml(alt)}">`
+    : "<span>选择图片后在这里预览</span>";
 }
 
 export function renderOperationError(
@@ -978,6 +1001,7 @@ export function renderDetail(
           </dl>
           ${relatedMemesMarkup(state)}
           ${aiAnalysisMarkup(state)}
+          <div data-caption-lab-host></div>
           ${detailError(state.actionError)}
           <div class="detail-actions">
             <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
@@ -991,6 +1015,9 @@ export function renderDetail(
   }
 
   bindImageFallbacks(elements.detailPanel);
+  elements.detailPanel.dispatchEvent(
+    new CustomEvent("meme-detail-rendered"),
+  );
 }
 
 export function openImageViewer(

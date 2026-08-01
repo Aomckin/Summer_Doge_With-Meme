@@ -79,6 +79,12 @@ def test_presets_include_openai_qwen_and_text_only_deepseek(
         model["supports_vision"] for model in presets["deepseek"]["models"]
     )
     assert presets["dashscope_embedding"]["models"][0]["supports_image_embedding"]
+    embedding_models = {
+        model["model_id"]
+        for model in presets["dashscope_embedding"]["models"]
+    }
+    assert "qwen3-vl-embedding" in embedding_models
+    assert "tongyi-embedding-vision-plus" in embedding_models
     session.close()
 
 

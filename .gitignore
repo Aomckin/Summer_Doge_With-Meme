@@ -28,6 +28,8 @@ data/*.sqlite3
 # Uploaded images and generated thumbnails
 data/images/*
 data/thumbnails/*
+data/template_images/*
+data/template_thumbnails/*
 !data/images/.gitkeep
 !data/thumbnails/.gitkeep
 

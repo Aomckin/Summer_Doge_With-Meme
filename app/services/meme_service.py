@@ -340,7 +340,7 @@ class MemeService:
                 id=template.id,
                 name=template.name,
                 description=template.description,
-                reference_image_bytes=(reference_storage.read_original(template.reference_thumbnail_filename) if template.id in ranked and template.reference_thumbnail_filename else None),
+                reference_image_bytes=(reference_storage.read_thumbnail(template.reference_thumbnail_filename) if template.id in ranked and template.reference_thumbnail_filename else None),
                 reference_image_mime_type=("image/png" if template.id in ranked else None),
                 visual_similarity=ranked.get(template.id),
             )

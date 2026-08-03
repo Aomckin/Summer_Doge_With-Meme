@@ -21,6 +21,7 @@ def test_template_image_storage_keeps_files_in_its_own_roots(tmp_path) -> None:
     assert stored.file_path.parent == (tmp_path / "template-images")
     assert stored.thumbnail_path.parent == (tmp_path / "template-thumbnails")
     assert storage.read_original(stored.file_path) == png_bytes()
+    assert storage.read_thumbnail(stored.thumbnail_path) == stored.thumbnail_path.read_bytes()
     assert storage.exists(stored.file_path, stored.thumbnail_path)
 
 

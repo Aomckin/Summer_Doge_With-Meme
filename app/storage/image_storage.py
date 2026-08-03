@@ -141,6 +141,9 @@ class ImageStorage:
         original = self._path_inside(file_path, self.images_dir)
         return original.read_bytes()
 
+    def read_thumbnail(self, file_path: str | Path) -> bytes:
+        return self._path_inside(file_path, self.thumbnails_dir).read_bytes()
+
     def _inspect_image(self, content: bytes) -> tuple[str, int, int]:
         try:
             with Image.open(BytesIO(content)) as image:

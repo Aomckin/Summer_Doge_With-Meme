@@ -1,0 +1,24 @@
+你正在为 Meme Vault 处理一个本地离线标签批次。
+
+批次目录：<BATCH_DIR>
+
+请读取：
+- <BATCH_DIR>/manifest.json
+- <BATCH_DIR>/tags.json
+- <BATCH_DIR>/candidate.schema.json
+
+逐个处理 manifest 中的 Meme：
+1. 按 position 升序查看 images 中的全部 absolute_path；多图必须作为一个整体判断。
+2. 优先复用 tags.json 里的简体中文标签，避免同义重复和“图片、表情包、搞笑”等低信息标签。
+3. 只修改 <BATCH_DIR>/candidates.jsonl，每个 Meme 恰好一行 JSON，字段只能是：
+   meme_id、add_tags、remove_tags、confidence、reason。
+4. add_tags 只写当前没有的标签；不确定时少打或不打，不要为了凑数量创建标签。
+5. remove_tags 只能删除明显错误的自动标签，绝不能删除 source 为 user 或 manual 的标签。
+6. confidence 必须是 0 到 1 的数字；reason 用一两句话说明整组图片的判断依据。
+
+禁止：
+- 调用 Meme Vault 配置的 Qwen、OpenAI 或其他外部 AI Provider。
+- 修改标题、描述、模板、关系、文案、Provider 设置或 SQLite 数据库。
+- 运行导入器、--apply，或处理当前批次之外的 Meme。
+
+完成后只报告：处理数量、建议新增数、建议移除数，以及需要人工复核的 meme_id。

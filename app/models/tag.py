@@ -44,7 +44,7 @@ class MemeTag(Base):
         primary_key=True,
     )
 
-    # source 区分用户标签与未来的 AI 标签；confidence 为 AI 置信度预留。
+    # source 区分 user/manual、ai 与本地 codex 维护标签；confidence 保存候选置信度。
     source: Mapped[str] = mapped_column(String(20), default="user")
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     meme: Mapped["Meme"] = relationship(back_populates="tag_links")

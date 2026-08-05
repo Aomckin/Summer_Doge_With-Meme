@@ -1,8 +1,8 @@
-# Meme Vault v0.5.1
+# Meme Vault v0.5.2
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.1，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供固定入口的串行批量上传、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室，以及响应式瀑布流画廊。编辑 Meme 时会原地更新对应状态和卡片，保持已加载分页、顺序、滚动位置及其他卡片不变；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.2，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供固定入口的串行批量上传、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室、Codex Luna 离线标签维护，以及响应式瀑布流画廊。编辑 Meme 时会原地更新对应状态和卡片，保持已加载分页、顺序、滚动位置及其他卡片不变；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -98,6 +98,18 @@ python -m pytest -v
 如果 PowerShell 允许执行 npm 脚本，也可以把 `npm.cmd` 简写为 `npm`。
 
 Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录已被 Git 忽略。
+
+## Codex Luna 离线标签整理
+
+不调用 Meme Vault 在线 AI Provider 的本地整理入口：
+
+```powershell
+.\tagging.ps1
+```
+
+浏览器页面可导出批次、按顺序预览完整图片组、复制 Luna 提示词并执行 dry-run。
+真实导入没有网页按钮，仍必须人工复核后显式使用 `--apply`。完整说明见
+[`docs/LUNA_TAGGING_WORKFLOW.md`](docs/LUNA_TAGGING_WORKFLOW.md)。
 
 ## TypeScript 前端
 

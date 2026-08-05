@@ -84,5 +84,37 @@ class TagRepository:
         self.session.flush()
         return list(meme.tags)
 
+    def apply_maintenance_tags(
+        self,
+        meme: Meme,
+        *,
+        add_names: Sequence[str],
+        remove_names: Sequence[str],
+        source: str = "codex",
+        confidence: float | None = None,
+    ) -> list[Tag]:
+        """Apply an already validated offline-maintenance tag delta."""
+        remove_set = {self.normalize_name(name) for name in remove_names}
+        if remove_set:
+            meme.tag_links[:] = [
+                link for link in meme.tag_links if link.tag.name not in remove_set
+            ]
+
+        links_by_name = {link.tag.name: link for link in meme.tag_links}
+        for name in add_names:
+            normalized = self.normalize_name(name)
+            if not normalized or normalized in links_by_name:
+                continue
+            link = MemeTag(
+                tag=self.get_or_create(normalized),
+                source=source,
+                confidence=confidence,
+            )
+            meme.tag_links.append(link)
+            links_by_name[normalized] = link
+
+        self.session.flush()
+        return list(meme.tags)
+
     def list(self) -> list[Tag]:
         return list(self.session.scalars(select(Tag).order_by(Tag.name)))

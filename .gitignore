@@ -24,6 +24,10 @@ data/.ai_settings.key
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/tagging_work/
+data/backups/
+data/*.bak
+data/*_backup*.db
 
 # Uploaded images and generated thumbnails
 data/images/*

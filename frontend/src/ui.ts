@@ -12,6 +12,7 @@ export interface AppElements {
   searchInput: HTMLInputElement;
   randomButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
+  openDownloadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
   operationError: HTMLElement;
@@ -44,6 +45,7 @@ export interface AppElements {
   imageViewerImage: HTMLImageElement;
   imageViewerTitle: HTMLElement;
   imageViewerLink: HTMLAnchorElement;
+  imageViewerDownload: HTMLAnchorElement;
   imageViewerError: HTMLElement;
   imageViewerPrevious: HTMLButtonElement;
   imageViewerNext: HTMLButtonElement;
@@ -121,6 +123,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
+          <button id="open-download" class="button button-secondary" type="button">批量下载</button>
         </div>
       </header>
 
@@ -343,6 +346,7 @@ export function mountShell(root: HTMLElement): AppElements {
               target="_blank"
               rel="noopener noreferrer"
             >打开原图</a>
+            <a class="button button-primary" data-viewer-download>下载当前图</a>
             <button
               class="icon-button"
               type="button"
@@ -365,6 +369,7 @@ export function mountShell(root: HTMLElement): AppElements {
     searchInput: required(root, "#meme-search"),
     randomButton: required(root, "#random-button"),
     openUploadButton: required(root, "#open-upload"),
+    openDownloadButton: required(root, "#open-download"),
     openSettingsButton: required(root, "#open-settings"),
     openTemplatesButton: required(root, "#open-templates"),
     operationError: required(root, "#operation-error"),
@@ -400,6 +405,7 @@ export function mountShell(root: HTMLElement): AppElements {
     imageViewerImage: required(document, "[data-viewer-image]"),
     imageViewerTitle: required(document, "[data-viewer-title]"),
     imageViewerLink: required(document, "[data-viewer-link]"),
+    imageViewerDownload: required(document, "[data-viewer-download]"),
     imageViewerError: required(document, "[data-viewer-error]"),
     imageViewerPrevious: required(document, "[data-viewer-previous]"),
     imageViewerNext: required(document, "[data-viewer-next]"),
@@ -1004,6 +1010,7 @@ export function renderDetail(
           <div data-caption-lab-host></div>
           ${detailError(state.actionError)}
           <div class="detail-actions">
+            <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
             <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
             <button class="button button-danger" type="button" data-delete-meme ${state.deleting ? "disabled" : ""}>
               ${state.deleting ? "正在删除…" : "删除"}
@@ -1025,7 +1032,7 @@ export function openImageViewer(
   meme: MemeResponse,
   index = 0,
 ): void {
-  const images = meme.images.length ? meme.images : [{ image_url: meme.image_url, width: meme.width, height: meme.height }];
+  const images = meme.images.length ? meme.images : [{ id: 0, image_url: meme.image_url, width: meme.width, height: meme.height }];
   const image = images[index] ?? images[0];
   elements.imageViewerImage.hidden = false;
   elements.imageViewerFrame.classList.remove("is-broken");
@@ -1038,6 +1045,7 @@ export function openImageViewer(
   elements.imageViewerImage.height = image.height;
   elements.imageViewerTitle.textContent = meme.title;
   elements.imageViewerLink.href = image.image_url;
+  elements.imageViewerDownload.href = `/api/memes/${meme.id}/images/${image.id}/download`;
   elements.imageViewerPrevious.disabled = index <= 0;
   elements.imageViewerNext.disabled = index >= images.length - 1;
 
@@ -1055,6 +1063,7 @@ export function closeImageViewer(elements: AppElements): void {
   elements.imageViewerImage.removeAttribute("height");
   elements.imageViewerImage.alt = "";
   elements.imageViewerLink.removeAttribute("href");
+  elements.imageViewerDownload.removeAttribute("href");
   elements.imageViewerTitle.textContent = "";
   elements.imageViewerPrevious.disabled = true;
   elements.imageViewerNext.disabled = true;

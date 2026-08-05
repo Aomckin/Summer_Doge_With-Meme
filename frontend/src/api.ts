@@ -2,6 +2,9 @@ import type {
   CreateImportJobInput,
   ImportJobItemPage,
   ImportJobResponse,
+  CreateExportJobInput,
+  ExportJobItemPage,
+  ExportJobResponse,
   AIAnalysisConfirmPayload,
   AIAnalysisResponse,
   AIConnectionTestResponse,
@@ -78,6 +81,28 @@ export function retryFailedImportJob(id: number): Promise<ImportJobResponse> {
 
 export async function deleteImportJob(id: number): Promise<void> {
   await requestJson<void>(`/api/import-jobs/${id}`, { method: "DELETE" });
+}
+
+export function createExportJob(input: CreateExportJobInput): Promise<ExportJobResponse> {
+  return requestJson<ExportJobResponse>("/api/export-jobs", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+}
+
+export function getExportJob(id: number): Promise<ExportJobResponse> {
+  return requestJson<ExportJobResponse>(`/api/export-jobs/${id}`);
+}
+
+export function listExportJobItems(id: number, offset = 0, limit = 50): Promise<ExportJobItemPage> {
+  return requestJson<ExportJobItemPage>(`/api/export-jobs/${id}/items?offset=${offset}&limit=${limit}&failed_only=true`);
+}
+
+export function cancelExportJob(id: number): Promise<ExportJobResponse> {
+  return requestJson<ExportJobResponse>(`/api/export-jobs/${id}/cancel`, { method: "POST" });
+}
+
+export async function deleteExportJob(id: number): Promise<void> {
+  await requestJson<void>(`/api/export-jobs/${id}`, { method: "DELETE" });
 }
 
 interface ValidationDetail {

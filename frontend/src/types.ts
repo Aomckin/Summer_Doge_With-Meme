@@ -164,6 +164,65 @@ export interface ImportJobItemPage {
   limit: number;
 }
 
+export type ExportScope = "all" | "filtered";
+export type ExportOrganization = "flat" | "template" | "tag";
+
+export interface CreateExportJobInput {
+  scope: ExportScope;
+  query: string | null;
+  tags: string[];
+  template_id: number | null;
+  organization: ExportOrganization;
+  include_manifest: true;
+  archive_name: string;
+}
+
+export interface ExportJobResponse {
+  id: number;
+  status: "pending" | "running" | "ready" | "completed_with_errors" | "cancelling" | "cancelled" | "interrupted" | "failed" | "expired";
+  scope: ExportScope;
+  query: string | null;
+  tags: string[];
+  template_id: number | null;
+  organization: ExportOrganization;
+  include_manifest: boolean;
+  archive_name: string;
+  total_memes: number;
+  total_images: number;
+  processed_memes: number;
+  processed_images: number;
+  success_count: number;
+  skipped_count: number;
+  failed_count: number;
+  estimated_bytes: number;
+  archive_size: number | null;
+  current_meme_id: number | null;
+  current_filename: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  expires_at: string | null;
+}
+
+export interface ExportJobItemResponse {
+  id: number;
+  meme_id: number;
+  image_id: number;
+  status: string;
+  archive_filename: string | null;
+  file_size: number;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ExportJobItemPage {
+  items: ExportJobItemResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export type CaptionLength = "short" | "medium" | "long";
 export type CaptionSource = "manual" | "ai";
 export type CaptionRewriteAction = "polish" | "shorten" | "expand" | "retone";

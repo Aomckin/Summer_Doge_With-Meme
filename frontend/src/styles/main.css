@@ -1109,6 +1109,51 @@ label small {
   padding: 0 1.5rem 1rem;
 }
 
+.batch-download-dialog {
+  width: min(960px, calc(100vw - 40px));
+}
+
+.batch-download-card {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.batch-download-card fieldset {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.batch-download-card fieldset label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.batch-download-card fieldset label + label {
+  margin-top: 0;
+}
+
+.batch-download-card input[type="radio"],
+.batch-download-card input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+.export-filter-summary {
+  padding: 0.75rem;
+  border-radius: 0.6rem;
+  background: var(--surface-muted);
+  line-height: 1.7;
+}
+
 .batch-mode-switch label {
   display: inline-flex;
   align-items: center;

@@ -34,6 +34,7 @@ import {
   updateMeme,
   uploadMeme,
   createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
+  createExportJob, getExportJob, listExportJobItems, cancelExportJob, deleteExportJob,
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
 } from "./api";
@@ -50,8 +51,10 @@ import type {
   TemplateUpdatePayload,
   UploadMemeInput,
   CreateImportJobInput, ImportJobItemPage, ImportJobResponse,
+  CreateExportJobInput, ExportJobItemPage, ExportJobResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
+import { BatchDownloadController } from "./batch-download";
 import {
   CaptionLabController,
   type CaptionLabApi,
@@ -103,6 +106,11 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   cancelImportJob(id: number): Promise<ImportJobResponse>;
   retryFailedImportJob(id: number): Promise<ImportJobResponse>;
   deleteImportJob(id: number): Promise<void>;
+  createExportJob(input: CreateExportJobInput): Promise<ExportJobResponse>;
+  getExportJob(id: number): Promise<ExportJobResponse>;
+  listExportJobItems(id: number, offset?: number, limit?: number): Promise<ExportJobItemPage>;
+  cancelExportJob(id: number): Promise<ExportJobResponse>;
+  deleteExportJob(id: number): Promise<void>;
   updateMeme(
     id: number,
     payload: MemeUpdatePayload,
@@ -135,6 +143,7 @@ const defaultApi: MemeApi = {
   getRandomMeme,
   uploadMeme,
   createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
+  createExportJob, getExportJob, listExportJobItems, cancelExportJob, deleteExportJob,
   updateMeme,
   deleteMeme,
   listCaptions,
@@ -240,6 +249,7 @@ export class MemeVaultApp {
   private relationRemovalToken: symbol | null = null;
   private readonly settings: AISettingsController;
   private readonly batchUpload: BatchUploadController;
+  private readonly batchDownload: BatchDownloadController;
   private readonly captionLab: CaptionLabController;
   private templateReferencePreviewToken = 0;
 
@@ -266,6 +276,13 @@ export class MemeVaultApp {
           this.refreshTemplates(),
         ]);
       },
+    });
+    this.batchDownload = new BatchDownloadController({
+      createExportJob: input => this.api.createExportJob(input),
+      getExportJob: id => this.api.getExportJob(id),
+      listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
+      cancelExportJob: id => this.api.cancelExportJob(id),
+      deleteExportJob: id => this.api.deleteExportJob(id),
     });
     this.bindEvents();
     this.render();
@@ -358,6 +375,13 @@ export class MemeVaultApp {
     this.elements.templateForm.addEventListener("submit", (event) => {
       event.preventDefault();
       void this.submitTemplate();
+    });
+    this.elements.openDownloadButton.addEventListener("click", () => {
+      this.batchDownload.open({
+        query: this.state.query,
+        tags: this.state.selectedTags,
+        templateId: null,
+      });
     });
     this.elements.templateForm
       .querySelector<HTMLInputElement>('[name="reference_image"]')

@@ -1,4 +1,5 @@
 from typing import Annotated
+from pathlib import Path
 
 from fastapi import (
     APIRouter,
@@ -11,6 +12,11 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+import json
+from tempfile import NamedTemporaryFile
+from zipfile import ZIP_STORED, ZipFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +44,7 @@ from app.services.meme_service import (
     NoMemesAvailableError,
 )
 from app.storage.image_storage import ImageStorage, ImageTooLargeError, InvalidImageError
+from app.utils.download_names import safe_download_filename, safe_extension, sanitize_stem, unique_archive_name
 
 
 # API 层只处理 HTTP 输入输出：解析请求、调用 Service、转换异常和响应。
@@ -274,6 +281,77 @@ def analyze_meme(
     except (AIUpstreamError, AIInvalidResponseError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return _to_ai_analysis_response(analysis, service)
+
+
+@router.get("/{meme_id}/download")
+def download_meme(meme_id: int, request: Request, service: ServiceDependency):
+    try:
+        meme = service.get_meme(meme_id)
+    except MemeNotFoundError as error:
+        raise HTTPException(404, str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(410, str(error)) from error
+    images = list(meme.images)
+    if len(images) == 1:
+        image = images[0]
+        filename = safe_download_filename(
+            meme.title, f"meme-{meme.id}", safe_extension(image.original_filename, image.mime_type)
+        )
+        return FileResponse(
+            service.storage.original_path(image.file_path), media_type=image.mime_type,
+            filename=filename, content_disposition_type="attachment",
+        )
+    exports_dir = request.app.state.export_archives_dir
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    temporary = NamedTemporaryFile(prefix=f"meme-{meme.id}-", suffix=".zip", dir=exports_dir, delete=False)
+    temporary_path = Path(temporary.name)
+    temporary.close()
+    used: set[str] = set()
+    manifest_images = []
+    try:
+        with ZipFile(temporary_path, "w", compression=ZIP_STORED, allowZip64=True) as archive:
+            for image in sorted(images, key=lambda item: item.position):
+                extension = safe_extension(image.original_filename, image.mime_type)
+                stem = sanitize_stem(Path(image.original_filename).stem, f"image-{image.position + 1}")
+                arcname = unique_archive_name(f"{image.position + 1:02d}_{stem}{extension}", used)
+                archive.write(service.storage.original_path(image.file_path), arcname, compress_type=ZIP_STORED)
+                manifest_images.append({
+                    "id": image.id, "position": image.position,
+                    "original_filename": image.original_filename, "archive_path": arcname,
+                    "mime_type": image.mime_type, "file_size": image.file_size,
+                    "sha256": image.file_hash,
+                })
+            manifest = {
+                "meme_id": meme.id, "title": meme.title, "description": meme.description,
+                "source": meme.source, "tags": [tag.name for tag in meme.tags],
+                "template": meme.template.name if meme.template else None,
+                "images": manifest_images,
+            }
+            archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"), compress_type=ZIP_STORED)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+    filename = safe_download_filename(f"{meme.title}_meme_{meme.id}", f"meme-{meme.id}", ".zip")
+    return FileResponse(
+        temporary_path, media_type="application/zip", filename=filename,
+        content_disposition_type="attachment", background=BackgroundTask(temporary_path.unlink, missing_ok=True),
+    )
+
+
+@router.get("/{meme_id}/images/{image_id}/download")
+def download_meme_image(meme_id: int, image_id: int, service: ServiceDependency) -> FileResponse:
+    meme = service.repository.get_by_id(meme_id)
+    if meme is None:
+        raise HTTPException(404, f"Meme {meme_id} does not exist")
+    image = next((item for item in meme.images if item.id == image_id), None)
+    if image is None:
+        raise HTTPException(404, f"Image {image_id} does not belong to Meme {meme_id}")
+    path = service.storage.original_path(image.file_path)
+    if not path.is_file():
+        raise HTTPException(410, "Original image is missing")
+    extension = safe_extension(image.original_filename, image.mime_type)
+    filename = safe_download_filename(Path(image.original_filename).stem, f"meme-{meme_id}-image-{image.id}", extension)
+    return FileResponse(path, media_type=image.mime_type, filename=filename, content_disposition_type="attachment")
 
 
 @router.post("/{meme_id}/images", response_model=MemeResponse)

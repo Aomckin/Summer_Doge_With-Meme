@@ -1,8 +1,8 @@
-# Meme Vault v0.5.3
+# Meme Vault v0.5.4
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.3，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供普通串行批量上传、持久化 ZIP 批量导入、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室、Codex Luna 离线标签维护，以及响应式瀑布流画廊。编辑 Meme 时会原地更新对应状态和卡片，保持已加载分页、顺序、滚动位置及其他卡片不变；开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.4，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供单图/复合 Meme 原图下载、持久化批量 ZIP 导出、普通串行批量上传、持久化 ZIP 批量导入、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室、Codex Luna 离线标签维护，以及响应式瀑布流画廊。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -124,6 +124,8 @@ Pytest 的临时文件统一写入项目根目录的 `.pytest_tmp/`，该目录�
 - 批量队列严格串行；可在当前请求结束后暂停并继续，只重试失败项，重复图片按 HTTP 409 标记为跳过。
 - 上传对话框可切换到 ZIP 模式：浏览器只上传一个压缩包且不渲染成员预览；任务创建后轮询持久化进度，关闭弹窗不影响后台执行，重新打开可恢复当前任务。
 - ZIP 模式支持公共标签、模板、来源和 1～1000 的批次大小（默认 100）；失败明细分页显示，并可取消任务或只重试失败成员。
+- 详情页可直接下载单张原图或含完整有序图片组与 `manifest.json` 的 ZIP；查看器“下载当前图”会随上一张/下一张同步更新。
+- 顶部“批量下载”可导出全部或当前搜索/AND 标签筛选的服务器完整结果，并按扁平、模板或标签目录组织；不会只导出前端当前加载的 24 张。
 - 编辑表单可以选择已有模板；选择“无模板”会通过 JSON `null` 清除归类。
 - 列表、批量上传、随机、保存和删除均提供独立的加载或错误反馈。
 - 详情面板可发起 AI 图片分析，预览描述、标签建议、已有模板建议、置信度和使用的模型。
@@ -191,7 +193,7 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`captions`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers`、`ai_models`、`import_jobs` 和 `import_job_items`。删除 Meme 时其 Caption 通过外键和 ORM 关系级联删除。
+应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`captions`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers`、`ai_models`、`import_jobs`、`import_job_items`、`export_jobs` 和 `export_job_items`。
 
 从旧 SQLite 数据库启动时，基础设施层会幂等补齐历史版本字段，并为每条尚无 `meme_images` 记录的旧 Meme 回填一张 position=0 的首图。迁移只复制已有图片元数据，不移动或重写磁盘文件；重复启动不会重复回填，也不会删除或重建已有表。非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
 
@@ -223,6 +225,12 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 - `GET /api/import-jobs/{job_id}`、`GET /api/import-jobs/{job_id}/items`：读取任务进度和分页成员结果。
 - `POST /api/import-jobs/{job_id}/cancel`、`POST /api/import-jobs/{job_id}/retry-failed`：取消或重试失败成员。
 - `DELETE /api/import-jobs/{job_id}`：删除终态任务及其保留的临时 ZIP。
+- `GET /api/memes/{meme_id}/download`：单图返回原图；复合 Meme 返回有序图片组 ZIP 和 manifest。
+- `GET /api/memes/{meme_id}/images/{image_id}/download`：下载属于指定 Meme 的一张原图。
+- `POST /api/export-jobs`：创建全部或完整筛选结果的持久化 ZIP 导出任务。
+- `GET /api/export-jobs/{job_id}`、`GET /api/export-jobs/{job_id}/items`：读取导出进度和失败明细。
+- `GET /api/export-jobs/{job_id}/download`：以磁盘文件流下载 ready ZIP。
+- `POST /api/export-jobs/{job_id}/cancel`、`DELETE /api/export-jobs/{job_id}`：取消或删除导出任务。
 - `GET /api/memes`：获取列表，支持搜索标题和描述的 `q`、分页参数 `offset`/`limit`，以及可重复的 `tags` 参数。
 - `GET /api/memes/random`：随机获取 Meme，可使用重复的 `tags` 参数限定范围。
 - `GET /api/memes/{meme_id}`：获取详情。
@@ -251,7 +259,15 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 
 每张图先复用 `ImageStorage.validate` 做大小、真实格式和 SHA-256 校验；查重发生在原图落盘和缩略图生成前。非重复项调用 `MemeService.create_meme_no_commit`，每项位于 SAVEPOINT 内，每 `chunk_size` 项提交外层事务。单项失败不会回滚同批其他项；外层批次提交失败时，整批数据库变更回滚，并按本批文件清单删除原图和缩略图。
 
-无失败的完成任务和取消任务会删除临时 ZIP；含失败成员的完成任务暂时保留 ZIP，供 `retry-failed` 精确重读这些成员，任务删除或重试全部成功后再清理。批量导出仍未实现，留待后续独立版本。
+无失败的完成任务和取消任务会删除临时 ZIP；含失败成员的完成任务暂时保留 ZIP，供 `retry-failed` 精确重读这些成员，任务删除或重试全部成功后再清理。
+
+## 原图下载与批量 ZIP 导出
+
+普通下载始终读取 `data/images/` 原图，不使用缩略图或 UUID 作为下载名。文件名会去除路径、控制字符、危险字符和 Windows 保留名；中文与空格通过标准 `Content-Disposition` 正常传递。复合 Meme 使用 `ZIP_STORED + Zip64` 写临时磁盘 ZIP，图片按 position 排序并附带标题、描述、来源、标签、模板、文件大小和 SHA-256 manifest。
+
+批量导出先用短数据库查询固定全部匹配 Meme 的元数据快照，再释放查询事务并使用单线程后台执行器逐文件调用 `ZipFile.write()`。ZIP 先写入 `data/export_archives/*.part`，成功后原子改名；取消、失败和启动恢复会清理 `.part`。ready 或 `completed_with_errors` ZIP 默认保留 24 小时，过期或用户删除任务时清理。
+
+创建任务前按实际目录组织方式估算输出：flat/template 每张原图一次，tag 按标签数复制，无标签写入“无标签”。tag 模式可能显著增大 ZIP；系统要求预计体积之外至少保留 512 MiB 可用空间，空间不足返回清晰错误，绝不会删除原图或缩略图。
 - `/api/ai-settings/providers`：模型厂商的列表、新增、修改与删除。
 - `/api/ai-settings/providers/{id}/test`：验证密钥和 `/models` 连接。
 - `/api/ai-settings/providers/{id}/refresh-models`：同步厂商模型标识。

@@ -121,6 +121,11 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     cancelImportJob: vi.fn(),
     retryFailedImportJob: vi.fn(),
     deleteImportJob: vi.fn().mockResolvedValue(undefined),
+    createExportJob: vi.fn(),
+    getExportJob: vi.fn(),
+    listExportJobItems: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 25 }),
+    cancelExportJob: vi.fn(),
+    deleteExportJob: vi.fn().mockResolvedValue(undefined),
     updateMeme: vi.fn().mockResolvedValue(makeMeme(2, "已编辑")),
     deleteMeme: vi.fn().mockResolvedValue(undefined),
     listCaptions: vi.fn().mockResolvedValue([]),
@@ -1807,5 +1812,23 @@ describe("MemeVaultApp", () => {
       ).toContain("网络请求失败");
     });
     expect(document.querySelector("[data-related-meme]")).toBeNull();
+  });
+
+  it("renders direct download links for details and the current viewer image", async () => {
+    const composite = makeCompositeMeme();
+    const app = new MemeVaultApp(root(), makeApi({ listMemes: vi.fn().mockResolvedValue([composite]) }));
+    await app.start();
+    expect(button("批量下载")).toBeTruthy();
+    document.querySelector<HTMLButtonElement>(`[data-meme-id="${composite.id}"]`)?.click();
+    const group = document.querySelector<HTMLAnchorElement>("[data-download-meme]");
+    expect(group?.textContent).toContain("下载图片组");
+    expect(group?.getAttribute("href")).toBe(`/api/memes/${composite.id}/download`);
+    document.querySelector<HTMLButtonElement>('[data-image-index="0"][data-open-viewer]')?.click();
+    let download = document.querySelector<HTMLAnchorElement>("[data-viewer-download]");
+    expect(download?.getAttribute("href")).toBe(`/api/memes/${composite.id}/images/${composite.images[0].id}/download`);
+    document.querySelector<HTMLButtonElement>("[data-viewer-next]")?.click();
+    download = document.querySelector<HTMLAnchorElement>("[data-viewer-download]");
+    expect(download?.getAttribute("href")).toBe(`/api/memes/${composite.id}/images/${composite.images[1].id}/download`);
+    expect(document.querySelector<HTMLAnchorElement>("[data-viewer-link]")?.target).toBe("_blank");
   });
 });

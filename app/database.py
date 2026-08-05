@@ -50,6 +50,7 @@ def create_tables() -> None:
     from app.models import meme_image  # noqa: F401
     from app.models import meme_relation  # noqa: F401
     from app.models import import_job  # noqa: F401
+    from app.models import export_job  # noqa: F401
     from app.models import tag  # noqa: F401
     from app.models import template  # noqa: F401
 
@@ -87,6 +88,11 @@ def run_startup_migrations(bind: Engine = engine) -> None:
         ("templates", "reference_embedding_model_id", "ALTER TABLE templates ADD COLUMN reference_embedding_model_id VARCHAR(200)"),
         ("ai_models", "supports_image_embedding", "ALTER TABLE ai_models ADD COLUMN supports_image_embedding BOOLEAN NOT NULL DEFAULT 0"),
         ("ai_models", "is_embedding_active", "ALTER TABLE ai_models ADD COLUMN is_embedding_active BOOLEAN NOT NULL DEFAULT 0"),
+        (
+            "export_jobs",
+            "snapshot_json",
+            "ALTER TABLE export_jobs ADD COLUMN snapshot_json TEXT NOT NULL DEFAULT '[]'",
+        ),
     )
     with bind.begin() as connection:
         for table_name, column_name, statement in upgrades:

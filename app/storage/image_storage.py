@@ -171,6 +171,10 @@ class ImageStorage:
         original = self._path_inside(file_path, self.images_dir)
         return original.read_bytes()
 
+    def original_path(self, file_path: str | Path) -> Path:
+        """Resolve an original image while enforcing the configured root."""
+        return self._path_inside(file_path, self.images_dir)
+
     def read_thumbnail(self, file_path: str | Path) -> bytes:
         return self._path_inside(file_path, self.thumbnails_dir).read_bytes()
 

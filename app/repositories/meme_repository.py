@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 # Repository 层只关心“怎样读写数据库”，不理解 HTTP，也不保存图片。
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.meme import Meme
 from app.models.tag import MemeTag, Tag
@@ -64,6 +66,38 @@ class MemeRepository:
             )
         statement = statement.order_by(Meme.id).offset(offset).limit(limit)
         return list(self.session.scalars(statement))
+
+    def list_all_for_export(
+        self,
+        *,
+        tags: Sequence[str] | None = None,
+        q: str | None = None,
+        template_id: int | None = None,
+    ) -> list[Meme]:
+        statement = select(Meme).options(
+            selectinload(Meme.images),
+            selectinload(Meme.tag_links).selectinload(MemeTag.tag),
+            selectinload(Meme.template),
+        )
+        search = (q or "").strip().lower()
+        if search:
+            statement = statement.where(
+                or_(
+                    func.lower(Meme.title).contains(search, autoescape=True),
+                    func.lower(func.coalesce(Meme.description, "")).contains(search, autoescape=True),
+                )
+            )
+        normalized_tags = list(dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip()))
+        if normalized_tags:
+            statement = (
+                statement.join(MemeTag).join(Tag)
+                .where(Tag.name.in_(normalized_tags))
+                .group_by(Meme.id)
+                .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
+            )
+        if template_id is not None:
+            statement = statement.where(Meme.template_id == template_id)
+        return list(self.session.scalars(statement.order_by(Meme.id)).unique())
 
     def update(self, meme: Meme, changes: Mapping[str, object]) -> Meme:
         # Repository 不决定哪些字段允许修改；这条业务规则由 Service 负责。

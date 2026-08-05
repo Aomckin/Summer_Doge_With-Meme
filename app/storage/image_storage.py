@@ -48,6 +48,15 @@ class StoredImage:
     file_hash: str
 
 
+@dataclass(frozen=True)
+class ValidatedImage:
+    content: bytes
+    image_format: str
+    width: int
+    height: int
+    file_hash: str
+
+
 class ImageStorage:
     def __init__(
         self,
@@ -67,7 +76,10 @@ class ImageStorage:
         self.thumbnails_dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, original_filename: str, content: bytes) -> StoredImage:
-        # 先做便宜的字节数检查，超限文件无需再交给 Pillow 解码。
+        return self.save_validated(original_filename, self.validate(content))
+
+    def validate(self, content: bytes) -> ValidatedImage:
+        """Validate and hash without writing files or generating a thumbnail."""
         file_size = len(content)
         if file_size > self.max_file_size:
             raise ImageTooLargeError(
@@ -76,6 +88,24 @@ class ImageStorage:
 
         # 格式、宽高都从文件内容读取，而不是相信客户端提交的信息。
         image_format, width, height = self._inspect_image(content)
+        return ValidatedImage(
+            content=content,
+            image_format=image_format,
+            width=width,
+            height=height,
+            file_hash=sha256(content).hexdigest(),
+        )
+
+    def save_validated(
+        self, original_filename: str, validated: ValidatedImage
+    ) -> StoredImage:
+        content = validated.content
+        file_size = len(content)
+        image_format, width, height = (
+            validated.image_format,
+            validated.width,
+            validated.height,
+        )
         extension, mime_type = FORMAT_DETAILS[image_format]
         # 使用随机 UUID 作为磁盘文件名，既避免同名覆盖，也不暴露原文件名。
         file_id = uuid4().hex
@@ -104,7 +134,7 @@ class ImageStorage:
             width=width,
             height=height,
             # 内容哈希可用于判断两次上传的文件是否完全相同。
-            file_hash=sha256(content).hexdigest(),
+            file_hash=validated.file_hash,
         )
 
     def delete(

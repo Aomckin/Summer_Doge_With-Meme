@@ -21,7 +21,7 @@ from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.repositories.meme_repository import MemeRepository
 from app.repositories.tag_repository import TagRepository
 from app.repositories.template_repository import TemplateRepository
-from app.storage.image_storage import ImageStorage
+from app.storage.image_storage import ImageStorage, StoredImage, ValidatedImage
 from app.storage.template_image_storage import TemplateImageStorage
 from app.ai.embedding_client import ImageEmbeddingClient
 from app.services.template_matching import rank_visual_templates
@@ -70,6 +70,10 @@ class AIAnalysisAlreadyConfirmedError(RuntimeError):
     pass
 
 
+class DuplicateImageError(ValueError):
+    pass
+
+
 class MemeService:
     def __init__(self, session: Session, storage: ImageStorage | None = None) -> None:
         # 依赖从外部传入，测试时可以换成临时数据库和临时文件目录。
@@ -91,13 +95,49 @@ class MemeService:
         tags: Sequence[str] = (),
         template_id: int | None = None,
     ) -> Meme:
+        validated = self.storage.validate(content)
+        stored: StoredImage | None = None
+        try:
+            meme, stored = self.create_meme_no_commit(
+                original_filename,
+                validated,
+                title=title,
+                description=description,
+                source=source,
+                tags=tags,
+                template_id=template_id,
+                check_duplicate=False,
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            if stored is not None:
+                self.storage.delete(stored.file_path, stored.thumbnail_path)
+            raise
+        return meme
+
+    def create_meme_no_commit(
+        self,
+        original_filename: str,
+        validated: ValidatedImage,
+        *,
+        title: str,
+        description: str | None = None,
+        source: str | None = None,
+        tags: Sequence[str] = (),
+        template_id: int | None = None,
+        check_duplicate: bool = True,
+    ) -> tuple[Meme, StoredImage]:
+        """Create and flush one Meme while leaving commit/rollback to the caller."""
         if (
             template_id is not None
             and self.template_repository.get_by_id(template_id) is None
         ):
             raise ValueError(f"Template {template_id} does not exist")
-        # 先保存并检查图片，由存储层返回可信的文件信息。
-        stored = self.storage.save(original_filename, content)
+        if check_duplicate and self.repository.get_by_file_hash(validated.file_hash) is not None:
+            raise DuplicateImageError("Image already exists")
+        # 查重完成后才生成缩略图，避免为重复图片执行 Pillow 缩放。
+        stored = self.storage.save_validated(original_filename, validated)
         # ORM 对象只保存元数据和磁盘路径，图片二进制本身不塞进数据库。
         meme = Meme(
             title=title,
@@ -132,15 +172,10 @@ class MemeService:
         try:
             self.repository.create(meme)
             self.tag_repository.replace_meme_tags(meme, tags)
-            # Meme 和标签关系都准备好后一次提交，保持数据库内部一致。
-            self.session.commit()
         except Exception:
-            # 数据库失败时既回滚事务，也删除刚落盘的文件，避免残留垃圾。
-            self.session.rollback()
             self.storage.delete(stored.file_path, stored.thumbnail_path)
             raise
-
-        return meme
+        return meme, stored
 
     def append_image(self, meme_id: int, original_filename: str, content: bytes) -> Meme:
         meme = self.get_meme(meme_id)

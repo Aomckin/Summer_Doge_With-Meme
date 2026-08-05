@@ -49,6 +49,7 @@ def create_tables() -> None:
     from app.models import meme  # noqa: F401
     from app.models import meme_image  # noqa: F401
     from app.models import meme_relation  # noqa: F401
+    from app.models import import_job  # noqa: F401
     from app.models import tag  # noqa: F401
     from app.models import template  # noqa: F401
 

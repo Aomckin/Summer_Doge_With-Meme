@@ -24,6 +24,9 @@ class MemeRepository:
     def get_by_id(self, meme_id: int) -> Meme | None:
         return self.session.get(Meme, meme_id)
 
+    def get_by_file_hash(self, file_hash: str) -> Meme | None:
+        return self.session.scalar(select(Meme).where(Meme.file_hash == file_hash))
+
     def list(
         self,
         *,

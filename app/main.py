@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.ai_settings import router as ai_settings_router
 from app.api.captions import router as caption_router
 from app.api.memes import router as meme_router
+from app.api.import_jobs import router as import_job_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
 from app.config import (
@@ -16,6 +17,7 @@ from app.config import (
     FRONTEND_DIST_DIR,
     IMAGES_DIR,
     IMAGES_URL_PREFIX,
+    IMPORT_ARCHIVES_DIR,
     TEMPLATE_IMAGES_DIR,
     TEMPLATE_IMAGES_URL_PREFIX,
     TEMPLATE_THUMBNAILS_DIR,
@@ -23,14 +25,19 @@ from app.config import (
     THUMBNAILS_DIR,
     THUMBNAILS_URL_PREFIX,
 )
-from app.database import create_tables
+from app.database import SessionLocal, create_tables
+from app.services.import_job_service import ImportJobManager
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # lifespan 中 yield 之前的代码只在应用启动时运行一次。
     create_tables()
-    yield
+    application.state.import_job_manager.recover_interrupted()
+    try:
+        yield
+    finally:
+        application.state.import_job_manager.shutdown()
 
 
 def health_check() -> dict[str, str]:
@@ -43,22 +50,25 @@ def create_app(
     thumbnails_dir: Path = THUMBNAILS_DIR,
     frontend_dir: Path = FRONTEND_DIST_DIR,
     ai_settings_key_file: Path = AI_SETTINGS_KEY_FILE,
+    import_archives_dir: Path = IMPORT_ARCHIVES_DIR,
 ) -> FastAPI:
     resolved_images = images_dir.resolve()
     resolved_thumbnails = thumbnails_dir.resolve()
     resolved_template_images = TEMPLATE_IMAGES_DIR.resolve()
     resolved_template_thumbnails = TEMPLATE_THUMBNAILS_DIR.resolve()
     resolved_frontend = frontend_dir.resolve()
+    resolved_import_archives = import_archives_dir.resolve()
 
     # StaticFiles 初始化时要求目录已经存在，因此先创建再挂载。
     resolved_images.mkdir(parents=True, exist_ok=True)
     resolved_thumbnails.mkdir(parents=True, exist_ok=True)
     resolved_template_images.mkdir(parents=True, exist_ok=True)
     resolved_template_thumbnails.mkdir(parents=True, exist_ok=True)
+    resolved_import_archives.mkdir(parents=True, exist_ok=True)
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.5.2",
+        version="0.5.3",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -66,6 +76,13 @@ def create_app(
     application.state.template_images_dir = resolved_template_images
     application.state.template_thumbnails_dir = resolved_template_thumbnails
     application.state.ai_settings_key_file = ai_settings_key_file.resolve()
+    application.state.import_archives_dir = resolved_import_archives
+    application.state.import_job_manager = ImportJobManager(
+        SessionLocal,
+        resolved_images,
+        resolved_thumbnails,
+        resolved_import_archives,
+    )
     application.mount(
         IMAGES_URL_PREFIX,
         StaticFiles(directory=resolved_images),
@@ -81,6 +98,7 @@ def create_app(
 
     # 各业务路由在独立模块中定义，入口文件只负责把它们挂到应用上。
     application.include_router(meme_router)
+    application.include_router(import_job_router)
     application.include_router(caption_router)
     application.include_router(tag_router)
     application.include_router(ai_settings_router)

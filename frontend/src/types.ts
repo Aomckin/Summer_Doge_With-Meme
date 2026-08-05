@@ -109,6 +109,61 @@ export interface AIAnalysisConfirmPayload {
   apply_template: boolean;
 }
 
+export interface CreateImportJobInput {
+  archive: File;
+  tags: string[];
+  template_id: number | null;
+  source: string;
+  chunk_size: number;
+}
+
+export type ImportJobStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export interface ImportJobResponse {
+  id: number;
+  original_filename: string;
+  status: ImportJobStatus;
+  total_entries: number;
+  image_entries: number;
+  processed_count: number;
+  success_count: number;
+  skipped_count: number;
+  failed_count: number;
+  chunk_size: number;
+  tags: string[];
+  template_id: number | null;
+  source: string | null;
+  current_filename: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ImportJobItemResponse {
+  id: number;
+  entry_index: number;
+  filename: string;
+  status: "success" | "skipped" | "failed";
+  meme_id: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ImportJobItemPage {
+  items: ImportJobItemResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export type CaptionLength = "short" | "medium" | "long";
 export type CaptionSource = "manual" | "ai";
 export type CaptionRewriteAction = "polish" | "shorten" | "expand" | "retone";

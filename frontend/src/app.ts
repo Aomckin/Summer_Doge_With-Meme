@@ -33,6 +33,7 @@ import {
   uploadTemplateReferenceImage,
   updateMeme,
   uploadMeme,
+  createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
 } from "./api";
@@ -48,6 +49,7 @@ import type {
   TemplateResponse,
   TemplateUpdatePayload,
   UploadMemeInput,
+  CreateImportJobInput, ImportJobItemPage, ImportJobResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import {
@@ -95,6 +97,12 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   deleteTemplateReferenceImage(id: number): Promise<void>;
   getRandomMeme(tags: string[], signal?: AbortSignal): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
+  createImportJob(input: CreateImportJobInput): Promise<ImportJobResponse>;
+  getImportJob(id: number): Promise<ImportJobResponse>;
+  listImportJobItems(id: number, offset?: number, limit?: number, status?: string): Promise<ImportJobItemPage>;
+  cancelImportJob(id: number): Promise<ImportJobResponse>;
+  retryFailedImportJob(id: number): Promise<ImportJobResponse>;
+  deleteImportJob(id: number): Promise<void>;
   updateMeme(
     id: number,
     payload: MemeUpdatePayload,
@@ -126,6 +134,7 @@ const defaultApi: MemeApi = {
   deleteTemplateReferenceImage,
   getRandomMeme,
   uploadMeme,
+  createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
   updateMeme,
   deleteMeme,
   listCaptions,
@@ -243,6 +252,13 @@ export class MemeVaultApp {
     this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
     this.batchUpload = new BatchUploadController({
       uploadMeme: (input) => this.api.uploadMeme(input),
+      createImportJob: (input) => this.api.createImportJob(input),
+      getImportJob: (id) => this.api.getImportJob(id),
+      listImportJobItems: (id, offset, limit, status) =>
+        this.api.listImportJobItems(id, offset, limit, status),
+      cancelImportJob: (id) => this.api.cancelImportJob(id),
+      retryFailedImportJob: (id) => this.api.retryFailedImportJob(id),
+      deleteImportJob: (id) => this.api.deleteImportJob(id),
       onComplete: async () => {
         await Promise.all([
           this.reloadMemes(),

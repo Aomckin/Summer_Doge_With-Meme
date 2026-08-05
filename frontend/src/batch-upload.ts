@@ -1,5 +1,8 @@
 import { ApiError, parseTagInput } from "./api";
 import type {
+  CreateImportJobInput,
+  ImportJobItemResponse,
+  ImportJobResponse,
   MemeResponse,
   TemplateResponse,
   UploadMemeInput,
@@ -29,6 +32,12 @@ export interface BatchUploadResult {
 
 interface BatchUploadOptions {
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
+  createImportJob?(input: CreateImportJobInput): Promise<ImportJobResponse>;
+  getImportJob?(id: number): Promise<ImportJobResponse>;
+  listImportJobItems?(id: number, offset?: number, limit?: number, status?: string): Promise<{ items: ImportJobItemResponse[]; total: number }>;
+  cancelImportJob?(id: number): Promise<ImportJobResponse>;
+  retryFailedImportJob?(id: number): Promise<ImportJobResponse>;
+  deleteImportJob?(id: number): Promise<void>;
   onComplete(result: BatchUploadResult): Promise<void> | void;
   confirmClose?: (message: string) => boolean;
 }
@@ -39,6 +48,9 @@ const ACCEPTED_IMAGE_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+const ACTIVE_IMPORT_STATUSES = new Set(["queued", "running", "cancelling"]);
+const IMPORT_JOB_STORAGE_KEY = "meme-vault.active-import-job";
+const FAILED_PAGE_SIZE = 25;
 
 const STATUS_LABELS: Record<BatchUploadStatus, string> = {
   pending: "等待中",
@@ -87,6 +99,15 @@ export class BatchUploadController {
   private readonly retryButton: HTMLButtonElement;
   private readonly clearButton: HTMLButtonElement;
   private readonly resultElement: HTMLElement;
+  private readonly zipInput: HTMLInputElement;
+  private mode: "images" | "zip" = "images";
+  private zipFile: File | null = null;
+  private importJob: ImportJobResponse | null = null;
+  private failedItems: ImportJobItemResponse[] = [];
+  private failedOffset = 0;
+  private failedTotal = 0;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private importCompletionNotified = false;
   private resultTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: BatchUploadItem[] = [];
   private nextId = 0;
@@ -109,8 +130,13 @@ export class BatchUploadController {
           <button class="icon-button" type="button" data-close-batch aria-label="关闭">×</button>
         </div>
 
+        <div class="batch-mode-switch" role="radiogroup" aria-label="上传模式">
+          <label><input type="radio" name="upload_mode" value="images" checked> 普通图片</label>
+          <label><input type="radio" name="upload_mode" value="zip"> 压缩包导入</label>
+        </div>
+
         <div class="batch-upload-layout">
-          <section class="batch-files-panel" aria-label="待上传图片">
+          <section class="batch-files-panel" aria-label="待上传图片" data-image-panel>
             <div class="batch-drop-zone" data-batch-drop-zone tabindex="0">
               <strong>拖入多张图片</strong>
               <span>或点击选择 JPEG、PNG、WebP、GIF</span>
@@ -129,6 +155,20 @@ export class BatchUploadController {
             <p class="batch-empty" data-batch-empty>还没有选择图片。</p>
             <div class="batch-file-list" data-batch-queue></div>
           </section>
+          <section class="batch-files-panel" aria-label="ZIP 压缩包" data-zip-panel hidden>
+            <label class="batch-drop-zone batch-zip-picker">
+              <strong>选择一个 ZIP 压缩包</strong>
+              <span>后端逐项读取，不会在浏览器中生成图片预览</span>
+              <input name="zip_archive" type="file" accept=".zip,application/zip">
+            </label>
+            <article class="batch-zip-summary" data-zip-summary>还没有选择压缩包。</article>
+            <div class="batch-failed-list" data-import-failures hidden></div>
+            <div class="batch-failure-pages" data-import-pages hidden>
+              <button class="button button-ghost" type="button" data-import-prev>上一页</button>
+              <span data-import-page-label></span>
+              <button class="button button-ghost" type="button" data-import-next>下一页</button>
+            </div>
+          </section>
 
           <section class="batch-metadata" aria-label="公共信息">
             <label>
@@ -146,6 +186,11 @@ export class BatchUploadController {
               <span>公共来源</span>
               <input name="source" type="text" maxlength="500">
             </label>
+            <label data-zip-only hidden>
+              <span>数据库批次大小</span>
+              <input name="chunk_size" type="number" min="1" max="1000" value="100">
+              <small>默认每 100 张提交一次</small>
+            </label>
             <div class="batch-progress" aria-live="polite">
               <strong>上传进度</strong>
               <span data-batch-stats>等待添加图片</span>
@@ -158,6 +203,9 @@ export class BatchUploadController {
           <button class="button button-ghost" type="button" data-close-batch>关闭</button>
           <button class="button button-secondary" type="button" data-retry-batch hidden>重试失败项</button>
           <button class="button button-secondary" type="button" data-stop-batch hidden>停止上传</button>
+          <button class="button button-secondary" type="button" data-retry-import hidden>重试 ZIP 失败项</button>
+          <button class="button button-secondary" type="button" data-cancel-import hidden>取消导入</button>
+          <button class="button button-secondary" type="button" data-new-import hidden>删除任务并新建</button>
           <button class="button button-primary" type="submit" data-start-batch>开始上传</button>
         </div>
       </form>
@@ -173,6 +221,7 @@ export class BatchUploadController {
 
     this.form = this.required("[data-batch-form]");
     this.fileInput = this.required('[name="batch_files"]');
+    this.zipInput = this.required('[name="zip_archive"]');
     this.queueElement = this.required("[data-batch-queue]");
     this.emptyElement = this.required("[data-batch-empty]");
     this.statsElement = this.required("[data-batch-stats]");
@@ -183,14 +232,19 @@ export class BatchUploadController {
     this.clearButton = this.required("[data-clear-batch]");
     this.bindEvents();
     this.render();
+    const storedJobId = Number(localStorage.getItem(IMPORT_JOB_STORAGE_KEY));
+    if (storedJobId > 0 && this.options.getImportJob) {
+      this.mode = "zip";
+      void this.resumeImport(storedJobId);
+    }
   }
 
   open(templates: TemplateResponse[]): void {
-    if (this.running) {
-      return;
+    if (!this.importJob && !this.running) {
+      this.reset();
     }
-    this.reset();
     this.setTemplates(templates);
+    this.render();
     this.dialog.showModal();
   }
 
@@ -210,6 +264,10 @@ export class BatchUploadController {
   }
 
   requestClose(): void {
+    if (this.mode === "zip" && this.importJob) {
+      this.dialog.close();
+      return;
+    }
     const hasUnfinished = this.queue.some((item) =>
       ["pending", "uploading", "failed"].includes(item.status),
     );
@@ -261,6 +319,27 @@ export class BatchUploadController {
       this.addFiles(this.fileInput.files ?? []);
       this.fileInput.value = "";
     });
+    for (const radio of this.dialog.querySelectorAll<HTMLInputElement>(
+      '[name="upload_mode"]',
+    )) {
+      radio.addEventListener("change", () => {
+        if (this.locked || this.importJob) return;
+        this.mode = radio.value === "zip" ? "zip" : "images";
+        this.setMessage(null);
+        this.render();
+      });
+    }
+    this.zipInput.addEventListener("change", () => {
+      const file = this.zipInput.files?.[0] ?? null;
+      if (file && !file.name.toLowerCase().endsWith(".zip")) {
+        this.zipFile = null;
+        this.setMessage("请选择 ZIP 压缩包。");
+      } else {
+        this.zipFile = file;
+        this.setMessage(null);
+      }
+      this.render();
+    });
     this.queueElement.addEventListener("click", (event) => {
       if (this.locked) return;
       const button = (event.target as Element).closest<HTMLButtonElement>(
@@ -285,7 +364,8 @@ export class BatchUploadController {
     this.clearButton.addEventListener("click", () => this.clearQueue());
     this.form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void this.runQueue();
+      if (this.mode === "zip") void this.startImport();
+      else void this.runQueue();
     });
     this.stopButton.addEventListener("click", () => {
       this.stopRequested = true;
@@ -300,6 +380,26 @@ export class BatchUploadController {
       }
       void this.runQueue();
     });
+    this.required<HTMLButtonElement>("[data-cancel-import]").addEventListener(
+      "click",
+      () => void this.cancelImport(),
+    );
+    this.required<HTMLButtonElement>("[data-retry-import]").addEventListener(
+      "click",
+      () => void this.retryImport(),
+    );
+    this.required<HTMLButtonElement>("[data-new-import]").addEventListener(
+      "click",
+      () => void this.deleteImportAndReset(),
+    );
+    this.required<HTMLButtonElement>("[data-import-prev]").addEventListener(
+      "click",
+      () => void this.loadFailurePage(Math.max(0, this.failedOffset - FAILED_PAGE_SIZE)),
+    );
+    this.required<HTMLButtonElement>("[data-import-next]").addEventListener(
+      "click",
+      () => void this.loadFailurePage(this.failedOffset + FAILED_PAGE_SIZE),
+    );
     for (const button of this.dialog.querySelectorAll("[data-close-batch]")) {
       button.addEventListener("click", () => this.requestClose());
     }
@@ -354,6 +454,11 @@ export class BatchUploadController {
     this.stopRequested = false;
     this.locked = false;
     this.form.reset();
+    this.mode = "images";
+    this.zipFile = null;
+    this.failedItems = [];
+    this.failedTotal = 0;
+    this.failedOffset = 0;
     this.setMessage(null);
     this.render();
   }
@@ -369,6 +474,157 @@ export class BatchUploadController {
       tags: parseTagInput(tags),
       template_id: templateId ? Number(templateId) : null,
     };
+  }
+
+  private async startImport(): Promise<void> {
+    if (
+      !this.zipFile ||
+      this.importJob ||
+      !this.options.createImportJob ||
+      !this.options.getImportJob
+    ) return;
+    const metadata = this.metadata();
+    const chunkSize = Number(
+      this.required<HTMLInputElement>('[name="chunk_size"]').value,
+    );
+    this.locked = true;
+    this.setMessage(null);
+    this.render();
+    try {
+      this.importJob = await this.options.createImportJob({
+        archive: this.zipFile,
+        tags: metadata.tags ?? [],
+        template_id: metadata.template_id ?? null,
+        source: metadata.source ?? "",
+        chunk_size: chunkSize,
+      });
+      localStorage.setItem(IMPORT_JOB_STORAGE_KEY, String(this.importJob.id));
+      this.importCompletionNotified = false;
+      this.render();
+      this.schedulePoll(0);
+    } catch (error) {
+      this.locked = false;
+      this.setMessage(errorText(error));
+      this.render();
+    }
+  }
+
+  private async resumeImport(jobId: number): Promise<void> {
+    try {
+      this.importJob = await this.options.getImportJob?.(jobId) ?? null;
+      this.locked = Boolean(
+        this.importJob && ACTIVE_IMPORT_STATUSES.has(this.importJob.status),
+      );
+      this.render();
+      if (this.importJob && ACTIVE_IMPORT_STATUSES.has(this.importJob.status)) {
+        this.schedulePoll();
+      } else if (this.importJob?.failed_count) {
+        await this.loadFailurePage(0);
+      }
+    } catch {
+      localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      this.importJob = null;
+      this.locked = false;
+      this.render();
+    }
+  }
+
+  private schedulePoll(delay = 800): void {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = setTimeout(() => void this.pollImport(), delay);
+  }
+
+  private async pollImport(): Promise<void> {
+    if (!this.importJob || !this.options.getImportJob) return;
+    try {
+      this.importJob = await this.options.getImportJob(this.importJob.id);
+      this.locked = ACTIVE_IMPORT_STATUSES.has(this.importJob.status);
+      this.setMessage(this.importJob.error_message);
+      this.render();
+      if (this.locked) {
+        this.schedulePoll();
+        return;
+      }
+      if (this.importJob.failed_count > 0) await this.loadFailurePage(0);
+      if (
+        this.importJob.status === "completed" &&
+        !this.importCompletionNotified
+      ) {
+        this.importCompletionNotified = true;
+        await this.options.onComplete({
+          success: this.importJob.success_count,
+          skipped: this.importJob.skipped_count,
+          failed: this.importJob.failed_count,
+        });
+        const summary = `导入完成：成功 ${this.importJob.success_count}，重复 ${this.importJob.skipped_count}，失败 ${this.importJob.failed_count}。`;
+        this.showResult(summary);
+      }
+      if (this.importJob.failed_count === 0) {
+        localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      }
+    } catch (error) {
+      this.setMessage(errorText(error));
+      this.schedulePoll(2000);
+    }
+    this.render();
+  }
+
+  private async cancelImport(): Promise<void> {
+    if (!this.importJob || !this.options.cancelImportJob) return;
+    try {
+      this.importJob = await this.options.cancelImportJob(this.importJob.id);
+      this.render();
+      this.schedulePoll(0);
+    } catch (error) {
+      this.setMessage(errorText(error));
+    }
+  }
+
+  private async retryImport(): Promise<void> {
+    if (!this.importJob || !this.options.retryFailedImportJob) return;
+    try {
+      this.importJob = await this.options.retryFailedImportJob(this.importJob.id);
+      this.failedItems = [];
+      this.failedTotal = 0;
+      this.locked = true;
+      this.importCompletionNotified = false;
+      this.render();
+      this.schedulePoll(0);
+    } catch (error) {
+      this.setMessage(errorText(error));
+    }
+  }
+
+  private async deleteImportAndReset(): Promise<void> {
+    if (!this.importJob || !this.options.deleteImportJob) return;
+    try {
+      await this.options.deleteImportJob(this.importJob.id);
+      localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      this.importJob = null;
+      this.zipFile = null;
+      this.zipInput.value = "";
+      this.failedItems = [];
+      this.failedTotal = 0;
+      this.locked = false;
+      this.setMessage(null);
+      this.render();
+    } catch (error) {
+      this.setMessage(errorText(error));
+    }
+  }
+
+  private async loadFailurePage(offset: number): Promise<void> {
+    if (!this.importJob || !this.options.listImportJobItems) return;
+    const page = await this.options.listImportJobItems(
+      this.importJob.id,
+      offset,
+      FAILED_PAGE_SIZE,
+      "failed",
+    );
+    this.failedItems = page.items;
+    this.failedTotal = page.total;
+    this.failedOffset = offset;
+    this.render();
   }
 
   private async runQueue(): Promise<void> {
@@ -470,6 +726,46 @@ export class BatchUploadController {
       (item) => item.status === "uploading",
     ).length;
     const processed = result.success + result.skipped + result.failed;
+    const isZip = this.mode === "zip";
+    this.required<HTMLElement>("[data-image-panel]").hidden = isZip;
+    this.required<HTMLElement>("[data-zip-panel]").hidden = !isZip;
+    this.required<HTMLElement>("[data-zip-only]").hidden = !isZip;
+    for (const radio of this.dialog.querySelectorAll<HTMLInputElement>(
+      '[name="upload_mode"]',
+    )) {
+      radio.checked = radio.value === this.mode;
+      radio.disabled = Boolean(this.importJob) || this.running;
+    }
+    const zipSummary = this.required<HTMLElement>("[data-zip-summary]");
+    if (this.importJob) {
+      zipSummary.innerHTML = `
+        <strong>${escapeHtml(this.importJob.original_filename)}</strong>
+        <span>任务 #${this.importJob.id} · ${escapeHtml(this.importJob.status)}</span>
+        ${this.importJob.current_filename ? `<small>当前：${escapeHtml(this.importJob.current_filename)}</small>` : ""}
+      `;
+    } else if (this.zipFile) {
+      zipSummary.innerHTML = `
+        <strong>${escapeHtml(this.zipFile.name)}</strong>
+        <span>${(this.zipFile.size / 1024 / 1024).toFixed(2)} MiB</span>
+      `;
+    } else {
+      zipSummary.textContent = "还没有选择压缩包。";
+    }
+    const failures = this.required<HTMLElement>("[data-import-failures]");
+    failures.hidden = !isZip || this.failedTotal === 0;
+    failures.innerHTML = this.failedItems.map((item) => `
+      <article class="batch-failure-item">
+        <strong>${escapeHtml(item.filename)}</strong>
+        <small>${escapeHtml(item.error_message ?? "未知错误")}</small>
+      </article>
+    `).join("");
+    const pages = this.required<HTMLElement>("[data-import-pages]");
+    pages.hidden = !isZip || this.failedTotal <= FAILED_PAGE_SIZE;
+    this.required<HTMLElement>("[data-import-page-label]").textContent =
+      this.failedTotal ? `${this.failedOffset + 1}–${Math.min(this.failedOffset + FAILED_PAGE_SIZE, this.failedTotal)} / ${this.failedTotal}` : "";
+    this.required<HTMLButtonElement>("[data-import-prev]").disabled = this.failedOffset === 0;
+    this.required<HTMLButtonElement>("[data-import-next]").disabled =
+      this.failedOffset + FAILED_PAGE_SIZE >= this.failedTotal;
     this.required("[data-batch-count]").textContent =
       `${this.queue.length} 张图片`;
     this.emptyElement.hidden = this.queue.length > 0;
@@ -510,13 +806,17 @@ export class BatchUploadController {
         `,
       )
       .join("");
-    this.statsElement.textContent = this.queue.length
-      ? `${processed}/${this.queue.length} · 成功 ${result.success} · 跳过 ${result.skipped} · 失败 ${result.failed} · 待处理 ${pending + uploading}`
-      : "等待添加图片";
+    this.statsElement.textContent = isZip
+      ? this.importJob
+        ? `${this.importJob.processed_count}/${this.importJob.image_entries} · 成功 ${this.importJob.success_count} · 重复 ${this.importJob.skipped_count} · 失败 ${this.importJob.failed_count}`
+        : "等待选择 ZIP"
+      : this.queue.length
+        ? `${processed}/${this.queue.length} · 成功 ${result.success} · 跳过 ${result.skipped} · 失败 ${result.failed} · 待处理 ${pending + uploading}`
+        : "等待添加图片";
 
     for (const control of this.form.querySelectorAll<
       HTMLInputElement | HTMLSelectElement
-    >('[name="tags"], [name="source"], [name="template_id"], [name="batch_files"]')) {
+    >('[name="tags"], [name="source"], [name="template_id"], [name="batch_files"], [name="zip_archive"], [name="chunk_size"]')) {
       control.disabled = this.locked;
     }
     this.required<HTMLElement>("[data-batch-drop-zone]").classList.toggle(
@@ -524,17 +824,26 @@ export class BatchUploadController {
       this.locked,
     );
     this.clearButton.disabled = this.locked || this.queue.length === 0;
-    this.startButton.disabled =
-      this.running ||
-      !this.canStart();
-    this.startButton.textContent =
-      this.locked && !this.running && pending > 0 ? "继续上传" : "开始上传";
-    this.stopButton.hidden = !this.running;
+    this.startButton.hidden = isZip && Boolean(this.importJob);
+    this.startButton.disabled = isZip
+      ? !this.zipFile || this.locked || !this.options.createImportJob
+      : this.running || !this.canStart();
+    this.startButton.textContent = isZip
+      ? "创建导入任务"
+      : this.locked && !this.running && pending > 0 ? "继续上传" : "开始上传";
+    this.stopButton.hidden = isZip || !this.running;
     this.stopButton.disabled = this.stopRequested;
     this.stopButton.textContent = this.stopRequested
       ? "当前完成后停止…"
       : "停止上传";
-    this.retryButton.hidden =
-      this.running || !this.queue.some((item) => item.status === "failed");
+    this.retryButton.hidden = isZip || this.running || !this.queue.some((item) => item.status === "failed");
+    const cancelImport = this.required<HTMLButtonElement>("[data-cancel-import]");
+    cancelImport.hidden = !isZip || !this.importJob || !ACTIVE_IMPORT_STATUSES.has(this.importJob.status);
+    cancelImport.disabled = this.importJob?.status === "cancelling";
+    const retryImport = this.required<HTMLButtonElement>("[data-retry-import]");
+    retryImport.hidden = !isZip || !this.importJob || ACTIVE_IMPORT_STATUSES.has(this.importJob.status) || this.importJob.failed_count === 0;
+    const newImport = this.required<HTMLButtonElement>("[data-new-import]");
+    newImport.hidden = !isZip || !this.importJob || ACTIVE_IMPORT_STATUSES.has(this.importJob.status);
+    newImport.disabled = !this.options.deleteImportJob;
   }
 }

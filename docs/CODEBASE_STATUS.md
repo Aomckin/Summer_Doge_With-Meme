@@ -1,10 +1,10 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.5.2 实现状态（2026-08-05）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.5.3 实现状态（2026-08-05）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
-- 本地 Meme 库：单图 API、固定入口的串行批量上传、缩略图、全局重复图片检测、搜索、标签筛选、随机查看、编辑、删除与分页加载。
+- 本地 Meme 库：单图 API、普通串行批量上传、持久化 ZIP 批量导入、缩略图、全局重复图片检测、搜索、标签筛选、随机查看、编辑、删除与分页加载。
 - 复合 Meme：一个 Meme 包含一张或多张按零基 `position` 排序的图片；第一张是封面。
 - 图片管理：向已有 Meme 追加单图、删除非最后图片、HTML 拖拽排序；完整删除会清理整组图片文件。
 - 桌面优先的原生 TypeScript 前端：瀑布流封面卡片、图片数量角标、纵向图片组详情、可前后切换的原图查看器，以及明确的忙碌/错误状态。
@@ -19,7 +19,7 @@
 
 - 尚未实现聊天场景推荐 Meme、语义搜索、Meme 制作器、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
-- 批量上传仍逐张复用单图 API，每个文件创建独立 Meme；不提供后端批量接口，也不在上传时组成复合 Meme。
+- ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出尚未实现。
 
 ## 技术结构
 
@@ -129,6 +129,28 @@ DELETE /api/memes/{id}/images/{image_id}
 - “停止上传”只设置暂停标志，当前请求完成后保留剩余 `pending`；继续上传沿用原顺序。“重试失败项”只把 `failed` 重置为 `pending`。
 - 队列无失败时显示统计、自动关闭并刷新 Meme、标签和模板；存在失败时保留具体原因与重试入口。
 
+### ZIP 持久化导入
+
+```text
+POST /api/import-jobs
+  -> UploadFile 每 1 MiB 复制到 data/import_archives
+  -> 创建 ImportJob 并提交
+  -> HTTP 202
+  -> 单线程 ImportJobManager
+  -> ZipFile.infolist 安全预检
+  -> ZipFile.open 逐成员读取
+  -> ImageStorage.validate（格式、大小、哈希）
+  -> MemeService.create_meme_no_commit
+  -> 单项 SAVEPOINT；每 chunk_size 项外层 commit
+```
+
+- `ImportJob` 保存公共元数据、计数器、当前文件、归档引用和完整生命周期时间；`ImportJobItem` 保存每个图片成员的 success/skipped/failed、`meme_id` 和错误。
+- 安全预检限制 20,000 个成员、20 GiB 总解压体积和 1000:1 单成员压缩比；绝对路径、Windows 驱动器路径和 `..` 图片成员逐项失败。
+- 批次提交失败会回滚整批记录并清理本批已写原图/缩略图；重复图在缩略图生成前跳过。
+- 取消在当前成员安全结束后停止，删除临时 ZIP；无失败完成也清理 ZIP，有失败则保留到重试成功或任务删除。
+- 应用启动把遗留 `running`/`cancelling` 标记为 `interrupted`；导入执行器 `max_workers=1`，第一版不使用 Celery、Redis 或 WebSocket。
+- 前端在普通图片/ZIP 两种模式间切换；ZIP 只显示归档摘要，轮询进度，弹窗关闭后继续，任务 ID 通过 localStorage 恢复，失败项分页展示。
+
 ### AI 有序多图分析
 
 ```text
@@ -175,6 +197,12 @@ POST .../captions/generate 或 .../rewrite
 - `POST /api/memes/{meme_id}/captions/generate`
 - `POST /api/memes/{meme_id}/captions/rewrite`
 - `POST /api/templates/with-reference-image`
+- `POST /api/import-jobs`
+- `GET /api/import-jobs/{job_id}`
+- `GET /api/import-jobs/{job_id}/items`
+- `POST /api/import-jobs/{job_id}/cancel`
+- `POST /api/import-jobs/{job_id}/retry-failed`
+- `DELETE /api/import-jobs/{job_id}`
 
 所有 Meme 响应包含有序 `images` 与 `image_count`；旧 `image_url`、`thumbnail_url`、尺寸、哈希等字段直接从 `images[0]` 派生并继续对应首图。
 
@@ -196,7 +224,7 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.5.2 发布验证基线：前端 66 项测试通过，后端 143 项测试通过，TypeScript 类型检查和 Vite 生产构建通过；本地标签维护页面已在浏览器中验证图片加载、PowerShell 预设和 dry-run。
+v0.5.3 发布验证基线：前端 67 项测试通过，后端 152 项测试通过，TypeScript 类型检查、Vite 生产构建和 `git diff --check` 通过。ZIP 验收覆盖 250 张三批导入、垃圾成员忽略、重复/损坏/路径穿越隔离、三类 ZIP 限制、取消、失败重试、批次回滚清理与启动恢复。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 

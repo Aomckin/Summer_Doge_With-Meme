@@ -1,4 +1,7 @@
 import type {
+  CreateImportJobInput,
+  ImportJobItemPage,
+  ImportJobResponse,
   AIAnalysisConfirmPayload,
   AIAnalysisResponse,
   AIConnectionTestResponse,
@@ -24,6 +27,58 @@ import type {
   TemplateUpdatePayload,
   UploadMemeInput,
 } from "./types";
+
+export async function createImportJob(
+  input: CreateImportJobInput,
+): Promise<ImportJobResponse> {
+  const form = new FormData();
+  form.append("archive", input.archive);
+  form.append("tags", input.tags.join(","));
+  form.append("template_id", input.template_id?.toString() ?? "");
+  form.append("source", input.source);
+  form.append("chunk_size", input.chunk_size.toString());
+  return requestJson<ImportJobResponse>("/api/import-jobs", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function getImportJob(id: number): Promise<ImportJobResponse> {
+  return requestJson<ImportJobResponse>(`/api/import-jobs/${id}`);
+}
+
+export function listImportJobItems(
+  id: number,
+  offset = 0,
+  limit = 50,
+  status = "failed",
+): Promise<ImportJobItemPage> {
+  const query = new URLSearchParams({
+    offset: offset.toString(),
+    limit: limit.toString(),
+    status,
+  });
+  return requestJson<ImportJobItemPage>(
+    `/api/import-jobs/${id}/items?${query.toString()}`,
+  );
+}
+
+export function cancelImportJob(id: number): Promise<ImportJobResponse> {
+  return requestJson<ImportJobResponse>(`/api/import-jobs/${id}/cancel`, {
+    method: "POST",
+  });
+}
+
+export function retryFailedImportJob(id: number): Promise<ImportJobResponse> {
+  return requestJson<ImportJobResponse>(
+    `/api/import-jobs/${id}/retry-failed`,
+    { method: "POST" },
+  );
+}
+
+export async function deleteImportJob(id: number): Promise<void> {
+  await requestJson<void>(`/api/import-jobs/${id}`, { method: "DELETE" });
+}
 
 interface ValidationDetail {
   loc?: Array<string | number>;

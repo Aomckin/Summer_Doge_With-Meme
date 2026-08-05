@@ -6,10 +6,38 @@ import {
   type BatchUploadResult,
 } from "./batch-upload";
 import type {
+  ImportJobResponse,
   MemeResponse,
   TemplateResponse,
   UploadMemeInput,
 } from "./types";
+
+function importJob(
+  status: ImportJobResponse["status"],
+  overrides: Partial<ImportJobResponse> = {},
+): ImportJobResponse {
+  return {
+    id: 9,
+    original_filename: "vault.zip",
+    status,
+    total_entries: 250,
+    image_entries: 250,
+    processed_count: status === "completed" ? 250 : 0,
+    success_count: status === "completed" ? 248 : 0,
+    skipped_count: status === "completed" ? 2 : 0,
+    failed_count: 0,
+    chunk_size: 100,
+    tags: [],
+    template_id: null,
+    source: null,
+    current_filename: null,
+    error_message: null,
+    created_at: "2026-08-05T00:00:00Z",
+    started_at: null,
+    completed_at: status === "completed" ? "2026-08-05T00:01:00Z" : null,
+    ...overrides,
+  };
+}
 
 const template: TemplateResponse = {
   id: 3,
@@ -133,6 +161,51 @@ afterEach(() => {
 });
 
 describe("BatchUploadController", () => {
+  it("creates one ZIP job, keeps polling after close, and restores its progress", async () => {
+    const current = deferred<ImportJobResponse>();
+    const createImportJob = vi.fn().mockResolvedValue(importJob("running"));
+    const getImportJob = vi.fn().mockReturnValue(current.promise);
+    const onComplete = vi.fn(async () => undefined);
+    const confirmClose = vi.fn(() => true);
+    const controller = new BatchUploadController({
+      uploadMeme: vi.fn(),
+      createImportJob,
+      getImportJob,
+      listImportJobItems: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      cancelImportJob: vi.fn(),
+      retryFailedImportJob: vi.fn(),
+      onComplete,
+      confirmClose,
+    });
+    controller.open([]);
+    const mode = input("upload_mode");
+    const zipMode = [...document.querySelectorAll<HTMLInputElement>('[name="upload_mode"]')]
+      .find((candidate) => candidate.value === "zip")!;
+    zipMode.checked = true;
+    zipMode.dispatchEvent(new Event("change", { bubbles: true }));
+    const picker = input("zip_archive");
+    const archive = new File(["zip"], "vault.zip", { type: "application/zip" });
+    Object.defineProperty(picker, "files", { configurable: true, value: [archive] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+
+    button("创建导入任务").click();
+    await vi.waitFor(() => expect(createImportJob).toHaveBeenCalledOnce());
+    expect(document.querySelectorAll("[data-batch-item]")).toHaveLength(0);
+    button("关闭").click();
+    expect(confirmClose).not.toHaveBeenCalled();
+    controller.open([]);
+    expect(document.body.textContent).toContain("任务 #9");
+
+    current.resolve(importJob("completed"));
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledWith({
+      success: 248,
+      skipped: 2,
+      failed: 0,
+    }));
+    expect(document.body.textContent).toContain("250/250");
+    void mode;
+  });
+
   it("adds selected and dropped images with previews and filename titles", () => {
     createController();
 

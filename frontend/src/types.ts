@@ -4,6 +4,21 @@ export interface TagResponse {
   category: string;
   description: string | null;
   created_at: string;
+  usage_count: number;
+}
+
+export type TagSort = "name_asc" | "name_desc" | "usage_asc" | "usage_desc";
+
+export interface ListTagsOptions {
+  includeEmpty?: boolean;
+  q?: string;
+  sort?: TagSort;
+  signal?: AbortSignal;
+}
+
+export interface TagCleanupResponse {
+  deleted_count: number;
+  deleted_tags: string[];
 }
 
 export interface TemplateResponse {

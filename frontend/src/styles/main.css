@@ -19,6 +19,155 @@
   --radius: 18px;
 }
 
+.tag-editor {
+  position: relative;
+}
+
+.tag-editor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tag-editor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+
+.tag-editor-chip button,
+.tag-editor-add,
+.tag-editor-input-slot button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tag-editor-add {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+}
+
+.tag-editor-input-slot {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.tag-editor-input-slot input {
+  min-width: 10rem;
+}
+
+.tag-editor-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  display: grid;
+  min-width: 15rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 35%);
+}
+
+.tag-editor-suggestions button {
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tag-editor-suggestions button:hover,
+.tag-editor-suggestions button:focus-visible {
+  background: var(--surface-hover);
+}
+
+.tag-editor-error {
+  margin: 0.4rem 0 0;
+  color: var(--danger);
+}
+
+.tag-manager-shell {
+  width: min(1100px, 94vw);
+}
+
+.tag-manager-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 1rem 1rem;
+}
+
+.tag-manager-stats,
+.tag-manager-controls,
+.tag-manager-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tag-manager-stats {
+  flex: 0 0 auto;
+  margin: 1rem 0;
+}
+
+.tag-manager-stats span {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.65rem;
+  background: var(--surface-raised);
+}
+
+.tag-manager-list {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  min-height: 0;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  overflow: auto;
+}
+
+.tag-manager-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) auto auto minmax(10rem, 1fr) auto auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+}
+
+.tag-unused-warning {
+  margin-left: 0.5rem;
+  color: var(--warning, #b76500);
+  font-size: 0.8rem;
+}
+
+.tag-manager-filters .is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (max-width: 800px) {
+  .tag-manager-row {
+    grid-template-columns: 1fr auto;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

@@ -8,6 +8,7 @@ import {
   createTemplate,
   createTemplateWithReferenceImage,
   deleteMeme,
+  deleteTag,
   deleteAIModel,
   deleteAIProvider,
   deleteTemplate,
@@ -19,9 +20,11 @@ import {
   listAIProviders,
   listMemes,
   listTags,
+  mergeTag,
+  renameTag,
+  cleanupEmptyTags,
   listTemplates,
   listCaptions,
-  parseTagInput,
   refreshAIModels,
   generateCaptions,
   rewriteCaption,
@@ -43,9 +46,11 @@ import type {
   AIAnalysisResponse,
   AppState,
   ListMemesOptions,
+  ListTagsOptions,
   MemeResponse,
   MemeUpdatePayload,
   TagResponse,
+  TagCleanupResponse,
   TemplateCreatePayload,
   TemplateResponse,
   TemplateUpdatePayload,
@@ -55,6 +60,11 @@ import type {
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
+import { TagEditor } from "./tag-editor";
+import {
+  TagManagerController,
+  type TagMutation,
+} from "./tag-manager";
 import {
   CaptionLabController,
   type CaptionLabApi,
@@ -84,7 +94,11 @@ const PAGE_SIZE = 24;
 
 export interface MemeApi extends AISettingsApi, CaptionLabApi {
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
-  listTags(signal?: AbortSignal): Promise<TagResponse[]>;
+  listTags(options?: ListTagsOptions): Promise<TagResponse[]>;
+  renameTag(id: number, name: string): Promise<TagResponse>;
+  mergeTag(sourceId: number, targetId: number): Promise<TagResponse>;
+  deleteTag(id: number): Promise<void>;
+  cleanupEmptyTags(): Promise<TagCleanupResponse>;
   listTemplates(): Promise<TemplateResponse[]>;
   createTemplate(payload: TemplateCreatePayload): Promise<TemplateResponse>;
   createTemplateWithReferenceImage(
@@ -133,6 +147,10 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
 const defaultApi: MemeApi = {
   listMemes,
   listTags,
+  renameTag,
+  mergeTag,
+  deleteTag,
+  cleanupEmptyTags,
   listTemplates,
   createTemplate,
   createTemplateWithReferenceImage,
@@ -251,6 +269,8 @@ export class MemeVaultApp {
   private readonly batchUpload: BatchUploadController;
   private readonly batchDownload: BatchDownloadController;
   private readonly captionLab: CaptionLabController;
+  private readonly tagManager: TagManagerController;
+  private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
 
   constructor(
@@ -283,6 +303,14 @@ export class MemeVaultApp {
       listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
       cancelExportJob: id => this.api.cancelExportJob(id),
       deleteExportJob: id => this.api.deleteExportJob(id),
+    });
+    this.tagManager = new TagManagerController(this.api, {
+      onMutation: (mutation) => this.applyTagMutation(mutation),
+      onFilterTag: async (name) => {
+        this.state.selectedTags = [name];
+        renderTags(this.elements, this.state);
+        await this.reloadMemes();
+      },
     });
     this.bindEvents();
     this.render();
@@ -357,13 +385,19 @@ export class MemeVaultApp {
       void this.randomize();
     });
     this.elements.openUploadButton.addEventListener("click", () => {
-      this.batchUpload.open(this.state.availableTemplates);
+      this.batchUpload.open(
+        this.state.availableTemplates,
+        this.state.availableTags,
+      );
     });
     this.elements.openSettingsButton.addEventListener("click", () => {
       this.settings.open();
     });
     this.elements.openTemplatesButton.addEventListener("click", () => {
       this.openTemplateManager();
+    });
+    this.elements.openTagsButton.addEventListener("click", () => {
+      this.tagManager.open();
     });
     for (const button of document.querySelectorAll("[data-close-templates]")) {
       button.addEventListener("click", () => {
@@ -543,6 +577,9 @@ export class MemeVaultApp {
       }
       event.preventDefault();
       void this.submitEdit(form);
+    });
+    this.elements.detailPanel.addEventListener("meme-detail-rendered", () => {
+      this.mountEditTagEditor();
     });
 
     for (const button of this.elements.relationDialog.querySelectorAll(
@@ -916,6 +953,8 @@ export class MemeVaultApp {
   private async refreshTags(): Promise<void> {
     try {
       this.state.availableTags = await this.api.listTags();
+      this.batchUpload.setAvailableTags(this.state.availableTags);
+      this.editTagEditor?.setAvailableTags(this.state.availableTags);
       renderTags(this.elements, this.state);
     } catch (error) {
       this.state.actionError = readableError(error);
@@ -945,6 +984,7 @@ export class MemeVaultApp {
     this.relationRemovalToken = null;
     this.editing = false;
     this.editDraft = null;
+    this.editTagEditor = null;
     this.resetAIAnalysis();
     renderLibrary(this.elements, this.state);
     renderDetail(this.elements, this.state, false, null);
@@ -1166,7 +1206,7 @@ export class MemeVaultApp {
       title: meme.title,
       description: meme.description ?? "",
       source: meme.source ?? "",
-      tags: meme.tags.map((tag) => tag.name).join(", "),
+      tags: meme.tags.map((tag) => tag.name),
       templateId: meme.template ? String(meme.template.id) : "",
     };
     renderDetail(
@@ -1179,6 +1219,7 @@ export class MemeVaultApp {
 
   private cancelEdit(): void {
     this.editing = false;
+    this.editTagEditor = null;
     this.editDraft = null;
     this.state.actionError = null;
     renderDetail(this.elements, this.state, false, null);
@@ -1205,14 +1246,14 @@ export class MemeVaultApp {
       title,
       description: value(form, "description"),
       source: value(form, "source"),
-      tags: value(form, "tags"),
+      tags: this.editTagEditor?.getTags() ?? this.editDraft?.tags ?? [],
       templateId: value(form, "template_id"),
     };
     const payload: MemeUpdatePayload = {
       title,
       description: this.editDraft.description.trim() || null,
       source: this.editDraft.source.trim() || null,
-      tags: parseTagInput(this.editDraft.tags),
+      tags: this.editDraft.tags,
       template_id: this.editDraft.templateId
         ? Number(this.editDraft.templateId)
         : null,
@@ -1240,6 +1281,7 @@ export class MemeVaultApp {
       if (this.state.selectedMeme?.id === targetId) {
         this.editing = false;
         this.editDraft = null;
+        this.editTagEditor = null;
       }
       await this.refreshTags();
     } catch (error) {
@@ -1257,6 +1299,92 @@ export class MemeVaultApp {
         this.editing,
         this.editDraft,
       );
+    }
+  }
+
+  private mountEditTagEditor(): void {
+    const host = this.elements.detailPanel.querySelector<HTMLElement>(
+      "[data-edit-tag-editor]",
+    );
+    if (!host || !this.editing || !this.editDraft) {
+      this.editTagEditor = null;
+      return;
+    }
+    this.editTagEditor = new TagEditor(host, {
+      tags: this.editDraft.tags,
+      availableTags: this.state.availableTags,
+      label: "Meme 标签",
+      disabled: this.state.saving,
+      onChange: (tags) => {
+        if (this.editDraft) this.editDraft.tags = tags;
+      },
+    });
+  }
+
+  private mapMemeTagMutation(
+    meme: MemeResponse,
+    mutation: TagMutation,
+  ): MemeResponse {
+    const replacement =
+      mutation.type === "rename" || mutation.type === "merge"
+        ? { from: mutation.from, to: mutation.to }
+        : null;
+    const removed =
+      mutation.type === "delete"
+        ? new Set([mutation.name])
+        : mutation.type === "cleanup"
+          ? new Set(mutation.names)
+          : new Set<string>();
+    const tags = meme.tags
+      .filter((tag) => !removed.has(tag.name))
+      .map((tag) =>
+        replacement && tag.name === replacement.from
+          ? { ...tag, name: replacement.to }
+          : tag,
+      )
+      .filter(
+        (tag, index, items) =>
+          items.findIndex((candidate) => candidate.name === tag.name) === index,
+      );
+    return tags === meme.tags ? meme : { ...meme, tags };
+  }
+
+  private async applyTagMutation(mutation: TagMutation): Promise<void> {
+    const before = this.state.selectedTags.join("\0");
+    if (mutation.type === "rename" || mutation.type === "merge") {
+      this.state.selectedTags = [
+        ...new Set(
+          this.state.selectedTags.map((tag) =>
+            tag === mutation.from ? mutation.to : tag,
+          ),
+        ),
+      ];
+    } else {
+      const removed = new Set(
+        mutation.type === "delete" ? [mutation.name] : mutation.names,
+      );
+      this.state.selectedTags = this.state.selectedTags.filter(
+        (tag) => !removed.has(tag),
+      );
+    }
+    this.state.memes = this.state.memes.map((meme) =>
+      this.mapMemeTagMutation(meme, mutation),
+    );
+    this.state.relatedMemes = this.state.relatedMemes.map((meme) =>
+      this.mapMemeTagMutation(meme, mutation),
+    );
+    if (this.state.selectedMeme) {
+      this.state.selectedMeme = this.mapMemeTagMutation(
+        this.state.selectedMeme,
+        mutation,
+      );
+    }
+    await this.refreshTags();
+    renderTags(this.elements, this.state);
+    renderLibrary(this.elements, this.state);
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    if (before !== this.state.selectedTags.join("\0")) {
+      await this.reloadMemes();
     }
   }
 

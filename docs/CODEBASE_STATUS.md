@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.5.4 实现状态（2026-08-06）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.5.5 实现状态（2026-08-06）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -14,6 +14,8 @@
 - 网页内 API 设置：维护 AI 提供商、图片分析模型和独立的模板视觉检索模型；密钥加密落盘。
 - 文案实验室：每个 Meme 可保存多条独立文案；详情页支持统一编辑器、场景/语气/长度、复制、编辑、删除、未保存提醒，以及 AI 临时生成和草稿改写。
 - Codex 离线标签维护：本地页面按批次导出并显示完整有序图片组，提供 Luna 提示词与 PowerShell 预设；候选严格校验，导入默认 dry-run，apply 前备份并写审计。
+- 标签管理：聚合统计每个标签的 Meme 使用数，主资料库默认隐藏零引用标签；独立管理器支持搜索、排序、重命名、按来源优先级合并、删除单个空标签和二次确认清理全部空标签。
+- 标签芯片输入：Meme 编辑、普通批量上传和 ZIP 导入共用可访问的数组编辑器，支持键盘确认/取消、去重、删除和最多 8 条使用中标签自动补全；提交前仍由 API 客户端统一规范化。
 
 ## 明确尚未实现
 
@@ -76,6 +78,9 @@ SQLite 启动时先由 ORM 创建新表，再以 `INSERT ... SELECT ... WHERE NO
 ### 标签、模板与 AI
 
 - `tags` 与 `meme_tags` 保存标签及用户/AI 来源。
+- `GET /api/tags` 使用 `LEFT OUTER JOIN + COUNT + GROUP BY` 一次返回 `usage_count`，默认 `HAVING count > 0`；管理器通过 `include_empty=true` 查看全部标签，不执行逐标签 COUNT。
+- `TagService` 拥有重命名、合并、空标签删除和清理事务；合并先删除同 Meme 的冲突源关联，再迁移剩余复合主键，来源优先级为 `user/manual > codex > ai`。
+- 零引用标签不会在启动、Meme 编辑或 Meme 删除时自动清理；只有显式删除/清理管理接口会删除 Tag 本体。
 - `templates` 与 Meme 一对多；模板可有一张参考图和可选图像向量。
 - 新建含参考图模板通过单次事务完成文件保存、独立图片向量化和模板写入；任一步失败都会回滚记录并清理新文件。
 - `qwen3-vl-embedding` 请求只发送 Base64 Data URI，独立图片模式不启用融合，接受单个 `type=image` 或 `type=vl` 向量；旧 `tongyi-embedding-vision` 保持兼容。通用 `embed_multimodal` 为后续 Meme 融合向量保留独立入口。
@@ -213,6 +218,9 @@ POST .../captions/generate 或 .../rewrite
 - `POST /api/import-jobs/{job_id}/cancel`
 - `POST /api/import-jobs/{job_id}/retry-failed`
 - `DELETE /api/import-jobs/{job_id}`
+- `GET/PATCH/DELETE /api/tags...`
+- `POST /api/tags/{source_tag_id}/merge`
+- `POST /api/tags/cleanup-empty`
 
 所有 Meme 响应包含有序 `images` 与 `image_count`；旧 `image_url`、`thumbnail_url`、尺寸、哈希等字段直接从 `images[0]` 派生并继续对应首图。
 
@@ -234,7 +242,7 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.5.4 发布验证基线：前端 TypeScript 类型检查、70 项 Vitest 与生产构建通过，后端 162 项 Pytest 通过；v0.5.3 的 ZIP 导入实现保持不变并继续参与全量回归。
+v0.5.5 发布验证：前端 TypeScript 类型检查、87 项 Vitest、生产构建及 171 项 Pytest 全部通过；v0.5.4 下载/导出和 v0.5.3 ZIP 导入实现保持不变并继续参与全量回归。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 

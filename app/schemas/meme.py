@@ -15,6 +15,24 @@ class TagResponse(BaseModel):
     category: str
     description: str | None
     created_at: datetime
+    usage_count: int = 0
+
+
+class TagRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class TagMergeRequest(BaseModel):
+    target_tag_id: int = Field(gt=0)
+
+
+class TagCleanupRequest(BaseModel):
+    confirm: bool
+
+
+class TagCleanupResponse(BaseModel):
+    deleted_count: int
+    deleted_tags: list[str]
 
 
 class MemeCreate(BaseModel):

@@ -1,9 +1,11 @@
-import { ApiError, parseTagInput } from "./api";
+import { ApiError } from "./api";
+import { TagEditor } from "./tag-editor";
 import type {
   CreateImportJobInput,
   ImportJobItemResponse,
   ImportJobResponse,
   MemeResponse,
+  TagResponse,
   TemplateResponse,
   UploadMemeInput,
 } from "./types";
@@ -100,6 +102,7 @@ export class BatchUploadController {
   private readonly clearButton: HTMLButtonElement;
   private readonly resultElement: HTMLElement;
   private readonly zipInput: HTMLInputElement;
+  private readonly tagEditor: TagEditor;
   private mode: "images" | "zip" = "images";
   private zipFile: File | null = null;
   private importJob: ImportJobResponse | null = null;
@@ -173,8 +176,7 @@ export class BatchUploadController {
           <section class="batch-metadata" aria-label="公共信息">
             <label>
               <span>公共标签</span>
-              <input name="tags" type="text" placeholder="funny, reaction">
-              <small>使用英文逗号分隔</small>
+              <div data-batch-tag-editor></div>
             </label>
             <label>
               <span>公共模板</span>
@@ -230,6 +232,9 @@ export class BatchUploadController {
     this.stopButton = this.required("[data-stop-batch]");
     this.retryButton = this.required("[data-retry-batch]");
     this.clearButton = this.required("[data-clear-batch]");
+    this.tagEditor = new TagEditor(this.required("[data-batch-tag-editor]"), {
+      label: "公共标签",
+    });
     this.bindEvents();
     this.render();
     const storedJobId = Number(localStorage.getItem(IMPORT_JOB_STORAGE_KEY));
@@ -239,11 +244,12 @@ export class BatchUploadController {
     }
   }
 
-  open(templates: TemplateResponse[]): void {
+  open(templates: TemplateResponse[], availableTags: TagResponse[] = []): void {
     if (!this.importJob && !this.running) {
       this.reset();
     }
     this.setTemplates(templates);
+    this.tagEditor.setAvailableTags(availableTags);
     this.render();
     this.dialog.showModal();
   }
@@ -261,6 +267,10 @@ export class BatchUploadController {
     if ([...select.options].some((option) => option.value === selected)) {
       select.value = selected;
     }
+  }
+
+  setAvailableTags(tags: TagResponse[]): void {
+    this.tagEditor.setAvailableTags(tags);
   }
 
   requestClose(): void {
@@ -454,6 +464,7 @@ export class BatchUploadController {
     this.stopRequested = false;
     this.locked = false;
     this.form.reset();
+    this.tagEditor.setTags([]);
     this.mode = "images";
     this.zipFile = null;
     this.failedItems = [];
@@ -464,14 +475,13 @@ export class BatchUploadController {
   }
 
   private metadata(): Omit<UploadMemeInput, "file" | "title"> {
-    const tags = this.required<HTMLInputElement>('[name="tags"]').value;
     const source = this.required<HTMLInputElement>('[name="source"]').value;
     const templateId =
       this.required<HTMLSelectElement>('[name="template_id"]').value;
     return {
       description: "",
       source,
-      tags: parseTagInput(tags),
+      tags: this.tagEditor.getTags(),
       template_id: templateId ? Number(templateId) : null,
     };
   }
@@ -816,9 +826,10 @@ export class BatchUploadController {
 
     for (const control of this.form.querySelectorAll<
       HTMLInputElement | HTMLSelectElement
-    >('[name="tags"], [name="source"], [name="template_id"], [name="batch_files"], [name="zip_archive"], [name="chunk_size"]')) {
+    >('[name="source"], [name="template_id"], [name="batch_files"], [name="zip_archive"], [name="chunk_size"]')) {
       control.disabled = this.locked;
     }
+    this.tagEditor.setDisabled(this.locked);
     this.required<HTMLElement>("[data-batch-drop-zone]").classList.toggle(
       "is-locked",
       this.locked,

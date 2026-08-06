@@ -22,9 +22,11 @@ import type {
   CaptionRewritePayload,
   CaptionUpdatePayload,
   ListMemesOptions,
+  ListTagsOptions,
   MemeResponse,
   MemeUpdatePayload,
   TagResponse,
+  TagCleanupResponse,
   TemplateCreatePayload,
   TemplateResponse,
   TemplateUpdatePayload,
@@ -36,7 +38,7 @@ export async function createImportJob(
 ): Promise<ImportJobResponse> {
   const form = new FormData();
   form.append("archive", input.archive);
-  form.append("tags", input.tags.join(","));
+  form.append("tags", normalizeTags(input.tags).join(","));
   form.append("template_id", input.template_id?.toString() ?? "");
   form.append("source", input.source);
   form.append("chunk_size", input.chunk_size.toString());
@@ -120,7 +122,7 @@ export class ApiError extends Error {
   }
 }
 
-function normalizeTags(tags: string[]): string[] {
+export function normalizeTags(tags: string[]): string[] {
   return [
     ...new Set(
       tags
@@ -200,8 +202,41 @@ export function listMemes(options: ListMemesOptions): Promise<MemeResponse[]> {
   });
 }
 
-export function listTags(signal?: AbortSignal): Promise<TagResponse[]> {
-  return requestJson<TagResponse[]>("/api/tags", { signal });
+export function listTags(options: ListTagsOptions = {}): Promise<TagResponse[]> {
+  const params = new URLSearchParams();
+  if (options.includeEmpty) params.set("include_empty", "true");
+  const query = options.q?.trim();
+  if (query) params.set("q", query);
+  if (options.sort) params.set("sort", options.sort);
+  const suffix = params.size ? `?${params}` : "";
+  return requestJson<TagResponse[]>(`/api/tags${suffix}`, {
+    signal: options.signal,
+  });
+}
+
+export function renameTag(id: number, name: string): Promise<TagResponse> {
+  return requestJson<TagResponse>(
+    `/api/tags/${id}`,
+    jsonRequest("PATCH", { name }),
+  );
+}
+
+export function mergeTag(sourceId: number, targetId: number): Promise<TagResponse> {
+  return requestJson<TagResponse>(
+    `/api/tags/${sourceId}/merge`,
+    jsonRequest("POST", { target_tag_id: targetId }),
+  );
+}
+
+export function deleteTag(id: number): Promise<void> {
+  return requestJson<void>(`/api/tags/${id}`, { method: "DELETE" });
+}
+
+export function cleanupEmptyTags(): Promise<TagCleanupResponse> {
+  return requestJson<TagCleanupResponse>(
+    "/api/tags/cleanup-empty",
+    jsonRequest("POST", { confirm: true }),
+  );
 }
 
 export function listTemplates(): Promise<TemplateResponse[]> {

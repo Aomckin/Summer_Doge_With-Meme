@@ -127,6 +127,21 @@ function drop(files: File[]): void {
   zone.dispatchEvent(event);
 }
 
+function addSharedTag(name: string): void {
+  document
+    .querySelector<HTMLButtonElement>("[data-batch-tag-editor] [aria-label='添加标签']")
+    ?.click();
+  const input = document.querySelector<HTMLInputElement>(
+    "[data-batch-tag-editor] [aria-label='输入标签']",
+  );
+  if (!input) throw new Error("Missing shared tag input");
+  input.value = name;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  document
+    .querySelector<HTMLInputElement>("[data-batch-tag-editor] [aria-label='输入标签']")
+    ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+}
+
 function createController(
   uploadMeme = vi
     .fn<(input: UploadMemeInput) => Promise<MemeResponse>>()
@@ -187,9 +202,13 @@ describe("BatchUploadController", () => {
     const archive = new File(["zip"], "vault.zip", { type: "application/zip" });
     Object.defineProperty(picker, "files", { configurable: true, value: [archive] });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
+    addSharedTag("归档标签");
 
     button("创建导入任务").click();
     await vi.waitFor(() => expect(createImportJob).toHaveBeenCalledOnce());
+    expect(createImportJob).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: ["归档标签"] }),
+    );
     expect(document.querySelectorAll("[data-batch-item]")).toHaveLength(0);
     button("关闭").click();
     expect(confirmClose).not.toHaveBeenCalled();
@@ -278,7 +297,8 @@ describe("BatchUploadController", () => {
       .mockReturnValueOnce(second.promise);
     createController(uploadMeme);
     choose([image("first.png"), image("second.png")]);
-    input("tags").value = " funny, Reaction ";
+    addSharedTag("funny");
+    addSharedTag("Reaction");
     input("source").value = "Discord";
     const templateSelect =
       document.querySelector<HTMLSelectElement>('[name="template_id"]');
@@ -292,7 +312,7 @@ describe("BatchUploadController", () => {
       title: "first",
       description: "",
       source: "Discord",
-      tags: ["funny", "reaction"],
+      tags: ["funny", "Reaction"],
       template_id: 3,
     });
 
@@ -303,7 +323,7 @@ describe("BatchUploadController", () => {
       expect.objectContaining({
         title: "second",
         source: "Discord",
-        tags: ["funny", "reaction"],
+        tags: ["funny", "Reaction"],
         template_id: 3,
       }),
     );

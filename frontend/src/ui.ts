@@ -4,7 +4,7 @@ export interface EditDraft {
   title: string;
   description: string;
   source: string;
-  tags: string;
+  tags: string[];
   templateId: string;
 }
 
@@ -15,6 +15,7 @@ export interface AppElements {
   openDownloadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
+  openTagsButton: HTMLButtonElement;
   operationError: HTMLElement;
   tagFilters: HTMLElement;
   listStatus: HTMLElement;
@@ -121,6 +122,7 @@ export function mountShell(root: HTMLElement): AppElements {
           </label>
           <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
+          <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
@@ -372,6 +374,7 @@ export function mountShell(root: HTMLElement): AppElements {
     openDownloadButton: required(root, "#open-download"),
     openSettingsButton: required(root, "#open-settings"),
     openTemplatesButton: required(root, "#open-templates"),
+    openTagsButton: required(root, "#open-tags"),
     operationError: required(root, "#operation-error"),
     tagFilters: required(root, "#tag-filters"),
     listStatus: required(root, "#list-status"),
@@ -968,7 +971,7 @@ export function renderDetail(
           </label>
           <label>
             <span>标签</span>
-            <input name="tags" type="text" value="${escapeHtml(draft.tags)}">
+            <div data-edit-tag-editor></div>
           </label>
           <label>
             <span>模板</span>

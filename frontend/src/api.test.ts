@@ -6,16 +6,22 @@ import {
   analyzeMeme,
   appendMemeImage,
   confirmAIAnalysis,
+  createImportJob,
   createCaption,
   createAIProvider,
   createTemplate,
   createTemplateWithReferenceImage,
   deleteMeme,
+  deleteTag,
   deleteMemeImage,
   deleteMemeRelation,
   deleteCaption,
   deleteTemplate,
   listTemplates,
+  listTags,
+  mergeTag,
+  renameTag,
+  cleanupEmptyTags,
   listMemes,
   listMemeRelations,
   listCaptions,
@@ -86,6 +92,39 @@ describe("listMemes", () => {
   });
 });
 
+describe("tag management API", () => {
+  it("lists all tags with query options and uses management endpoints", async () => {
+    const managedTag = {
+      id: 2,
+      name: "猫",
+      usage_count: 3,
+      category: "custom",
+      description: null,
+      created_at: "2026-08-06T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([managedTag]))
+      .mockResolvedValueOnce(jsonResponse({ ...managedTag, name: "猫咪" }))
+      .mockResolvedValueOnce(jsonResponse(managedTag))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ deleted_count: 1, deleted_tags: ["孤儿"] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listTags({ includeEmpty: true, q: "猫", sort: "usage_desc" });
+    await renameTag(2, "猫咪");
+    await mergeTag(2, 3);
+    await deleteTag(2);
+    await cleanupEmptyTags();
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/tags?include_empty=true&q=%E7%8C%AB&sort=usage_desc");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ name: "猫咪" });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ target_tag_id: 3 });
+    expect(fetchMock.mock.calls[3][1].method).toBe("DELETE");
+    expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({ confirm: true });
+  });
+});
+
 describe("uploadMeme", () => {
   it("omits blank optional fields instead of sending null strings", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(meme, 201));
@@ -108,6 +147,24 @@ describe("uploadMeme", () => {
     expect(body.has("tags")).toBe(false);
     expect(body.get("template_id")).toBe("3");
     expect([...body.values()]).not.toContain("null");
+  });
+});
+
+describe("createImportJob", () => {
+  it("normalizes a ZIP job tag array only when serializing multipart", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 1 }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createImportJob({
+      archive: new File(["zip"], "memes.zip", { type: "application/zip" }),
+      tags: [" Reaction ", "reaction", "舞台"],
+      template_id: null,
+      source: "",
+      chunk_size: 100,
+    });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("tags")).toBe("reaction,舞台");
   });
 });
 

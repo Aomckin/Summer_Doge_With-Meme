@@ -14,6 +14,7 @@ const funnyTag: TagResponse = {
   category: "custom",
   description: null,
   created_at: "2026-07-25T00:00:00Z",
+  usage_count: 1,
 };
 
 const dogeTemplate = {
@@ -106,6 +107,10 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
   return {
     listMemes: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([funnyTag]),
+    renameTag: vi.fn().mockImplementation(async (_id, name) => ({ ...funnyTag, name })),
+    mergeTag: vi.fn().mockResolvedValue(funnyTag),
+    deleteTag: vi.fn().mockResolvedValue(undefined),
+    cleanupEmptyTags: vi.fn().mockResolvedValue({ deleted_count: 0, deleted_tags: [] }),
     listTemplates: vi.fn().mockResolvedValue([]),
     createTemplate: vi.fn(),
     createTemplateWithReferenceImage: vi.fn(),
@@ -241,6 +246,28 @@ function button(label: string): HTMLButtonElement {
   return match;
 }
 
+function replaceEditTags(names: string[]): void {
+  for (const remove of document.querySelectorAll<HTMLButtonElement>(
+    "[data-edit-tag-editor] .tag-editor-chip button",
+  )) {
+    remove.click();
+  }
+  for (const name of names) {
+    document
+      .querySelector<HTMLButtonElement>("[data-edit-tag-editor] [aria-label='添加标签']")
+      ?.click();
+    const input = document.querySelector<HTMLInputElement>(
+      "[data-edit-tag-editor] [aria-label='输入标签']",
+    );
+    if (!input) throw new Error("Missing edit tag input");
+    input.value = name;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    document
+      .querySelector<HTMLInputElement>("[data-edit-tag-editor] [aria-label='输入标签']")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
+}
+
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.stubGlobal("confirm", vi.fn(() => true));
@@ -342,6 +369,74 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector('[data-tag="标签10"]')).not.toBeNull();
   });
 
+  it("shows tag management and replaces selected filters after a merge", async () => {
+    const cat = { ...funnyTag, id: 2, name: "cat", usage_count: 2 };
+    const reaction = { ...funnyTag, id: 3, name: "reaction", usage_count: 4 };
+    const listTags = vi.fn().mockResolvedValue([cat, reaction]);
+    const api = makeApi({
+      listTags,
+      mergeTag: vi.fn().mockResolvedValue({ ...reaction, usage_count: 6 }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    expect(button("标签管理")).not.toBeNull();
+    button("cat").click();
+    button("reaction").click();
+    button("标签管理").click();
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll("[data-managed-tag]")).toHaveLength(2),
+    );
+    const target = document.querySelector<HTMLSelectElement>(
+      "[data-merge-target='2']",
+    );
+    if (!target) throw new Error("Missing merge target");
+    target.value = "3";
+    document.querySelector<HTMLButtonElement>("[data-merge-tag='2']")?.click();
+
+    await vi.waitFor(() => {
+      const state = (app as unknown as { state: AppState }).state;
+      expect(state.selectedTags).toEqual(["reaction"]);
+    });
+    expect(api.mergeTag).toHaveBeenCalledWith(2, 3);
+  });
+
+  it("synchronizes selected filters after tag rename and empty-tag deletion", async () => {
+    const cat = { ...funnyTag, id: 2, name: "cat", usage_count: 2 };
+    const empty = { ...funnyTag, id: 4, name: "orphan", usage_count: 0 };
+    vi.stubGlobal("prompt", vi.fn(() => "kitty"));
+    const listTags = vi.fn().mockResolvedValue([cat, empty]);
+    const api = makeApi({
+      listTags,
+      renameTag: vi.fn().mockResolvedValue({ ...cat, name: "kitty" }),
+      deleteTag: vi.fn().mockResolvedValue(undefined),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    button("cat").click();
+    button("标签管理").click();
+    await vi.waitFor(() => expect(document.querySelector("[data-rename-tag='2']")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>("[data-rename-tag='2']")?.click();
+    await vi.waitFor(() => {
+      const state = (app as unknown as { state: AppState }).state;
+      expect(state.selectedTags).toEqual(["kitty"]);
+    });
+
+    const state = (app as unknown as { state: AppState }).state;
+    state.selectedTags = ["orphan"];
+    await vi.waitFor(() => expect(document.querySelector("[data-delete-tag='4']")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>("[data-delete-tag='4']")?.click();
+    await vi.waitFor(() => expect(state.selectedTags).toEqual([]));
+    expect(api.deleteTag).toHaveBeenCalledWith(4);
+  });
+
+  it("does not expose comma-separated tag instructions", async () => {
+    const app = new MemeVaultApp(root(), makeApi());
+    await app.start();
+    button("图片上传").click();
+    expect(document.body.textContent).not.toContain("使用英文逗号分隔");
+  });
+
   it("debounces search and randomizes only within selected tags", async () => {
     vi.useFakeTimers();
     const api = makeApi();
@@ -431,8 +526,7 @@ describe("MemeVaultApp", () => {
     (editForm.elements.namedItem("description") as HTMLTextAreaElement).value =
       "";
     (editForm.elements.namedItem("source") as HTMLInputElement).value = "";
-    (editForm.elements.namedItem("tags") as HTMLInputElement).value =
-      "Reaction";
+    replaceEditTags(["reaction"]);
     editForm.dispatchEvent(
       new SubmitEvent("submit", { bubbles: true, cancelable: true }),
     );
@@ -836,8 +930,7 @@ describe("MemeVaultApp", () => {
     }
     (editForm.elements.namedItem("title") as HTMLInputElement).value =
       "第二页已编辑";
-    (editForm.elements.namedItem("tags") as HTMLInputElement).value =
-      "reaction";
+    replaceEditTags(["reaction"]);
     editForm.dispatchEvent(
       new SubmitEvent("submit", { bubbles: true, cancelable: true }),
     );

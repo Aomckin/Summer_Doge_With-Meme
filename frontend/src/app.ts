@@ -18,6 +18,7 @@ import {
   listAIModels,
   listAIProviderPresets,
   listAIProviders,
+  listMemePage,
   listMemes,
   listTags,
   mergeTag,
@@ -45,7 +46,11 @@ import type {
   AIAnalysisConfirmPayload,
   AIAnalysisResponse,
   AppState,
+  ListMemePageOptions,
   ListMemesOptions,
+  MemeCardSize,
+  MemePageResponse,
+  MemePageSize,
   ListTagsOptions,
   MemeResponse,
   MemeUpdatePayload,
@@ -76,6 +81,7 @@ import {
 import {
   type AppElements,
   type EditDraft,
+  applyMemeCardSize,
   closeImageViewer,
   mountShell,
   openImageViewer,
@@ -89,10 +95,36 @@ import {
   renderTemplateReferenceInputPreview,
   renderToolbar,
 } from "./ui";
+import { clampPage } from "./pagination";
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE_KEY = "meme-vault.page-size";
+const CARD_SIZE_KEY = "meme-vault.card-size";
+const SHUFFLE_MODULUS = 2_147_483_647;
+
+function storedPageSize(): MemePageSize {
+  const value = Number(localStorage.getItem(PAGE_SIZE_KEY));
+  return value === 24 || value === 48 || value === 96 ? value : 24;
+}
+
+function storedCardSize(): MemeCardSize {
+  const value = localStorage.getItem(CARD_SIZE_KEY);
+  return value === "extra-large" || value === "large" || value === "medium" || value === "small"
+    ? value
+    : "medium";
+}
+
+function shuffleSeed(previous: number | null = null): number {
+  const values = new Uint32Array(1);
+  let seed: number;
+  do {
+    crypto.getRandomValues(values);
+    seed = values[0] % SHUFFLE_MODULUS;
+  } while (seed === previous);
+  return seed;
+}
 
 export interface MemeApi extends AISettingsApi, CaptionLabApi {
+  listMemePage(options: ListMemePageOptions): Promise<MemePageResponse>;
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   listTags(options?: ListTagsOptions): Promise<TagResponse[]>;
   renameTag(id: number, name: string): Promise<TagResponse>;
@@ -145,6 +177,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
 }
 
 const defaultApi: MemeApi = {
+  listMemePage,
   listMemes,
   listTags,
   renameTag,
@@ -205,10 +238,15 @@ function initialState(): AppState {
     query: "",
     selectedTags: [],
     tagsExpanded: false,
-    offset: 0,
-    hasMore: false,
+    page: 1,
+    pageSize: storedPageSize(),
+    totalMemes: 0,
+    totalPages: 0,
+    listSort: "default",
+    shuffleSeed: null,
+    cardSize: storedCardSize(),
+    templatePage: 1,
     loadingList: false,
-    loadingMore: false,
     saving: false,
     deleting: false,
     randomizing: false,
@@ -222,7 +260,6 @@ function initialState(): AppState {
     applyAITemplate: false,
     aiError: null,
     listError: null,
-    loadMoreError: null,
     actionError: null,
     operationError: null,
   };
@@ -308,6 +345,7 @@ export class MemeVaultApp {
       onMutation: (mutation) => this.applyTagMutation(mutation),
       onFilterTag: async (name) => {
         this.state.selectedTags = [name];
+        this.state.page = 1;
         renderTags(this.elements, this.state);
         await this.reloadMemes();
       },
@@ -331,6 +369,7 @@ export class MemeVaultApp {
       }
       this.searchTimer = setTimeout(() => {
         this.state.query = this.elements.searchInput.value.trim();
+        this.state.page = 1;
         void this.reloadMemes();
       }, 300);
     });
@@ -354,6 +393,7 @@ export class MemeVaultApp {
       this.state.selectedTags = this.state.selectedTags.includes(tag)
         ? this.state.selectedTags.filter((name) => name !== tag)
         : [...this.state.selectedTags, tag];
+      this.state.page = 1;
       renderTags(this.elements, this.state);
       void this.reloadMemes();
     });
@@ -373,13 +413,49 @@ export class MemeVaultApp {
       const target = event.target as Element;
       if (target.closest("[data-retry-list]")) {
         void this.reloadMemes();
-      } else if (target.closest("[data-retry-more]")) {
-        void this.loadMore();
       }
     });
-
-    this.elements.loadMoreButton.addEventListener("click", () => {
-      void this.loadMore();
+    this.elements.browsingControls.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      if (target.matches("[data-list-sort]")) {
+        this.state.listSort = target.value === "shuffle" ? "shuffle" : "default";
+        this.state.shuffleSeed = this.state.listSort === "shuffle" ? shuffleSeed() : null;
+        this.state.page = 1;
+        void this.reloadMemes();
+      } else if (target.matches("[data-page-size]")) {
+        const size = Number(target.value);
+        if (size === 24 || size === 48 || size === 96) {
+          this.state.pageSize = size;
+          this.state.page = 1;
+          localStorage.setItem(PAGE_SIZE_KEY, String(size));
+          void this.reloadMemes();
+        }
+      } else if (target.matches("[data-card-size]")) {
+        const size = target.value;
+        if (size === "extra-large" || size === "large" || size === "medium" || size === "small") {
+          this.state.cardSize = size;
+          localStorage.setItem(CARD_SIZE_KEY, size);
+          applyMemeCardSize(this.elements, size);
+        }
+      }
+    });
+    this.elements.browsingControls.addEventListener("click", (event) => {
+      if (!(event.target as Element).closest("[data-reshuffle]")) return;
+      this.state.shuffleSeed = shuffleSeed(this.state.shuffleSeed);
+      this.state.page = 1;
+      void this.reloadMemes();
+    });
+    this.elements.pagination.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-page]");
+      if (button) void this.goToPage(Number(button.dataset.page));
+    });
+    this.elements.pagination.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (event.key === "Enter" && input instanceof HTMLInputElement && input.matches("[data-page-input]")) {
+        event.preventDefault();
+        if (input.value.trim()) void this.goToPage(Number(input.value));
+      }
     });
     this.elements.randomButton.addEventListener("click", () => {
       void this.randomize();
@@ -578,6 +654,25 @@ export class MemeVaultApp {
       event.preventDefault();
       void this.submitEdit(form);
     });
+    this.elements.templatePagination.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-template-page]");
+      if (!button || this.templateBusy) return;
+      this.state.templatePage = clampPage(
+        Number(button.dataset.templatePage),
+        Math.ceil(this.state.availableTemplates.length / 12),
+      );
+      renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
+    });
+    this.elements.templatePagination.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (event.key !== "Enter" || !(input instanceof HTMLInputElement) || !input.matches("[data-template-page-input]") || !input.value.trim()) return;
+      event.preventDefault();
+      this.state.templatePage = clampPage(
+        Number(input.value),
+        Math.ceil(this.state.availableTemplates.length / 12),
+      );
+      renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
+    });
     this.elements.detailPanel.addEventListener("meme-detail-rendered", () => {
       this.mountEditTagEditor();
     });
@@ -666,6 +761,10 @@ export class MemeVaultApp {
   private async refreshTemplates(): Promise<void> {
     try {
       this.state.availableTemplates = await this.api.listTemplates();
+      this.state.templatePage = clampPage(
+        this.state.templatePage,
+        Math.ceil(this.state.availableTemplates.length / 12),
+      );
       if (this.state.aiAnalysis?.suggested_template) {
         const currentSuggestion = this.state.availableTemplates.find(
           (template) =>
@@ -705,6 +804,7 @@ export class MemeVaultApp {
   private openTemplateManager(): void {
     this.templateEditingId = null;
     this.templateError = null;
+    this.state.templatePage = 1;
     this.clearTemplateReferenceInput();
     renderTemplateManager(this.elements, this.state, null, false, null);
     this.elements.templateDialog.showModal();
@@ -730,6 +830,7 @@ export class MemeVaultApp {
     this.elements.templateSubmit.disabled = true;
     this.elements.templateSubmit.textContent = "正在保存…";
     try {
+      const creating = this.templateEditingId === null;
       if (this.templateEditingId === null) {
         if (file) {
           await this.api.createTemplateWithReferenceImage(
@@ -749,6 +850,12 @@ export class MemeVaultApp {
       this.templateEditingId = null;
       this.clearTemplateReferenceInput();
       await this.refreshTemplates();
+      if (creating) {
+        this.state.templatePage = Math.max(
+          1,
+          Math.ceil(this.state.availableTemplates.length / 12),
+        );
+      }
     } catch (error) {
       this.templateError = readableError(error);
     } finally {
@@ -830,6 +937,10 @@ export class MemeVaultApp {
       this.state.availableTemplates = this.state.availableTemplates.filter(
         (item) => item.id !== templateId,
       );
+      this.state.templatePage = clampPage(
+        this.state.templatePage,
+        Math.ceil(this.state.availableTemplates.length / 12),
+      );
       if (this.state.selectedMeme?.template?.id === templateId) {
         this.state.selectedMeme = {
           ...this.state.selectedMeme,
@@ -866,33 +977,38 @@ export class MemeVaultApp {
     }
   }
 
-  private async reloadMemes(): Promise<void> {
+  private async reloadMemes(scrollAfter = false): Promise<void> {
     this.listController?.abort();
     const controller = new AbortController();
     this.listController = controller;
     this.state.loadingList = true;
-    this.state.loadingMore = false;
     this.state.listError = null;
-    this.state.loadMoreError = null;
     this.state.memes = [];
-    this.state.offset = 0;
-    this.state.hasMore = false;
     renderLibrary(this.elements, this.state);
 
     try {
-      const memes = await this.api.listMemes({
-        offset: 0,
-        limit: PAGE_SIZE,
+      const response = await this.api.listMemePage({
+        page: this.state.page,
+        pageSize: this.state.pageSize,
         q: this.state.query,
         tags: this.state.selectedTags,
+        sort: this.state.listSort,
+        shuffleSeed: this.state.shuffleSeed,
         signal: controller.signal,
       });
       if (this.listController !== controller) {
         return;
       }
-      this.state.memes = memes;
-      this.state.offset = memes.length;
-      this.state.hasMore = memes.length === PAGE_SIZE;
+      this.state.memes = response.items;
+      this.state.totalMemes = response.total;
+      this.state.totalPages = response.total_pages;
+      this.state.page = response.page;
+      this.state.pageSize = response.page_size;
+      this.state.listSort = response.sort;
+      this.state.shuffleSeed = response.shuffle_seed;
+      if (scrollAfter) {
+        this.elements.libraryHeading.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      }
     } catch (error) {
       if (isAbortError(error) || this.listController !== controller) {
         return;
@@ -906,48 +1022,12 @@ export class MemeVaultApp {
     }
   }
 
-  private async loadMore(): Promise<void> {
-    if (
-      this.state.loadingList ||
-      this.state.loadingMore ||
-      !this.state.hasMore
-    ) {
-      return;
-    }
-    const controller = new AbortController();
-    this.listController?.abort();
-    this.listController = controller;
-    this.state.loadingMore = true;
-    this.state.loadMoreError = null;
-    renderLibrary(this.elements, this.state);
-
-    try {
-      const memes = await this.api.listMemes({
-        offset: this.state.offset,
-        limit: PAGE_SIZE,
-        q: this.state.query,
-        tags: this.state.selectedTags,
-        signal: controller.signal,
-      });
-      if (this.listController !== controller) {
-        return;
-      }
-      const knownIds = new Set(this.state.memes.map((meme) => meme.id));
-      this.state.memes.push(
-        ...memes.filter((meme) => !knownIds.has(meme.id)),
-      );
-      this.state.offset += memes.length;
-      this.state.hasMore = memes.length === PAGE_SIZE;
-    } catch (error) {
-      if (!isAbortError(error) && this.listController === controller) {
-        this.state.loadMoreError = readableError(error);
-      }
-    } finally {
-      if (this.listController === controller) {
-        this.state.loadingMore = false;
-        renderLibrary(this.elements, this.state);
-      }
-    }
+  private async goToPage(page: number): Promise<void> {
+    if (this.state.loadingList || this.state.totalPages === 0 || !Number.isInteger(page)) return;
+    const target = clampPage(page, this.state.totalPages);
+    if (target === this.state.page) return;
+    this.state.page = target;
+    await this.reloadMemes(true);
   }
 
   private async refreshTags(): Promise<void> {
@@ -1271,6 +1351,9 @@ export class MemeVaultApp {
 
     try {
       const targetId = meme.id;
+      const previousTags = meme.tags.map((tag) => tag.name).sort();
+      const submittedTags = [...this.editDraft.tags].sort();
+      const tagsChanged = previousTags.join("\0") !== submittedTags.join("\0");
       const updated = await this.api.updateMeme(targetId, payload);
       this.replaceMeme(updated);
       renderMemeCard(
@@ -1284,6 +1367,10 @@ export class MemeVaultApp {
         this.editTagEditor = null;
       }
       await this.refreshTags();
+      if (tagsChanged) {
+        this.state.page = 1;
+        await this.reloadMemes();
+      }
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
         this.state.actionError = readableError(error);
@@ -1350,7 +1437,6 @@ export class MemeVaultApp {
   }
 
   private async applyTagMutation(mutation: TagMutation): Promise<void> {
-    const before = this.state.selectedTags.join("\0");
     if (mutation.type === "rename" || mutation.type === "merge") {
       this.state.selectedTags = [
         ...new Set(
@@ -1383,9 +1469,8 @@ export class MemeVaultApp {
     renderTags(this.elements, this.state);
     renderLibrary(this.elements, this.state);
     renderDetail(this.elements, this.state, this.editing, this.editDraft);
-    if (before !== this.state.selectedTags.join("\0")) {
-      await this.reloadMemes();
-    }
+    this.state.page = 1;
+    await this.reloadMemes();
   }
 
   private replaceMeme(updated: MemeResponse): void {

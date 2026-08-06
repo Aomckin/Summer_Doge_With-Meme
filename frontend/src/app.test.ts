@@ -104,7 +104,11 @@ function makeCompositeMeme(id = 1): MemeResponse {
 }
 
 function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
-  return {
+  const api: MemeApi = {
+    listMemePage: vi.fn().mockResolvedValue({
+      items: [], total: 0, page: 1, page_size: 24, total_pages: 0,
+      sort: "default", shuffle_seed: null,
+    }),
     listMemes: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([funnyTag]),
     renameTag: vi.fn().mockImplementation(async (_id, name) => ({ ...funnyTag, name })),
@@ -216,6 +220,49 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
     deleteAIModel: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+  if (overrides.listMemes && !overrides.listMemePage) {
+    api.listMemePage = vi.fn(async (options) => {
+      const items = await api.listMemes({
+        offset: (options.page - 1) * options.pageSize,
+        limit: options.pageSize,
+        q: options.q,
+        tags: options.tags,
+        signal: options.signal,
+      });
+      const total = items.length === options.pageSize
+        ? options.page * options.pageSize + 1
+        : (options.page - 1) * options.pageSize + items.length;
+      return {
+        items,
+        total,
+        page: options.page,
+        page_size: options.pageSize,
+        total_pages: total ? Math.ceil(total / options.pageSize) : 0,
+        sort: options.sort,
+        shuffle_seed: options.sort === "shuffle" ? options.shuffleSeed ?? null : null,
+      };
+    });
+  }
+  return api;
+}
+
+function memePage(
+  items: MemeResponse[],
+  total = items.length,
+  page = 1,
+  pageSize: 24 | 48 | 96 = 24,
+  sort: "default" | "shuffle" = "default",
+  seed: number | null = null,
+) {
+  return {
+    items,
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: total ? Math.ceil(total / pageSize) : 0,
+    sort,
+    shuffle_seed: sort === "shuffle" ? seed : null,
+  } as const;
 }
 
 function deferred<T>() {
@@ -270,6 +317,7 @@ function replaceEditTags(names: string[]): void {
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>';
+  localStorage.clear();
   vi.stubGlobal("confirm", vi.fn(() => true));
 });
 
@@ -304,7 +352,7 @@ describe("MemeVaultApp", () => {
     );
   });
 
-  it("loads the library, appends another page and filters by tag", async () => {
+  it("loads the library, replaces the page and filters by tag", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),
     );
@@ -325,9 +373,10 @@ describe("MemeVaultApp", () => {
       "Meme 1",
     );
 
-    button("加载更多").click();
+    button("下一页").click();
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(25);
+      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(1);
+      expect(document.querySelector('[data-meme-id="25"]')).not.toBeNull();
     });
 
     button("funny").click();
@@ -341,6 +390,201 @@ describe("MemeVaultApp", () => {
         tags: ["funny"],
       }),
     );
+  });
+
+  it("requests page one, shows totals, and supports every page jump control", async () => {
+    const listMemePage = vi.fn(async ({ page, pageSize, sort, shuffleSeed }) =>
+      memePage([makeMeme(page)], 120, page, pageSize, sort, shuffleSeed ?? null),
+    );
+    const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
+    await app.start();
+
+    expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 24 }));
+    expect(document.querySelector("[data-meme-total]")?.textContent).toContain("120");
+    expect(document.querySelector("#list-status")?.textContent).toContain("第 1 / 5 页");
+    expect(document.body.textContent).not.toContain("加载更多");
+
+    document.querySelector<HTMLButtonElement>('[data-page="3"]')?.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 3 })));
+    button("第一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 })));
+
+    button("下一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })));
+    button("最后一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 5 })));
+    button("上一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 4 })));
+    button("第一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 })));
+
+    const input = document.querySelector<HTMLInputElement>("[data-page-input]")!;
+    input.value = "999";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 5 })));
+  });
+
+  it("persists density preferences while card size remains request-free", async () => {
+    const listMemePage = vi.fn(async ({ page, pageSize, sort, shuffleSeed }) =>
+      memePage([makeMeme(page)], 100, page, pageSize, sort, shuffleSeed ?? null),
+    );
+    const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
+    await app.start();
+    button("下一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenCalledTimes(2));
+
+    const cardSize = document.querySelector<HTMLSelectElement>("[data-card-size]")!;
+    const cardImage = document.querySelector<HTMLImageElement>("[data-card-image]")!;
+    for (const size of ["extra-large", "large", "medium", "small"] as const) {
+      cardSize.value = size;
+      cardSize.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(document.querySelector("#meme-grid")?.getAttribute("data-card-size")).toBe(size);
+      expect(cardImage.getAttribute("src")).toBe(
+        size === "extra-large"
+          ? "/media/images/stored-2.png"
+          : "/media/thumbnails/stored-2.png",
+      );
+      expect(localStorage.getItem("meme-vault.card-size")).toBe(size);
+    }
+    expect(listMemePage).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem("meme-vault.card-size")).toBe("small");
+    expect((app as unknown as { state: AppState }).state.page).toBe(2);
+
+    const pageSize = document.querySelector<HTMLSelectElement>("[data-page-size]")!;
+    pageSize.value = "48";
+    pageSize.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 48 })));
+    expect(localStorage.getItem("meme-vault.page-size")).toBe("48");
+  });
+
+  it("falls back from invalid stored density preferences", () => {
+    localStorage.setItem("meme-vault.page-size", "12");
+    localStorage.setItem("meme-vault.card-size", "huge");
+    const app = new MemeVaultApp(root(), makeApi());
+    const state = (app as unknown as { state: AppState }).state;
+    expect(state.pageSize).toBe(24);
+    expect(state.cardSize).toBe("medium");
+  });
+
+  it("restores extra-large cards with original image sources", async () => {
+    localStorage.setItem("meme-vault.card-size", "extra-large");
+    const app = new MemeVaultApp(root(), makeApi({
+      listMemePage: vi.fn().mockResolvedValue(memePage([makeMeme(7)])),
+    }));
+    await app.start();
+    expect(document.querySelector("#meme-grid")?.getAttribute("data-card-size")).toBe("extra-large");
+    expect(document.querySelector<HTMLImageElement>("[data-card-image]")?.getAttribute("src"))
+      .toBe("/media/images/stored-7.png");
+  });
+
+  it("paginates templates by twelve, jumps by Enter, creates on the last page, and backs up after deletion", async () => {
+    let templates = Array.from({ length: 25 }, (_, index) => ({
+      ...dogeTemplate,
+      id: index + 1,
+      name: `模板 ${index + 1}`,
+    }));
+    const api = makeApi({
+      listTemplates: vi.fn(async () => [...templates]),
+      createTemplate: vi.fn(async (payload) => {
+        const created = { ...dogeTemplate, id: 26, name: payload.name, description: payload.description };
+        templates.push(created);
+        return created;
+      }),
+      deleteTemplate: vi.fn(async (id) => {
+        templates = templates.filter((item) => item.id !== id);
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    button("模板管理").click();
+    expect(document.querySelectorAll(".template-row")).toHaveLength(12);
+
+    document.querySelector<HTMLButtonElement>('[data-template-page="2"]')?.click();
+    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 2 / 3 页");
+    const jump = document.querySelector<HTMLInputElement>("[data-template-page-input]")!;
+    jump.value = "99";
+    jump.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(document.querySelectorAll(".template-row")).toHaveLength(1);
+
+    const form = document.querySelector<HTMLFormElement>("#template-form")!;
+    (form.elements.namedItem("name") as HTMLInputElement).value = "新模板";
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(document.querySelector('[data-edit-template="26"]')).not.toBeNull());
+    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 3 / 3 页");
+
+    document.querySelector<HTMLButtonElement>('[data-delete-template="25"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-delete-template="25"]')).toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-delete-template="26"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector("#template-pagination")?.textContent).toContain("第 2 / 2 页"));
+  });
+
+  it("keeps one shuffle seed across paging and filters, then reshuffles and clears it", async () => {
+    const values = [100, 200];
+    vi.stubGlobal("crypto", {
+      getRandomValues(target: Uint32Array) {
+        target[0] = values.shift() ?? 300;
+        return target;
+      },
+    });
+    const listMemePage = vi.fn(async ({ page, pageSize, sort, shuffleSeed }) =>
+      memePage([makeMeme(page)], 60, page, pageSize, sort, shuffleSeed ?? null),
+    );
+    const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
+    await app.start();
+    const sort = document.querySelector<HTMLSelectElement>("[data-list-sort]")!;
+    sort.value = "shuffle";
+    sort.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort: "shuffle", shuffleSeed: 100 })));
+    button("下一页").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, shuffleSeed: 100 })));
+    button("funny").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, tags: ["funny"], shuffleSeed: 100 })));
+    const search = document.querySelector<HTMLInputElement>("#meme-search")!;
+    search.value = "猫";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, q: "猫", shuffleSeed: 100 })), { timeout: 1000 });
+    button("重新洗牌").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, shuffleSeed: 200 })));
+    sort.value = "default";
+    sort.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "default", shuffleSeed: null })));
+  });
+
+  it("does not let an older page response overwrite a newer page", async () => {
+    const first = deferred<ReturnType<typeof memePage>>();
+    const listMemePage = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockResolvedValueOnce(memePage([makeMeme(2)], 48, 2));
+    const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
+    const starting = app.start();
+    expect(document.querySelector<HTMLSelectElement>("[data-list-sort]")?.disabled).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>("[data-page]")?.disabled).toBe(true);
+    const state = (app as unknown as { state: AppState }).state;
+    state.page = 2;
+    const reload = (app as unknown as { reloadMemes(): Promise<void> }).reloadMemes();
+    await reload;
+    first.resolve(memePage([makeMeme(1)], 48, 1));
+    await starting;
+    expect(document.querySelector('[data-meme-id="2"]')).not.toBeNull();
+    expect(state.page).toBe(2);
+  });
+
+  it("accepts the backend-corrected page after deleting the last item", async () => {
+    const item = makeMeme(49);
+    const listMemePage = vi
+      .fn()
+      .mockResolvedValueOnce(memePage([item], 49, 3))
+      .mockResolvedValueOnce(memePage([makeMeme(25)], 48, 2));
+    const api = makeApi({ listMemePage });
+    const app = new MemeVaultApp(root(), api);
+    const state = (app as unknown as { state: AppState }).state;
+    state.page = 3;
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="49"]')?.click();
+    button("删除").click();
+    await vi.waitFor(() => expect(state.page).toBe(2));
+    expect(document.querySelector('[data-meme-id="25"]')).not.toBeNull();
   });
 
   it("collapses excess tags and keeps selected tags visible", async () => {
@@ -454,11 +698,11 @@ describe("MemeVaultApp", () => {
     search.dispatchEvent(new Event("input", { bubbles: true }));
 
     await vi.advanceTimersByTimeAsync(299);
-    expect(api.listMemes).not.toHaveBeenLastCalledWith(
+    expect(api.listMemePage).not.toHaveBeenLastCalledWith(
       expect.objectContaining({ q: "reaction" }),
     );
     await vi.advanceTimersByTimeAsync(1);
-    expect(api.listMemes).toHaveBeenLastCalledWith(
+    expect(api.listMemePage).toHaveBeenLastCalledWith(
       expect.objectContaining({ q: "reaction", tags: ["funny"] }),
     );
 
@@ -691,7 +935,7 @@ describe("MemeVaultApp", () => {
     await vi.waitFor(() => {
       expect(confirm).toHaveBeenCalled();
       expect(api.deleteTemplate).toHaveBeenCalledWith(3);
-      expect(api.listMemes).toHaveBeenCalledTimes(2);
+      expect(api.listMemePage).toHaveBeenCalledTimes(2);
       expect(listTemplates).toHaveBeenCalledTimes(4);
     });
   });
@@ -730,7 +974,7 @@ describe("MemeVaultApp", () => {
     });
   });
 
-  it("keeps loaded cards and retries the same page after load-more fails", async () => {
+  it("shows a retry action when a page request fails", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),
     );
@@ -742,15 +986,15 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), makeApi({ listMemes }));
     await app.start();
 
-    button("加载更多").click();
+    button("下一页").click();
     await vi.waitFor(() => {
-      expect(document.querySelector("[data-more-error]")).not.toBeNull();
+      expect(document.querySelector("[data-list-error]")).not.toBeNull();
     });
-    expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(24);
+    expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(0);
 
-    button("重试加载").click();
+    button("重试").click();
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(25);
+      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(1);
     });
     expect(listMemes).toHaveBeenLastCalledWith(
       expect.objectContaining({ offset: 24, limit: 24 }),
@@ -885,7 +1129,7 @@ describe("MemeVaultApp", () => {
     );
   });
 
-  it("preserves two loaded pages and card order after editing one Meme", async () => {
+  it("preserves the current page and card order after editing one Meme", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),
     );
@@ -895,7 +1139,6 @@ describe("MemeVaultApp", () => {
     const updated = {
       ...secondPage[5],
       title: "第二页已编辑",
-      tags: [{ ...funnyTag, name: "reaction" }],
     };
     const listMemes = vi
       .fn()
@@ -908,9 +1151,9 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), api);
     await app.start();
 
-    button("加载更多").click();
+    button("下一页").click();
     await vi.waitFor(() => {
-      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(48);
+      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(24);
     });
     document
       .querySelector<HTMLElement>('[data-meme-id="30"]')
@@ -930,7 +1173,6 @@ describe("MemeVaultApp", () => {
     }
     (editForm.elements.namedItem("title") as HTMLInputElement).value =
       "第二页已编辑";
-    replaceEditTags(["reaction"]);
     editForm.dispatchEvent(
       new SubmitEvent("submit", { bubbles: true, cancelable: true }),
     );
@@ -946,10 +1188,9 @@ describe("MemeVaultApp", () => {
     ].map((card) => Number(card.dataset.memeId));
     expect(listMemes).toHaveBeenCalledTimes(2);
     expect(api.listTags).toHaveBeenCalledTimes(2);
-    expect(state.memes).toHaveLength(48);
-    expect(state.offset).toBe(48);
-    expect(state.hasMore).toBe(true);
-    expect(state.memes[29]).toEqual(updated);
+    expect(state.memes).toHaveLength(24);
+    expect(state.page).toBe(2);
+    expect(state.memes[5]).toEqual(updated);
     expect(state.selectedMeme).toEqual(updated);
     expect(orderAfter).toEqual(orderBefore);
     expect(

@@ -76,7 +76,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.5.5",
+        version="0.5.6",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images

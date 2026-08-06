@@ -18,6 +18,7 @@ import {
   deleteCaption,
   deleteTemplate,
   listTemplates,
+  listMemePage,
   listTags,
   mergeTag,
   renameTag,
@@ -88,6 +89,29 @@ describe("listMemes", () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(
       "/api/memes?offset=24&limit=24&tags=funny&tags=cat",
+    );
+  });
+});
+
+describe("listMemePage", () => {
+  it("serializes paging, repeated tags, sorting and the stable seed", async () => {
+    const page = {
+      items: [meme], total: 80, page: 2, page_size: 48, total_pages: 2,
+      sort: "shuffle", shuffle_seed: 92837461,
+    } as const;
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(page));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listMemePage({
+      page: 2,
+      pageSize: 48,
+      q: "猫",
+      tags: ["反讽", "猫"],
+      sort: "shuffle",
+      shuffleSeed: 92837461,
+    })).resolves.toEqual(page);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/memes/page?page=2&page_size=48&sort=shuffle&q=%E7%8C%AB&tags=%E5%8F%8D%E8%AE%BD&tags=%E7%8C%AB&shuffle_seed=92837461",
     );
   });
 });

@@ -1,4 +1,5 @@
-import type { AppState, MemeResponse } from "./types";
+import type { AppState, MemeCardSize, MemeResponse } from "./types";
+import { buildPaginationTokens, clampPage } from "./pagination";
 
 export interface EditDraft {
   title: string;
@@ -18,14 +19,17 @@ export interface AppElements {
   openTagsButton: HTMLButtonElement;
   operationError: HTMLElement;
   tagFilters: HTMLElement;
+  libraryHeading: HTMLElement;
+  browsingControls: HTMLElement;
   listStatus: HTMLElement;
   memeGrid: HTMLElement;
-  loadMoreButton: HTMLButtonElement;
+  pagination: HTMLElement;
   detailPanel: HTMLElement;
   templateDialog: HTMLDialogElement;
   templateForm: HTMLFormElement;
   templateReferencePreview: HTMLElement;
   templateList: HTMLElement;
+  templatePagination: HTMLElement;
   templateError: HTMLElement;
   templateSubmit: HTMLButtonElement;
   settingsDialog: HTMLDialogElement;
@@ -133,16 +137,36 @@ export function mountShell(root: HTMLElement): AppElements {
 
       <main class="workspace">
         <section class="library" aria-label="Meme 资料库">
-          <div class="section-heading">
+          <div id="library-heading" class="section-heading">
             <div>
               <p class="eyebrow">LIBRARY</p>
               <h1>我的 Meme</h1>
             </div>
           </div>
           <div id="tag-filters" class="tag-filters" aria-label="标签筛选"></div>
+          <div id="browsing-controls" class="browsing-controls" aria-label="资料库浏览设置">
+            <strong data-meme-total>共 0 个 Meme</strong>
+            <label>顺序
+              <select data-list-sort aria-label="资料库顺序">
+                <option value="default">默认顺序</option>
+                <option value="shuffle">随机顺序</option>
+              </select>
+            </label>
+            <button class="button button-secondary" type="button" data-reshuffle hidden>重新洗牌</button>
+            <label>每页
+              <select data-page-size aria-label="每页显示数量">
+                <option value="24">24</option><option value="48">48</option><option value="96">96</option>
+              </select>
+            </label>
+            <label>卡片
+              <select data-card-size aria-label="卡片显示大小">
+                <option value="extra-large">超大</option><option value="large">大</option><option value="medium">中</option><option value="small">小</option>
+              </select>
+            </label>
+          </div>
           <div id="list-status" class="list-status" aria-live="polite"></div>
-          <div id="meme-grid" class="meme-grid"></div>
-          <button id="load-more" class="button button-secondary load-more" type="button" hidden>加载更多</button>
+          <div id="meme-grid" class="meme-grid" data-card-size="medium"></div>
+          <nav id="library-pagination" class="pagination" aria-label="资料库分页"></nav>
         </section>
 
         <aside id="detail-panel" class="detail-panel" aria-label="Meme 详情"></aside>
@@ -180,7 +204,10 @@ export function mountShell(root: HTMLElement): AppElements {
               <button id="template-submit" class="button button-primary" type="submit">创建模板</button>
             </div>
           </form>
-          <div id="template-list" class="template-list"></div>
+          <div>
+            <div id="template-list" class="template-list"></div>
+            <nav id="template-pagination" class="template-pagination" aria-label="模板分页"></nav>
+          </div>
         </div>
       </div>
     </dialog>
@@ -377,9 +404,11 @@ export function mountShell(root: HTMLElement): AppElements {
     openTagsButton: required(root, "#open-tags"),
     operationError: required(root, "#operation-error"),
     tagFilters: required(root, "#tag-filters"),
+    libraryHeading: required(root, "#library-heading"),
+    browsingControls: required(root, "#browsing-controls"),
     listStatus: required(root, "#list-status"),
     memeGrid: required(root, "#meme-grid"),
-    loadMoreButton: required(root, "#load-more"),
+    pagination: required(root, "#library-pagination"),
     detailPanel: required(root, "#detail-panel"),
     templateDialog: required(document, "#template-dialog"),
     templateForm: required(document, "#template-form"),
@@ -388,6 +417,7 @@ export function mountShell(root: HTMLElement): AppElements {
       "#template-reference-input-preview",
     ),
     templateList: required(document, "#template-list"),
+    templatePagination: required(document, "#template-pagination"),
     templateError: required(document, "#template-error"),
     templateSubmit: required(document, "#template-submit"),
     settingsDialog: required(document, "#api-settings-dialog"),
@@ -481,8 +511,12 @@ export function renderTemplateManager(
     editing?.reference_thumbnail_url ?? null,
     editing ? `${editing.name} 当前参考图` : "参考图预览",
   );
-  elements.templateList.innerHTML = state.availableTemplates.length
-    ? state.availableTemplates
+  const totalPages = Math.ceil(state.availableTemplates.length / 12);
+  const page = clampPage(state.templatePage, totalPages);
+  const start = (page - 1) * 12;
+  const templates = state.availableTemplates.slice(start, start + 12);
+  elements.templateList.innerHTML = templates.length
+    ? templates
         .map(
           (template) => `
             <article class="template-row">
@@ -500,6 +534,13 @@ export function renderTemplateManager(
         )
         .join("")
     : '<p class="muted">还没有模板，可以先创建一个。</p>';
+  elements.templatePagination.hidden = totalPages === 0;
+  elements.templatePagination.innerHTML = totalPages
+    ? `<button class="button button-ghost" type="button" data-template-page="${page - 1}" ${page <= 1 || busy ? "disabled" : ""}>上一页</button>
+       <span>第 ${page} / ${totalPages} 页</span>
+       <label>跳至页码 <input type="number" min="1" max="${totalPages}" inputmode="numeric" data-template-page-input ${busy ? "disabled" : ""}></label>
+       <button class="button button-ghost" type="button" data-template-page="${page + 1}" ${page >= totalPages || busy ? "disabled" : ""}>下一页</button>`
+    : "";
 }
 
 export function renderTemplateReferenceInputPreview(
@@ -567,8 +608,13 @@ export function renderTags(elements: AppElements, state: AppState): void {
   elements.tagFilters.innerHTML = `${tags}${toggle}`;
 }
 
-function cardMarkup(meme: MemeResponse, selected: boolean): string {
-  const image = meme.thumbnail_url ?? meme.image_url;
+function cardMarkup(
+  meme: MemeResponse,
+  selected: boolean,
+  cardSize: MemeCardSize,
+): string {
+  const thumbnail = meme.thumbnail_url ?? meme.image_url;
+  const image = cardSize === "extra-large" ? meme.image_url : thumbnail;
   return `
     <button
       class="meme-card${selected ? " is-selected" : ""}"
@@ -578,6 +624,9 @@ function cardMarkup(meme: MemeResponse, selected: boolean): string {
     >
       <span class="card-image">
         <img
+          data-card-image
+          data-thumbnail-src="${escapeHtml(thumbnail)}"
+          data-original-src="${escapeHtml(meme.image_url)}"
           src="${escapeHtml(image)}"
           alt="${escapeHtml(meme.title)}"
           width="${meme.width}"
@@ -608,6 +657,21 @@ export function renderLibrary(
   elements: AppElements,
   state: AppState,
 ): void {
+  applyMemeCardSize(elements, state.cardSize);
+  const total = new Intl.NumberFormat("zh-CN").format(state.totalMemes);
+  const totalNode = elements.browsingControls.querySelector<HTMLElement>("[data-meme-total]");
+  if (totalNode) totalNode.textContent = `共 ${total} 个 Meme`;
+  const sort = elements.browsingControls.querySelector<HTMLSelectElement>("[data-list-sort]");
+  const pageSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-page-size]");
+  const cardSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-card-size]");
+  const reshuffle = elements.browsingControls.querySelector<HTMLButtonElement>("[data-reshuffle]");
+  if (sort) { sort.value = state.listSort; sort.disabled = state.loadingList; }
+  if (pageSize) { pageSize.value = String(state.pageSize); pageSize.disabled = state.loadingList; }
+  if (cardSize) cardSize.value = state.cardSize;
+  if (reshuffle) {
+    reshuffle.hidden = state.listSort !== "shuffle";
+    reshuffle.disabled = state.loadingList;
+  }
   if (state.loadingList) {
     elements.listStatus.innerHTML =
       '<span class="status-line"><span class="spinner"></span>正在加载 Meme…</span>';
@@ -624,33 +688,28 @@ export function renderLibrary(
     `;
     elements.memeGrid.innerHTML = "";
   } else {
-    if (state.loadMoreError) {
-      elements.listStatus.innerHTML = `
-        <div class="error-panel" data-more-error>
-          <span>${escapeHtml(state.loadMoreError)}</span>
-          <button class="button button-secondary" type="button" data-retry-more>重试加载</button>
-        </div>
-      `;
-    } else {
-      elements.listStatus.textContent = state.memes.length
-        ? `已显示 ${state.memes.length} 个 Meme`
-        : "还没有符合条件的 Meme";
-    }
+    elements.listStatus.textContent = state.memes.length
+      ? `第 ${state.page} / ${state.totalPages} 页`
+      : "还没有符合条件的 Meme";
     elements.memeGrid.innerHTML = state.memes
-      .map((meme) => cardMarkup(meme, meme.id === state.selectedMeme?.id))
+      .map((meme) => cardMarkup(meme, meme.id === state.selectedMeme?.id, state.cardSize))
       .join("");
     bindImageFallbacks(elements.memeGrid);
   }
 
-  elements.loadMoreButton.hidden =
-    state.loadingList ||
-    Boolean(state.listError) ||
-    Boolean(state.loadMoreError) ||
-    !state.hasMore;
-  elements.loadMoreButton.disabled = state.loadingMore;
-  elements.loadMoreButton.textContent = state.loadingMore
-    ? "正在加载…"
-    : "加载更多";
+  const disabled = state.loadingList || state.totalPages === 0;
+  const tokens = buildPaginationTokens(state.page, state.totalPages)
+    .map((token) => token === "ellipsis"
+      ? '<span class="pagination-ellipsis" aria-hidden="true">…</span>'
+      : `<button type="button" class="button button-ghost pagination-number${token === state.page ? " is-active" : ""}" data-page="${token}" ${disabled || token === state.page ? "disabled" : ""} aria-current="${token === state.page ? "page" : "false"}">${token}</button>`)
+    .join("");
+  elements.pagination.innerHTML = `
+    <button type="button" class="button button-ghost" data-page="1" ${disabled || state.page <= 1 ? "disabled" : ""}>第一页</button>
+    <button type="button" class="button button-ghost" data-page="${state.page - 1}" ${disabled || state.page <= 1 ? "disabled" : ""}>上一页</button>
+    <span class="pagination-numbers">${tokens}</span>
+    <button type="button" class="button button-ghost" data-page="${state.page + 1}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>下一页</button>
+    <button type="button" class="button button-ghost" data-page="${state.totalPages}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>最后一页</button>
+    <label>跳至页码 <input type="number" min="1" max="${Math.max(1, state.totalPages)}" inputmode="numeric" data-page-input ${disabled ? "disabled" : ""}></label>`;
 }
 
 export function renderMemeCard(
@@ -665,13 +724,31 @@ export function renderMemeCard(
     return;
   }
   const template = document.createElement("template");
-  template.innerHTML = cardMarkup(meme, selected).trim();
+  const size = elements.memeGrid.dataset.cardSize as MemeCardSize | undefined;
+  template.innerHTML = cardMarkup(meme, selected, size ?? "medium").trim();
   const replacement = template.content.firstElementChild;
   if (!(replacement instanceof HTMLElement)) {
     return;
   }
   current.replaceWith(replacement);
   bindImageFallbacks(replacement);
+}
+
+export function applyMemeCardSize(
+  elements: AppElements,
+  size: MemeCardSize,
+): void {
+  elements.memeGrid.dataset.cardSize = size;
+  for (const image of elements.memeGrid.querySelectorAll<HTMLImageElement>("[data-card-image]")) {
+    const source = size === "extra-large"
+      ? image.dataset.originalSrc
+      : image.dataset.thumbnailSrc;
+    if (source && image.getAttribute("src") !== source) {
+      image.hidden = false;
+      image.parentElement?.classList.remove("is-broken");
+      image.src = source;
+    }
+  }
 }
 
 function detailImage(meme: MemeResponse, state: AppState): string {

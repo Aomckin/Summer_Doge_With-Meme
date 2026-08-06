@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.meme import Meme
 from app.models.tag import MemeTag, Tag
 
+SHUFFLE_MODULUS = 2_147_483_647
+SHUFFLE_MULTIPLIER = 1_103_515_245
+
 
 class MemeRepository:
     def __init__(self, session: Session) -> None:
@@ -66,6 +69,73 @@ class MemeRepository:
             )
         statement = statement.order_by(Meme.id).offset(offset).limit(limit)
         return list(self.session.scalars(statement))
+
+    def _build_filtered_ids_statement(
+        self,
+        *,
+        tags: Sequence[str] | None = None,
+        q: str | None = None,
+    ):
+        statement = select(Meme.id.label("meme_id"))
+        search = (q or "").strip().lower()
+        if search:
+            statement = statement.where(
+                or_(
+                    func.lower(Meme.title).contains(search, autoescape=True),
+                    func.lower(func.coalesce(Meme.description, "")).contains(
+                        search,
+                        autoescape=True,
+                    ),
+                )
+            )
+        normalized_tags = list(
+            dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip())
+        )
+        if normalized_tags:
+            statement = (
+                statement.join(MemeTag)
+                .join(Tag)
+                .where(Tag.name.in_(normalized_tags))
+                .group_by(Meme.id)
+                .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
+            )
+        return statement
+
+    def count_filtered(
+        self,
+        *,
+        tags: Sequence[str] | None = None,
+        q: str | None = None,
+    ) -> int:
+        filtered_ids = self._build_filtered_ids_statement(tags=tags, q=q).subquery()
+        return int(
+            self.session.scalar(select(func.count()).select_from(filtered_ids)) or 0
+        )
+
+    def list_page(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        tags: Sequence[str] | None = None,
+        q: str | None = None,
+        sort: str = "default",
+        shuffle_seed: int | None = None,
+    ) -> list[Meme]:
+        filtered_ids = self._build_filtered_ids_statement(tags=tags, q=q).subquery()
+        statement = select(Meme).join(
+            filtered_ids,
+            Meme.id == filtered_ids.c.meme_id,
+        )
+        if sort == "shuffle":
+            assert shuffle_seed is not None
+            shuffle_key = (
+                Meme.id * SHUFFLE_MULTIPLIER + shuffle_seed
+            ) % SHUFFLE_MODULUS
+            statement = statement.order_by(shuffle_key.asc(), Meme.id.asc())
+        else:
+            statement = statement.order_by(Meme.id.asc())
+        return list(self.session.scalars(statement.offset(offset).limit(limit)).unique())
 
     def list_all_for_export(
         self,

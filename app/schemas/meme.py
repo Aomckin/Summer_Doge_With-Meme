@@ -1,5 +1,6 @@
 # Pydantic Schema 负责 API 边界的数据校验与序列化，不直接执行数据库操作。
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -80,6 +81,16 @@ class MemeResponse(MemeCreate):
     template: TemplateResponse | None = None
     images: list["MemeImageResponse"] = Field(default_factory=list)
     image_count: int = 1
+
+
+class MemePageResponse(BaseModel):
+    items: list[MemeResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    sort: Literal["default", "shuffle"]
+    shuffle_seed: int | None
 
 
 class MemeImageResponse(BaseModel):

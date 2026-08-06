@@ -21,9 +21,11 @@ import type {
   CaptionResponse,
   CaptionRewritePayload,
   CaptionUpdatePayload,
+  ListMemePageOptions,
   ListMemesOptions,
   ListTagsOptions,
   MemeResponse,
+  MemePageResponse,
   MemeUpdatePayload,
   TagResponse,
   TagCleanupResponse,
@@ -210,6 +212,25 @@ export function listTags(options: ListTagsOptions = {}): Promise<TagResponse[]> 
   if (options.sort) params.set("sort", options.sort);
   const suffix = params.size ? `?${params}` : "";
   return requestJson<TagResponse[]>(`/api/tags${suffix}`, {
+    signal: options.signal,
+  });
+}
+
+export function listMemePage(
+  options: ListMemePageOptions,
+): Promise<MemePageResponse> {
+  const params = new URLSearchParams({
+    page: String(options.page),
+    page_size: String(options.pageSize),
+    sort: options.sort,
+  });
+  const query = options.q?.trim();
+  if (query) params.set("q", query);
+  for (const tag of options.tags ?? []) params.append("tags", tag);
+  if (options.sort === "shuffle" && options.shuffleSeed !== null && options.shuffleSeed !== undefined) {
+    params.set("shuffle_seed", String(options.shuffleSeed));
+  }
+  return requestJson<MemePageResponse>(`/api/memes/page?${params}`, {
     signal: options.signal,
   });
 }

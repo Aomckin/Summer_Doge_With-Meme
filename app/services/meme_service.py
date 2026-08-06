@@ -36,6 +36,8 @@ TAGS_NOT_PROVIDED = object()
 MIN_AI_SUGGESTIONS = 2
 MAX_AI_SUGGESTIONS = 8
 PROTECTED_MAINTENANCE_TAG_SOURCES = frozenset({"user", "manual"})
+MEME_PAGE_SIZES = frozenset({24, 48, 96})
+MAX_SHUFFLE_SEED = 2_147_483_646
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,17 @@ class TagMaintenancePlan:
     add_tags: tuple[str, ...]
     remove_tags: tuple[str, ...]
     after: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class MemePage:
+    items: list[Meme]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    sort: str
+    shuffle_seed: int | None
 
 
 class MemeNotFoundError(LookupError):
@@ -317,6 +330,53 @@ class MemeService:
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
         return self.repository.list(offset=offset, limit=limit, tags=tags, q=q)
+
+    def list_meme_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 24,
+        tags: Sequence[str] | None = None,
+        q: str | None = None,
+        sort: str = "default",
+        shuffle_seed: int | None = None,
+    ) -> MemePage:
+        if page < 1:
+            raise ValueError("page must be at least 1")
+        if page_size not in MEME_PAGE_SIZES:
+            raise ValueError("page_size must be one of 24, 48, or 96")
+        if sort not in {"default", "shuffle"}:
+            raise ValueError("sort must be default or shuffle")
+        effective_seed: int | None = None
+        if sort == "shuffle":
+            if shuffle_seed is None:
+                raise ValueError("shuffle_seed is required when sort=shuffle")
+            if not 0 <= shuffle_seed <= MAX_SHUFFLE_SEED:
+                raise ValueError(
+                    f"shuffle_seed must be between 0 and {MAX_SHUFFLE_SEED}"
+                )
+            effective_seed = shuffle_seed
+
+        total = self.repository.count_filtered(tags=tags, q=q)
+        total_pages = (total + page_size - 1) // page_size
+        effective_page = min(page, total_pages) if total_pages else 1
+        items = self.repository.list_page(
+            offset=(effective_page - 1) * page_size,
+            limit=page_size,
+            tags=tags,
+            q=q,
+            sort=sort,
+            shuffle_seed=effective_seed,
+        )
+        return MemePage(
+            items=items,
+            total=total,
+            page=effective_page,
+            page_size=page_size,
+            total_pages=total_pages,
+            sort=sort,
+            shuffle_seed=effective_seed,
+        )
 
     def update_meme(
         self,

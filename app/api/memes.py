@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from pathlib import Path
 
 from fastapi import (
@@ -33,7 +33,7 @@ from app.models.meme import Meme
 from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.schemas.ai_analysis import AIAnalysisConfirm, AIAnalysisResponse
-from app.schemas.meme import ImageOrderRequest, MemeImageResponse, MemeRelationRequest, MemeResponse, MemeUpdate, TagResponse
+from app.schemas.meme import ImageOrderRequest, MemeImageResponse, MemePageResponse, MemeRelationRequest, MemeResponse, MemeUpdate, TagResponse
 from app.schemas.template import TemplateResponse
 from app.services.meme_service import (
     AIAnalysisAlreadyConfirmedError,
@@ -238,6 +238,38 @@ def list_memes(
         _to_meme_response(meme)
         for meme in service.list_memes(offset=offset, limit=limit, tags=tags, q=q)
     ]
+
+
+@router.get("/page", response_model=MemePageResponse)
+def list_meme_page(
+    service: ServiceDependency,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: int = 24,
+    tags: Annotated[list[str] | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    sort: Literal["default", "shuffle"] = "default",
+    shuffle_seed: int | None = None,
+) -> MemePageResponse:
+    try:
+        result = service.list_meme_page(
+            page=page,
+            page_size=page_size,
+            tags=tags,
+            q=q,
+            sort=sort,
+            shuffle_seed=shuffle_seed,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return MemePageResponse(
+        items=[_to_meme_response(meme) for meme in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+        total_pages=result.total_pages,
+        sort=result.sort,
+        shuffle_seed=result.shuffle_seed,
+    )
 
 
 # 固定路径 /random 放在 /{meme_id} 前，避免被当成一个动态 ID。

@@ -380,6 +380,30 @@ export interface ListMemesOptions {
   signal?: AbortSignal;
 }
 
+export type MemeListSort = "default" | "shuffle";
+export type MemeCardSize = "extra-large" | "large" | "medium" | "small";
+export type MemePageSize = 24 | 48 | 96;
+
+export interface MemePageResponse {
+  items: MemeResponse[];
+  total: number;
+  page: number;
+  page_size: MemePageSize;
+  total_pages: number;
+  sort: MemeListSort;
+  shuffle_seed: number | null;
+}
+
+export interface ListMemePageOptions {
+  page: number;
+  pageSize: MemePageSize;
+  q?: string;
+  tags?: string[];
+  sort: MemeListSort;
+  shuffleSeed?: number | null;
+  signal?: AbortSignal;
+}
+
 export interface AppState {
   relatedMemes: MemeResponse[];
   relationQuery: string;
@@ -397,10 +421,15 @@ export interface AppState {
   query: string;
   selectedTags: string[];
   tagsExpanded: boolean;
-  offset: number;
-  hasMore: boolean;
+  page: number;
+  pageSize: MemePageSize;
+  totalMemes: number;
+  totalPages: number;
+  listSort: MemeListSort;
+  shuffleSeed: number | null;
+  cardSize: MemeCardSize;
+  templatePage: number;
   loadingList: boolean;
-  loadingMore: boolean;
   saving: boolean;
   deleting: boolean;
   randomizing: boolean;
@@ -414,7 +443,6 @@ export interface AppState {
   applyAITemplate: boolean;
   aiError: string | null;
   listError: string | null;
-  loadMoreError: string | null;
   actionError: string | null;
   operationError: string | null;
 }

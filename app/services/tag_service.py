@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.models.tag import Tag
 from app.repositories.tag_repository import TagRepository, TagWithUsage
+from app.services.derived_data_invalidation import invalidate_meme_semantic_data
 
 
 class TagNotFoundError(LookupError):
@@ -57,6 +58,7 @@ class TagService:
 
     def rename_tag(self, tag_id: int, name: str) -> TagWithUsage:
         tag = self._get_tag(tag_id)
+        affected = self.repository.meme_ids_for_tag(tag_id)
         normalized = self._normalize_name(name)
         conflict = self.repository.get_by_name(normalized)
         if conflict is not None and conflict.id != tag.id:
@@ -66,6 +68,7 @@ class TagService:
         try:
             updated = self.repository.rename(tag, normalized)
             result = self._with_usage(updated)
+            invalidate_meme_semantic_data(self.session, affected)
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -77,9 +80,14 @@ class TagService:
             raise ValueError("A tag cannot be merged into itself")
         source = self._get_tag(source_tag_id)
         target = self._get_tag(target_tag_id)
+        affected = sorted(
+            set(self.repository.meme_ids_for_tag(source_tag_id))
+            | set(self.repository.meme_ids_for_tag(target_tag_id))
+        )
         try:
             merged = self.repository.merge(source, target)
             result = self._with_usage(merged)
+            invalidate_meme_semantic_data(self.session, affected)
             self.session.commit()
         except Exception:
             self.session.rollback()

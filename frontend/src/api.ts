@@ -33,7 +33,69 @@ import type {
   TemplateResponse,
   TemplateUpdatePayload,
   UploadMemeInput,
+  SemanticSearchInput,
+  SemanticSearchResponse,
+  SemanticIndexStatus,
+  EmbeddingJobScope,
+  EmbeddingJobResponse,
+  EmbeddingJobItemPage,
+  ScoredMemeResponse,
+  MemeEmbeddingStatus,
 } from "./types";
+
+export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSearchResponse> {
+  return requestJson<SemanticSearchResponse>("/api/semantic-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: input.query,
+      tags: normalizeTags(input.tags),
+      page: input.page,
+      page_size: input.page_size,
+    }),
+    signal: input.signal,
+  });
+}
+
+export function getSemanticIndexStatus(): Promise<SemanticIndexStatus> {
+  return requestJson<SemanticIndexStatus>("/api/semantic-index/status");
+}
+
+export function createEmbeddingJob(scope: EmbeddingJobScope, maxWorkers: number): Promise<EmbeddingJobResponse> {
+  return requestJson<EmbeddingJobResponse>("/api/embedding-jobs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, max_workers: maxWorkers }),
+  });
+}
+
+export function getEmbeddingJob(id: number): Promise<EmbeddingJobResponse> {
+  return requestJson<EmbeddingJobResponse>(`/api/embedding-jobs/${id}`);
+}
+
+export function listEmbeddingJobItems(id: number, offset = 0, limit = 50, status = "failed"): Promise<EmbeddingJobItemPage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit), status });
+  return requestJson<EmbeddingJobItemPage>(`/api/embedding-jobs/${id}/items?${params}`);
+}
+
+export function cancelEmbeddingJob(id: number): Promise<EmbeddingJobResponse> {
+  return requestJson<EmbeddingJobResponse>(`/api/embedding-jobs/${id}/cancel`, { method: "POST" });
+}
+
+export function retryFailedEmbeddingJob(id: number): Promise<EmbeddingJobResponse> {
+  return requestJson<EmbeddingJobResponse>(`/api/embedding-jobs/${id}/retry-failed`, { method: "POST" });
+}
+
+export async function deleteEmbeddingJob(id: number): Promise<void> {
+  await requestJson<void>(`/api/embedding-jobs/${id}`, { method: "DELETE" });
+}
+
+export function listSimilarMemes(id: number, limit = 12, signal?: AbortSignal): Promise<{ items: ScoredMemeResponse[] }> {
+  return requestJson<{ items: ScoredMemeResponse[] }>(`/api/memes/${id}/similar?limit=${limit}`, { signal });
+}
+
+export function rebuildMemeEmbedding(id: number): Promise<MemeEmbeddingStatus> {
+  return requestJson<MemeEmbeddingStatus>(`/api/memes/${id}/embedding/rebuild`, { method: "POST" });
+}
 
 export async function createImportJob(
   input: CreateImportJobInput,

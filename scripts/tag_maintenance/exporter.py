@@ -3,7 +3,8 @@ import json
 from pathlib import Path
 
 from app.config import DATABASE_PATH
-from app.services.meme_service import MemeService
+from app.repositories.meme_repository import MemeRepository
+from app.repositories.tag_repository import TagRepository
 
 from .database import close_session, make_session
 from .schemas import TagCandidate
@@ -40,8 +41,7 @@ def export_batch(
 
     session = make_session(database_path)
     try:
-        service = MemeService(session)
-        memes = service.list_memes(
+        memes = MemeRepository(session).list(
             offset=(batch_number - 1) * batch_size,
             limit=batch_size,
         )
@@ -109,7 +109,7 @@ def export_batch(
                 "category": tag.category,
                 "description": tag.description,
             }
-            for tag in service.list_tags()
+            for tag in TagRepository(session).list()
         ]
         _json_dump(batch_dir / "manifest.json", manifest)
         _json_dump(batch_dir / "tags.json", tags)

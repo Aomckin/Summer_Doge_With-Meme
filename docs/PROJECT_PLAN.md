@@ -384,12 +384,28 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：主资料库不会在浏览器加载完整数据后分页；同一筛选与 seed 的跨页顺序稳定；批量下载仍提交完整 query/tags 筛选而非当前页 ID；TypeScript、Vitest、生产构建和 Pytest 全量验证通过。
 
-### v0.6：语义搜索
+### v0.6：多模态语义索引、自然语言搜索与相似 Meme（已完成）
 
-- [ ] 为 Meme 描述生成向量
-- [ ] 根据自然语言搜索 Meme
-- [ ] 实现相似 Meme 推荐和场景匹配
-- [ ] 评估向量数据库或本地向量存储方案
+- [x] 新增 `MemeEmbedding`，使用 SQLite 小端 Float32 BLOB 保存归一化的 1024 维融合向量；模板参考图 JSON 向量保持不变。
+- [x] 集中构建标题、描述、标签、模板和前 5 张有序图片的固定文档内容与稳定 `source_hash`，完成 EXIF、GIF 首帧、透明通道和 1024 最大边预处理。
+- [x] 扩展 DashScope 客户端的 `embed_fused()`、usage/request_id 解析、429/5xx/网络/超时重试和 Provider 能力验证，仅支持 `qwen3-vl-embedding` fusion。
+- [x] 新增持久化 `EmbeddingJob`/`EmbeddingJobItem`、任务快照、1～8 外部工作线程、单协调线程顺序 SQLite 写入、取消、失败重试和启动中断恢复。
+- [x] 新增惰性进程内 NumPy 矩阵索引、generation 失效、10 分钟/50 项查询 LRU、自然语言搜索、标签 AND 过滤、正式分页与相似 Meme API。
+- [x] 标题、描述、标签、模板和图片业务变更在原事务中标记已有向量 `stale`；普通保存、上传和导入不调用 Provider。
+- [x] 前端新增关键词/语义模式、显式提交、score 展示、索引管理器和独立的语义相似 Meme 详情区域；旧响应由 AbortController/请求身份保护。
+- [x] 完成向量、内容哈希、融合客户端、任务协调、失效、搜索缓存、相似推荐和前端交互测试，并更新 README、代码现状和版本。
+
+验收：向量只保存在本地 SQLite，搜索只使用当前激活模型兼容的 ready 向量并由本地 NumPy 排序；翻页不重复调用 Provider；索引任务不并发写 SQLite且不会在启动时自动恢复消费；关键词分页、稳定乱序、上传、下载、标签、模板和 AI 全量回归继续通过。聊天记录解析保留给 v0.6.1。
+
+### v0.6-R：语义模块解耦（已完成）
+
+- [x] 基础 Meme、Tag、Template 服务通过轻量失效接口在原事务内更新 stale 与数据库 generation，不再导入语义索引、NumPy 或 Embedding Provider。
+- [x] 删除全局 SemanticIndex 通知注册表；语义索引查询时比较数据库 generation 并惰性重载。
+- [x] 由 `app.models` 统一注册 ORM 模型，删除无消费者的 `Meme.embedding` 与 `MemeEmbedding.model_record` relationship，同时保留数据库外键。
+- [x] 拆分 Meme 向量与 Embedding Job Repository，单项和批量重建共用 `MemeEmbeddingService`。
+- [x] 提取公开 Meme Response mapper，恢复 Luna 标签维护的独立轻量导入链，并增加实际 import、mapper、generation 与工作流架构回归测试。
+
+验收：本轮只调整依赖方向和内部职责，不改变 API、向量格式、索引算法、搜索排序或前端行为；v0.6.1 未开始。
 
 ### v0.6.1：聊天场景推荐 Meme
 
@@ -456,7 +472,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.5.6 资料库分页、展示密度与稳定乱序浏览已完成
+当前状态：v0.6 多模态语义索引、自然语言搜索与相似 Meme，以及 v0.6-R 语义模块解耦已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -465,5 +481,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图组级分析 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：v0.6——语义搜索与向量化（本阶段未开始）
+下一步：v0.6.1——聊天场景推荐 Meme（本阶段未开始）
 ```

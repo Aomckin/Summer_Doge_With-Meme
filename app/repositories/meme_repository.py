@@ -207,4 +207,9 @@ class MemeRepository:
             .where(Meme.template_id == template_id)
             .values(template_id=None)
         )
+
+    def meme_ids_for_template(self, template_id: int) -> list[int]:
+        return list(self.session.scalars(
+            select(Meme.id).where(Meme.template_id == template_id)
+        ))
         self.session.flush()

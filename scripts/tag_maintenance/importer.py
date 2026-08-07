@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from app.config import DATABASE_PATH
-from app.services.meme_service import MemeService, TagMaintenancePlan
+from app.services.tag_maintenance_service import TagMaintenancePlan, TagMaintenanceService
 
 from .database import backup_sqlite_database, close_session, make_session
 from .schemas import TagCandidate
@@ -68,9 +68,9 @@ def import_candidates(
     session = make_session(database_path)
     backup_path: Path | None = None
     try:
-        service = MemeService(session)
+        service = TagMaintenanceService(session)
         plans = [
-            service.plan_tag_maintenance(
+            service.plan(
                 candidate.meme_id,
                 add_tags=candidate.add_tags,
                 remove_tags=candidate.remove_tags,
@@ -96,7 +96,7 @@ def import_candidates(
                 if not plan.add_tags and not plan.remove_tags:
                     continue
                 if apply:
-                    plan = service.apply_tag_maintenance(
+                    plan = service.apply(
                         candidate.meme_id,
                         add_tags=candidate.add_tags,
                         remove_tags=candidate.remove_tags,

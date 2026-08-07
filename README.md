@@ -1,8 +1,8 @@
-# Meme Vault v0.5.6
+# Meme Vault v0.6
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.5.6，除图片上传、元数据管理、关键词检索、标签筛选和随机 Meme 外，还提供正式分页、稳定乱序浏览、标签使用统计、重命名、合并与空标签清理、标签芯片输入、单图/复合 Meme 原图下载、持久化批量 ZIP 导出、普通串行批量上传、持久化 ZIP 批量导入、有序多图 Meme、手动直接关联、模板参考图与视觉匹配、需要用户确认的 AI 图片组标题/描述/标签/已有模板建议、网页内模型管理、Meme 详情页文案实验室、Codex Luna 离线标签维护，以及响应式瀑布流画廊。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6，在 v0.5.6 正式分页、稳定乱序和展示密度的基础上，新增多模态融合向量、自然语言语义搜索、标签 AND 组合筛选、相似 Meme 推荐和持久化索引任务。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -199,11 +199,25 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 后端会优先提供已有标签给模型，并再次规范化输出：每次返回 2 至 8 个不重复标签。标签默认使用简体中文；常用外语专用表达、固定外语梗名，或使用外语才能更准确表达 Meme 含义时，会保留原外语标签。超时返回 504，未配置密钥返回 503，上游或响应格式错误返回 502。
 
+## 语义索引、自然语言搜索与相似 Meme
+
+先在“API 设置”中启用 DashScope `qwen3-vl-embedding`，勾选“支持图像与语义向量”，并将它设为当前向量模型。顶部“语义索引”打开独立管理器，可建立缺失与过期索引、重建全部索引、重试失败项、取消运行任务、查看失败明细和 Token 统计。任务关闭弹窗后继续运行，应用重启只会把残留运行任务标记为 `interrupted`，不会自动继续产生调用费用。
+
+每个 Meme 的文档向量融合标题、描述、规范化标签、模板名称以及按 `position` 排序的图片。一次请求最多使用前 5 张图片；图片总数大于 5 时，索引记录同时保存实际参与数量与完整数量。图片优先读取缩略图，缺失时回退原图；处理 EXIF 方向，GIF 只取首帧，最大边缩至 1024，透明内容用 PNG，其余用 JPEG。不会在磁盘生成新的永久图片。
+
+融合向量会先校验为 1024 维有限数值，再归一化并保存为连续小端 Float32 BLOB。向量与索引任务均保存在本地 SQLite，不保存大规模 JSON 向量；搜索时才由 NumPy 惰性加载当前模型的兼容 `ready` 向量到进程内只读矩阵，并用矩阵乘法计算余弦相似度。模板参考图原有 JSON 向量保持不变。
+
+主搜索框可切换“关键词/语义”。关键词模式维持 300ms 防抖、稳定乱序和原有分页；语义模式只有按 Enter 或点击“语义搜索”才调用 Provider 生成查询向量，输入过程不产生费用。语义搜索可与当前标签做多标签 AND 筛选，支持 24/48/96 分页，卡片显示余弦 score（不是概率或准确率）。同一查询翻页会复用 10 分钟、最多 50 项的进程内 LRU 结果缓存；索引 generation 改变后旧结果自然失效。
+
+以下操作会把已有向量标记为过期：修改标题、描述、标签或模板归属；追加、删除或排序图片；标签重命名或合并；模板重命名或删除。修改 `source`、Caption、直接关联、模板参考图、下载/导出以及未确认的 AI 分析不会使向量过期。普通保存事务只标记 `stale`，不会同步等待外部 API；请在索引管理器中重建或重试。新上传和 ZIP 导入的 Meme 没有向量记录，显示为待建立。
+
+详情页“语义相似 Meme”与人工“直接关联 Meme”明确分开。相似推荐只比较已经保存的同模型、同维度融合向量，不调用 Provider；当前 Meme 未索引时由用户显式点击“为此 Meme 建立索引”，不会自动产生费用。
+
 ## 数据库配置
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
 
-应用启动时会自动创建当前版本所需的数据表，包括 `memes`、`meme_images`、`meme_relations`、`captions`、`templates`、`tags`、`meme_tags`、`meme_ai_analyses`、`ai_providers`、`ai_models`、`import_jobs`、`import_job_items`、`export_jobs` 和 `export_job_items`。
+应用启动时会自动创建当前版本所需的数据表，包括原有业务表以及 `meme_embeddings`、`embedding_jobs` 和 `embedding_job_items`。升级只通过 `Base.metadata.create_all()` 增加缺失结构，不删除或重建已有表，不迁移模板 JSON 向量，也不会自动调用 Provider 生成真实业务向量。
 
 从旧 SQLite 数据库启动时，基础设施层会幂等补齐历史版本字段，并为每条尚无 `meme_images` 记录的旧 Meme 回填一张 position=0 的首图。迁移只复制已有图片元数据，不移动或重写磁盘文件；重复启动不会重复回填，也不会删除或重建已有表。非 SQLite 数据库不会执行这些 SQLite 专用 SQL。
 
@@ -265,6 +279,15 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 - `PATCH/DELETE /api/memes/{meme_id}/captions/{caption_id}`：编辑或删除属于当前 Meme 的文案。
 - `POST /api/memes/{meme_id}/captions/generate`：基于完整图片组和可选元数据生成临时候选，不写数据库。
 - `POST /api/memes/{meme_id}/captions/rewrite`：润色、缩短、扩写或换语气，不写数据库。
+
+语义相关 API：
+
+- `GET /api/semantic-index/status`：返回总数、ready/missing/stale/failed/incompatible 统计、当前模型和运行任务摘要。
+- `POST /api/embedding-jobs`、`GET /api/embedding-jobs/{id}`、`GET /api/embedding-jobs/{id}/items`：创建持久化索引任务并读取进度/明细。
+- `POST /api/embedding-jobs/{id}/cancel`、`POST /api/embedding-jobs/{id}/retry-failed`、`DELETE /api/embedding-jobs/{id}`：取消、重试失败项或只删除任务记录。
+- `POST /api/memes/{id}/embedding/rebuild`：只为单个 Meme 同步重建向量。
+- `POST /api/semantic-search`：自然语言查询、标签 AND 筛选和 24/48/96 正式分页。
+- `GET /api/memes/{id}/similar?limit=12`：完全使用本地已保存向量返回相似 Meme。
 
 ## ZIP 导入的事务与清理
 

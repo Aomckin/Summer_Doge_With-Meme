@@ -59,6 +59,25 @@ describe("TagEditor", () => {
     expect(document.body.textContent).toContain("蓝色调");
   });
 
+  it("keeps the input mounted while a Chinese IME is composing", () => {
+    const { editor } = create();
+    addButton().click();
+    const input = currentInput();
+    input.value = "mao";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", bubbles: true, isComposing: true,
+    }));
+
+    expect(currentInput()).toBe(input);
+    expect(editor.getTags()).toEqual([]);
+
+    input.value = "猫";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    currentInput().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(editor.getTags()).toEqual(["猫"]);
+  });
+
   it("cancels with Escape and does not create blank tags on blur", () => {
     const { editor } = create();
     addButton().click();

@@ -41,6 +41,10 @@ import {
   createExportJob, getExportJob, listExportJobItems, cancelExportJob, deleteExportJob,
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
+  semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
+  listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
+  deleteEmbeddingJob,
 } from "./api";
 import type {
   AIAnalysisConfirmPayload,
@@ -62,6 +66,9 @@ import type {
   UploadMemeInput,
   CreateImportJobInput, ImportJobItemPage, ImportJobResponse,
   CreateExportJobInput, ExportJobItemPage, ExportJobResponse,
+  SemanticSearchInput, SemanticSearchResponse, ScoredMemeResponse,
+  SemanticIndexStatus, EmbeddingJobScope, EmbeddingJobResponse,
+  EmbeddingJobItemPage, MemeEmbeddingStatus,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -96,6 +103,7 @@ import {
   renderToolbar,
 } from "./ui";
 import { clampPage } from "./pagination";
+import { SemanticIndexManager } from "./semantic-index-manager";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -168,6 +176,16 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   listMemeRelations(id: number): Promise<MemeResponse[]>;
   addMemeRelations(id: number, ids: number[]): Promise<MemeResponse[]>;
   deleteMemeRelation(id: number, relatedId: number): Promise<void>;
+  semanticSearch?(input: SemanticSearchInput): Promise<SemanticSearchResponse>;
+  listSimilarMemes?(id: number, limit?: number, signal?: AbortSignal): Promise<{ items: ScoredMemeResponse[] }>;
+  rebuildMemeEmbedding?(id: number): Promise<MemeEmbeddingStatus>;
+  getSemanticIndexStatus?(): Promise<SemanticIndexStatus>;
+  createEmbeddingJob?(scope: EmbeddingJobScope, maxWorkers: number): Promise<EmbeddingJobResponse>;
+  getEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  listEmbeddingJobItems?(id: number, offset?: number, limit?: number, status?: string): Promise<EmbeddingJobItemPage>;
+  cancelEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  retryFailedEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  deleteEmbeddingJob?(id: number): Promise<void>;
   analyzeMeme(id: number): Promise<AIAnalysisResponse>;
   confirmAIAnalysis(
     memeId: number,
@@ -205,6 +223,10 @@ const defaultApi: MemeApi = {
   rewriteCaption,
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
+  semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
+  listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
+  deleteEmbeddingJob,
   analyzeMeme,
   confirmAIAnalysis,
   listAIProviderPresets,
@@ -222,6 +244,14 @@ const defaultApi: MemeApi = {
 
 function initialState(): AppState {
   return {
+    searchMode: "keyword",
+    semanticSubmittedQuery: "",
+    semanticScores: {},
+    similarMemes: [],
+    similarLoading: false,
+    similarError: null,
+    similarExpanded: false,
+    rebuildingEmbedding: false,
     relatedMemes: [],
     relationQuery: "",
     selectedRelationIds: [],
@@ -307,14 +337,34 @@ export class MemeVaultApp {
   private readonly batchDownload: BatchDownloadController;
   private readonly captionLab: CaptionLabController;
   private readonly tagManager: TagManagerController;
+  private readonly semanticIndexManager: SemanticIndexManager;
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
+  private similarController: AbortController | null = null;
 
   constructor(
     root: HTMLElement,
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    this.semanticIndexManager = new SemanticIndexManager(
+      this.elements.openSemanticIndexButton,
+      {
+        getStatus: () => this.api.getSemanticIndexStatus
+          ? this.api.getSemanticIndexStatus()
+          : Promise.resolve({
+              total_memes: 0, ready_count: 0, missing_count: 0, stale_count: 0,
+              failed_count: 0, incompatible_count: 0, active_model_id: null,
+              dimension: 1024, running_job: null,
+            }),
+        createJob: (scope, maxWorkers) => (this.api.createEmbeddingJob ?? createEmbeddingJob)(scope, maxWorkers),
+        getJob: id => (this.api.getEmbeddingJob ?? getEmbeddingJob)(id),
+        listItems: (id, offset, limit, status) => (this.api.listEmbeddingJobItems ?? listEmbeddingJobItems)(id, offset, limit, status),
+        cancelJob: id => (this.api.cancelEmbeddingJob ?? cancelEmbeddingJob)(id),
+        retryFailed: id => (this.api.retryFailedEmbeddingJob ?? retryFailedEmbeddingJob)(id),
+        deleteJob: id => (this.api.deleteEmbeddingJob ?? deleteEmbeddingJob)(id),
+      },
+    );
     this.settings = new AISettingsController(this.elements, this.api);
     this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
     this.batchUpload = new BatchUploadController({
@@ -331,6 +381,7 @@ export class MemeVaultApp {
           this.reloadMemes(),
           this.refreshTags(),
           this.refreshTemplates(),
+          this.semanticIndexManager.refresh(),
         ]);
       },
     });
@@ -342,7 +393,10 @@ export class MemeVaultApp {
       deleteExportJob: id => this.api.deleteExportJob(id),
     });
     this.tagManager = new TagManagerController(this.api, {
-      onMutation: (mutation) => this.applyTagMutation(mutation),
+      onMutation: (mutation) => {
+        this.applyTagMutation(mutation);
+        void this.semanticIndexManager.refresh();
+      },
       onFilterTag: async (name) => {
         this.state.selectedTags = [name];
         this.state.page = 1;
@@ -364,6 +418,18 @@ export class MemeVaultApp {
 
   private bindEvents(): void {
     this.elements.searchInput.addEventListener("input", () => {
+      if (this.state.searchMode === "semantic") {
+        if (!this.elements.searchInput.value.trim()) {
+          this.state.semanticSubmittedQuery = "";
+          this.state.semanticScores = {};
+          this.state.memes = [];
+          this.state.totalMemes = 0;
+          this.state.totalPages = 0;
+          this.state.page = 1;
+          renderLibrary(this.elements, this.state);
+        }
+        return;
+      }
       if (this.searchTimer) {
         clearTimeout(this.searchTimer);
       }
@@ -372,6 +438,32 @@ export class MemeVaultApp {
         this.state.page = 1;
         void this.reloadMemes();
       }, 300);
+    });
+
+    this.elements.searchMode.addEventListener("change", () => {
+      this.state.searchMode = this.elements.searchMode.value === "semantic" ? "semantic" : "keyword";
+      this.state.page = 1;
+      this.listController?.abort();
+      if (this.state.searchMode === "semantic") {
+        this.state.semanticSubmittedQuery = "";
+        this.state.semanticScores = {};
+        this.state.memes = [];
+        this.state.totalMemes = 0;
+        this.state.totalPages = 0;
+        renderLibrary(this.elements, this.state);
+      } else {
+        this.state.query = this.elements.searchInput.value.trim();
+        void this.reloadMemes();
+      }
+    });
+    this.elements.searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && this.state.searchMode === "semantic") {
+        event.preventDefault();
+        void this.submitSemanticSearch();
+      }
+    });
+    this.elements.semanticSearchButton.addEventListener("click", () => {
+      void this.submitSemanticSearch();
     });
 
     this.elements.tagFilters.addEventListener("click", (event) => {
@@ -562,6 +654,15 @@ export class MemeVaultApp {
         const id = Number(target.closest<HTMLElement>("[data-related-meme]")?.dataset.relatedMeme);
         const meme = this.state.relatedMemes.find((item) => item.id === id);
         if (meme) this.selectMeme(meme);
+      } else if (target.closest("[data-similar-meme]")) {
+        const id = Number(target.closest<HTMLElement>("[data-similar-meme]")?.dataset.similarMeme);
+        const meme = this.state.similarMemes.find(item => item.meme.id === id)?.meme;
+        if (meme) this.selectMeme(meme);
+      } else if (target.closest("[data-toggle-similar]")) {
+        this.state.similarExpanded = !this.state.similarExpanded;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      } else if (target.closest("[data-rebuild-embedding]")) {
+        void this.rebuildSelectedEmbedding();
       } else if (target.closest("[data-remove-relation]")) {
         const id = Number(target.closest<HTMLElement>("[data-remove-relation]")?.dataset.removeRelation);
         void this.removeRelation(id);
@@ -850,6 +951,7 @@ export class MemeVaultApp {
       this.templateEditingId = null;
       this.clearTemplateReferenceInput();
       await this.refreshTemplates();
+      await this.semanticIndexManager.refresh();
       if (creating) {
         this.state.templatePage = Math.max(
           1,
@@ -934,6 +1036,7 @@ export class MemeVaultApp {
     );
     try {
       await this.api.deleteTemplate(templateId);
+      await this.semanticIndexManager.refresh();
       this.state.availableTemplates = this.state.availableTemplates.filter(
         (item) => item.id !== templateId,
       );
@@ -978,6 +1081,15 @@ export class MemeVaultApp {
   }
 
   private async reloadMemes(scrollAfter = false): Promise<void> {
+    if (this.state.searchMode === "semantic" && !this.state.semanticSubmittedQuery) {
+      this.state.memes = [];
+      this.state.semanticScores = {};
+      this.state.totalMemes = 0;
+      this.state.totalPages = 0;
+      this.state.loadingList = false;
+      renderLibrary(this.elements, this.state);
+      return;
+    }
     this.listController?.abort();
     const controller = new AbortController();
     this.listController = controller;
@@ -987,25 +1099,43 @@ export class MemeVaultApp {
     renderLibrary(this.elements, this.state);
 
     try {
-      const response = await this.api.listMemePage({
-        page: this.state.page,
-        pageSize: this.state.pageSize,
-        q: this.state.query,
-        tags: this.state.selectedTags,
-        sort: this.state.listSort,
-        shuffleSeed: this.state.shuffleSeed,
-        signal: controller.signal,
-      });
+      const response = this.state.searchMode === "semantic"
+        ? await (this.api.semanticSearch ?? semanticSearch)({
+            query: this.state.semanticSubmittedQuery,
+            tags: this.state.selectedTags,
+            page: this.state.page,
+            page_size: this.state.pageSize,
+            signal: controller.signal,
+          })
+        : await this.api.listMemePage({
+            page: this.state.page,
+            pageSize: this.state.pageSize,
+            q: this.state.query,
+            tags: this.state.selectedTags,
+            sort: this.state.listSort,
+            shuffleSeed: this.state.shuffleSeed,
+            signal: controller.signal,
+          });
       if (this.listController !== controller) {
         return;
       }
-      this.state.memes = response.items;
+      if (this.state.searchMode === "semantic") {
+        const semantic = response as SemanticSearchResponse;
+        this.state.memes = semantic.items.map(item => item.meme);
+        this.state.semanticScores = Object.fromEntries(
+          semantic.items.map(item => [item.meme.id, item.score]),
+        );
+      } else {
+        const keyword = response as MemePageResponse;
+        this.state.memes = keyword.items;
+        this.state.semanticScores = {};
+        this.state.listSort = keyword.sort;
+        this.state.shuffleSeed = keyword.shuffle_seed;
+      }
       this.state.totalMemes = response.total;
       this.state.totalPages = response.total_pages;
       this.state.page = response.page;
       this.state.pageSize = response.page_size;
-      this.state.listSort = response.sort;
-      this.state.shuffleSeed = response.shuffle_seed;
       if (scrollAfter) {
         this.elements.libraryHeading.scrollIntoView?.({ behavior: "smooth", block: "start" });
       }
@@ -1020,6 +1150,22 @@ export class MemeVaultApp {
         renderLibrary(this.elements, this.state);
       }
     }
+  }
+
+  private async submitSemanticSearch(): Promise<void> {
+    const query = this.elements.searchInput.value.trim();
+    if (!query) {
+      this.state.semanticSubmittedQuery = "";
+      this.state.memes = [];
+      this.state.semanticScores = {};
+      this.state.totalMemes = 0;
+      this.state.totalPages = 0;
+      renderLibrary(this.elements, this.state);
+      return;
+    }
+    this.state.semanticSubmittedQuery = query;
+    this.state.page = 1;
+    await this.reloadMemes();
   }
 
   private async goToPage(page: number): Promise<void> {
@@ -1061,6 +1207,12 @@ export class MemeVaultApp {
     this.state.relationError = null;
     this.state.relationsLoading = true;
     this.state.relationRemovingId = null;
+    this.similarController?.abort();
+    this.state.similarMemes = [];
+    this.state.similarLoading = true;
+    this.state.similarError = null;
+    this.state.similarExpanded = false;
+    this.state.rebuildingEmbedding = false;
     this.relationRemovalToken = null;
     this.editing = false;
     this.editDraft = null;
@@ -1069,6 +1221,54 @@ export class MemeVaultApp {
     renderLibrary(this.elements, this.state);
     renderDetail(this.elements, this.state, false, null);
     void this.loadRelations(meme.id);
+    void this.loadSimilarMemes(meme.id);
+  }
+
+  private async loadSimilarMemes(memeId: number): Promise<void> {
+    if (!this.api.listSimilarMemes) {
+      this.state.similarLoading = false;
+      this.state.similarError = "尚未建立语义索引";
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      return;
+    }
+    this.similarController?.abort();
+    const controller = new AbortController();
+    this.similarController = controller;
+    try {
+      const response = await this.api.listSimilarMemes(memeId, 12, controller.signal);
+      if (controller.signal.aborted || this.state.selectedMeme?.id !== memeId) return;
+      this.state.similarMemes = response.items;
+      this.state.similarError = null;
+    } catch (error) {
+      if (controller.signal.aborted || this.state.selectedMeme?.id !== memeId) return;
+      this.state.similarMemes = [];
+      this.state.similarError = error instanceof ApiError && error.status === 409
+        ? "尚未建立语义索引"
+        : readableError(error);
+    } finally {
+      if (this.similarController === controller && this.state.selectedMeme?.id === memeId) {
+        this.state.similarLoading = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
+  }
+
+  private async rebuildSelectedEmbedding(): Promise<void> {
+    const memeId = this.state.selectedMeme?.id;
+    if (!memeId || this.state.rebuildingEmbedding) return;
+    this.state.rebuildingEmbedding = true;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      await (this.api.rebuildMemeEmbedding ?? rebuildMemeEmbedding)(memeId);
+      if (this.state.selectedMeme?.id === memeId) await this.loadSimilarMemes(memeId);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === memeId) this.state.similarError = readableError(error);
+    } finally {
+      if (this.state.selectedMeme?.id === memeId) {
+        this.state.rebuildingEmbedding = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
   }
 
   private clearImageDragState(): void {
@@ -1090,6 +1290,7 @@ export class MemeVaultApp {
     renderDetail(this.elements, this.state, this.editing, this.editDraft);
     try {
       const updated = await this.api.appendMemeImage(meme.id, file);
+      await this.semanticIndexManager.refresh();
       this.replaceMeme(updated);
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
@@ -1112,6 +1313,7 @@ export class MemeVaultApp {
     renderDetail(this.elements, this.state, this.editing, this.editDraft);
     try {
       const updated = await this.api.deleteMemeImage(meme.id, imageId);
+      await this.semanticIndexManager.refresh();
       this.replaceMeme(updated);
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
@@ -1134,6 +1336,7 @@ export class MemeVaultApp {
     renderDetail(this.elements, this.state, this.editing, this.editDraft);
     try {
       const updated = await this.api.reorderMemeImages(meme.id, imageIds);
+      await this.semanticIndexManager.refresh();
       this.replaceMeme(updated);
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
@@ -1355,6 +1558,7 @@ export class MemeVaultApp {
       const submittedTags = [...this.editDraft.tags].sort();
       const tagsChanged = previousTags.join("\0") !== submittedTags.join("\0");
       const updated = await this.api.updateMeme(targetId, payload);
+      await this.semanticIndexManager.refresh();
       this.replaceMeme(updated);
       renderMemeCard(
         this.elements,
@@ -1562,6 +1766,7 @@ export class MemeVaultApp {
           apply_template: this.state.applyAITemplate,
         },
       );
+      await this.semanticIndexManager.refresh();
       if (this.state.selectedMeme?.id !== meme.id) {
         return;
       }
@@ -1610,6 +1815,7 @@ export class MemeVaultApp {
     try {
       const targetId = meme.id;
       await this.api.deleteMeme(targetId);
+      await this.semanticIndexManager.refresh();
       if (this.state.selectedMeme?.id === targetId) {
         this.captionLab.clear();
         this.state.selectedMeme = null;

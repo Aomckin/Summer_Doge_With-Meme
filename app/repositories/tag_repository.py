@@ -62,6 +62,11 @@ class TagRepository:
             return None
         return self.session.scalar(select(Tag).where(Tag.name == normalized))
 
+    def meme_ids_for_tag(self, tag_id: int) -> list[int]:
+        return list(self.session.scalars(
+            select(MemeTag.meme_id).where(MemeTag.tag_id == tag_id)
+        ))
+
     def replace_meme_tags(
         self,
         meme: Meme,

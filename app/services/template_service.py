@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -7,8 +10,11 @@ from app.repositories.meme_repository import MemeRepository
 from app.models.template import Template
 from app.repositories.template_repository import TemplateRepository
 from app.storage.template_image_storage import TemplateImageStorage
-from app.ai.embedding_client import ImageEmbeddingClient
 import json
+from app.services.derived_data_invalidation import invalidate_meme_semantic_data
+
+if TYPE_CHECKING:
+    from app.ai.embedding_client import ImageEmbeddingClient
 
 
 class TemplateNotFoundError(LookupError):
@@ -164,8 +170,15 @@ class TemplateService:
             data["name"] = name
         if "description" in data:
             data["description"] = self._normalize_description(data["description"])
+        name_changed = "name" in data and data["name"] != template.name
+        affected = (
+            self.meme_repository.meme_ids_for_template(template_id)
+            if name_changed
+            else []
+        )
         try:
             updated = self.repository.update(template, data)
+            invalidate_meme_semantic_data(self.session, affected)
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -174,10 +187,12 @@ class TemplateService:
 
     def delete_template(self, template_id: int) -> None:
         template = self.get_template(template_id)
+        affected = self.meme_repository.meme_ids_for_template(template_id)
         old = (template.reference_stored_filename, template.reference_thumbnail_filename)
         try:
             self.meme_repository.clear_template_references(template_id)
             self.ai_analysis_repository.clear_template_references(template_id)
+            invalidate_meme_semantic_data(self.session, affected)
             self.repository.delete(template)
             self.session.commit()
         except Exception:

@@ -401,6 +401,75 @@ textarea:focus-visible {
   padding: clamp(20px, 2.5vw, 32px);
 }
 
+#search-mode {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+  padding: 0 10px;
+}
+
+.semantic-score {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.semantic-similar {
+  border-top-style: dashed;
+}
+
+.semantic-similar-target {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.semantic-similar-target small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.semantic-index-shell {
+  max-width: 880px;
+}
+
+.index-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.index-stats > div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.index-stats span,
+.index-stats strong {
+  display: block;
+}
+
+.index-stats span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.index-actions,
+.index-job,
+.index-failures {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.index-job progress {
+  width: 100%;
+}
+
 .browsing-controls {
   display: flex;
   align-items: center;
@@ -1667,6 +1736,13 @@ label small {
     radial-gradient(circle at 85% -20%, rgb(230 255 74 / 10%), transparent 30rem),
     #0c0f15;
   box-shadow: 0 34px 110px rgb(0 0 0 / 70%);
+}
+
+.settings-shell.semantic-index-shell {
+  grid-template-rows: auto;
+  overflow-y: auto;
+  height: auto;
+  max-height: min(92vh, 920px);
 }
 
 .settings-header,

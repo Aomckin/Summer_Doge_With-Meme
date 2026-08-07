@@ -43,16 +43,7 @@ class Base(DeclarativeBase):
 def create_tables() -> None:
     # 必须先导入模型，SQLAlchemy 才会把这些类登记到 Base.metadata。
     # noqa 告诉代码检查器：这些导入虽然没有直接调用，但绝不是多余的。
-    from app.models import ai_analysis  # noqa: F401
-    from app.models import ai_settings  # noqa: F401
-    from app.models import caption  # noqa: F401
-    from app.models import meme  # noqa: F401
-    from app.models import meme_image  # noqa: F401
-    from app.models import meme_relation  # noqa: F401
-    from app.models import import_job  # noqa: F401
-    from app.models import export_job  # noqa: F401
-    from app.models import tag  # noqa: F401
-    from app.models import template  # noqa: F401
+    import app.models  # noqa: F401
 
     # create_all 只创建不存在的表，不会删除现有表或数据。
     Base.metadata.create_all(bind=engine)

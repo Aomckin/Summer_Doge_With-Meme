@@ -15,7 +15,11 @@ from app.ai.client import (
     OpenAICompatibleChatClient,
     OpenAIResponsesClient,
 )
-from app.ai.embedding_client import DashScopeEmbeddingClient, ImageEmbeddingClient
+from app.ai.embedding_client import (
+    DashScopeEmbeddingClient,
+    ImageEmbeddingClient,
+    MultimodalEmbeddingClient,
+)
 from app.ai.presets import PROVIDER_PRESETS, get_preset
 from app.ai.secrets import APIKeyCipher
 from app.models.ai_settings import AIModel, AIProvider
@@ -249,6 +253,39 @@ class AISettingsService:
             model=model.model_id,
             base_url=provider.base_url,
             timeout_seconds=provider.timeout_seconds,
+            max_retries=provider.max_retries,
+            retry_delay_seconds=provider.retry_delay_seconds,
+            http_client=self.http_client,
+        )
+
+    def build_active_multimodal_embedding_client(
+        self,
+    ) -> MultimodalEmbeddingClient:
+        model = self.repository.active_embedding_model()
+        if model is None:
+            raise AIConfigurationError("Semantic embedding model is not configured")
+        provider = model.provider
+        if not provider.enabled or not model.enabled:
+            raise AIConfigurationError("Semantic embedding provider and model must be enabled")
+        if not model.supports_image_embedding:
+            raise AIConfigurationError("The active model does not support image and semantic embeddings")
+        if not provider.api_key_ciphertext:
+            raise AIConfigurationError(f"Provider {provider.name} has no API Key")
+        if provider.protocol != "dashscope_multimodal_embedding":
+            raise AIConfigurationError(
+                "Semantic indexing requires dashscope_multimodal_embedding"
+            )
+        if model.model_id != "qwen3-vl-embedding":
+            raise AIConfigurationError(
+                "Semantic indexing currently requires qwen3-vl-embedding"
+            )
+        return DashScopeEmbeddingClient(
+            api_key=self.cipher.decrypt(provider.api_key_ciphertext),
+            model=model.model_id,
+            base_url=provider.base_url,
+            timeout_seconds=provider.timeout_seconds,
+            max_retries=provider.max_retries,
+            retry_delay_seconds=provider.retry_delay_seconds,
             http_client=self.http_client,
         )
 

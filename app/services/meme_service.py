@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
@@ -23,9 +26,12 @@ from app.repositories.tag_repository import TagRepository
 from app.repositories.template_repository import TemplateRepository
 from app.storage.image_storage import ImageStorage, StoredImage, ValidatedImage
 from app.storage.template_image_storage import TemplateImageStorage
-from app.ai.embedding_client import ImageEmbeddingClient
 from app.services.template_matching import rank_visual_templates
+from app.services.derived_data_invalidation import invalidate_meme_semantic_data
 import json
+
+if TYPE_CHECKING:
+    from app.ai.embedding_client import ImageEmbeddingClient
 
 
 # Service 是业务编排层：把数据库操作和文件操作组成一次完整用例。
@@ -35,18 +41,8 @@ EDITABLE_FIELDS = {"title", "description", "source", "tags", "template_id"}
 TAGS_NOT_PROVIDED = object()
 MIN_AI_SUGGESTIONS = 2
 MAX_AI_SUGGESTIONS = 8
-PROTECTED_MAINTENANCE_TAG_SOURCES = frozenset({"user", "manual"})
 MEME_PAGE_SIZES = frozenset({24, 48, 96})
 MAX_SHUFFLE_SEED = 2_147_483_646
-
-
-@dataclass(frozen=True)
-class TagMaintenancePlan:
-    meme_id: int
-    before: tuple[tuple[str, str], ...]
-    add_tags: tuple[str, ...]
-    remove_tags: tuple[str, ...]
-    after: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -209,6 +205,7 @@ class MemeService:
         try:
             self.session.add(image)
             self.session.flush()
+            invalidate_meme_semantic_data(self.session, [meme_id])
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -232,6 +229,7 @@ class MemeService:
             self.session.flush()
             self.session.refresh(meme)
             self._sync_cover(meme)
+            invalidate_meme_semantic_data(self.session, [meme_id])
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -259,6 +257,7 @@ class MemeService:
                 item.position = position
             self.session.flush()
             self._sync_cover(meme)
+            invalidate_meme_semantic_data(self.session, [meme_id])
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -391,6 +390,9 @@ class MemeService:
             raise ValueError(f"Fields cannot be updated: {names}")
 
         tag_names = data.pop("tags", TAGS_NOT_PROVIDED)
+        semantic_changed = bool(set(data) & {"title", "description", "template_id"}) or (
+            tag_names is not TAGS_NOT_PROVIDED
+        )
         if "template_id" in data:
             template_id = data["template_id"]
             if (
@@ -408,6 +410,8 @@ class MemeService:
             if tag_names is not TAGS_NOT_PROVIDED:
                 # 传入空列表表示主动清空；完全没传则保留原标签。
                 self.tag_repository.replace_meme_tags(meme, tag_names or [])
+            if semantic_changed:
+                invalidate_meme_semantic_data(self.session, [meme_id])
             self.session.commit()
         except Exception:
             # 任一更新步骤失败，标题等字段和标签关系都一起撤销。
@@ -419,96 +423,6 @@ class MemeService:
     def list_tags(self):
         # 当前只是简单转发，仍保留 Service 入口，避免 API 直接依赖数据层。
         return self.tag_repository.list()
-
-    def plan_tag_maintenance(
-        self,
-        meme_id: int,
-        *,
-        add_tags: Sequence[str],
-        remove_tags: Sequence[str],
-        allow_protected_removal: bool = False,
-    ) -> TagMaintenancePlan:
-        """Validate and describe an offline tag change without writing it."""
-        meme = self.repository.get_by_id(meme_id)
-        if meme is None:
-            raise MemeNotFoundError(f"Meme {meme_id} does not exist")
-
-        def normalize_names(names: Sequence[str]) -> tuple[str, ...]:
-            normalized: list[str] = []
-            for name in names:
-                value = self.tag_repository.normalize_name(name)
-                if value and value not in normalized:
-                    normalized.append(value)
-            return tuple(normalized)
-
-        additions = normalize_names(add_tags)
-        removals = normalize_names(remove_tags)
-        overlap = set(additions) & set(removals)
-        if overlap:
-            raise ValueError(
-                "Tags cannot be added and removed together: " + ", ".join(sorted(overlap))
-            )
-
-        links_by_name = {link.tag.name: link for link in meme.tag_links}
-        protected = sorted(
-            name
-            for name in removals
-            if name in links_by_name
-            and links_by_name[name].source in PROTECTED_MAINTENANCE_TAG_SOURCES
-        )
-        if protected and not allow_protected_removal:
-            raise ValueError(
-                "Cannot remove user/manual tags: " + ", ".join(protected)
-            )
-
-        actual_additions = tuple(
-            name for name in additions if name not in links_by_name
-        )
-        actual_removals = tuple(name for name in removals if name in links_by_name)
-        before = tuple((link.tag.name, link.source) for link in meme.tag_links)
-        removal_set = set(actual_removals)
-        after = tuple(item for item in before if item[0] not in removal_set) + tuple(
-            (name, "codex") for name in actual_additions
-        )
-        return TagMaintenancePlan(
-            meme_id=meme_id,
-            before=before,
-            add_tags=actual_additions,
-            remove_tags=actual_removals,
-            after=after,
-        )
-
-    def apply_tag_maintenance(
-        self,
-        meme_id: int,
-        *,
-        add_tags: Sequence[str],
-        remove_tags: Sequence[str],
-        confidence: float,
-        allow_protected_removal: bool = False,
-    ) -> TagMaintenancePlan:
-        """Apply one validated offline tag delta as a Service-owned transaction."""
-        plan = self.plan_tag_maintenance(
-            meme_id,
-            add_tags=add_tags,
-            remove_tags=remove_tags,
-            allow_protected_removal=allow_protected_removal,
-        )
-        meme = self.repository.get_by_id(meme_id)
-        assert meme is not None
-        try:
-            self.tag_repository.apply_maintenance_tags(
-                meme,
-                add_names=plan.add_tags,
-                remove_names=plan.remove_tags,
-                source="codex",
-                confidence=confidence,
-            )
-            self.session.commit()
-        except Exception:
-            self.session.rollback()
-            raise
-        return plan
 
     def get_random_meme(self, *, tags: Sequence[str] | None = None) -> Meme:
         # Repository 负责随机查询，Service 负责解释“没有结果”及检查文件。
@@ -641,6 +555,8 @@ class MemeService:
                 self.repository.update(meme, {"title": analysis.suggested_title})
             if apply_template:
                 self.repository.update(meme, {"template_id": template_id})
+            if selected_names or apply_description or apply_title or apply_template:
+                invalidate_meme_semantic_data(self.session, [meme_id])
             analysis.confirmed_at = datetime.now(UTC)
             self.session.flush()
             self.session.commit()
@@ -666,6 +582,7 @@ class MemeService:
                     or_(MemeRelation.meme_a_id == meme_id, MemeRelation.meme_b_id == meme_id)
                 )
             )
+            invalidate_meme_semantic_data(self.session, [meme_id])
             self.repository.delete(meme)
             # 先确认数据库删除成功，再清理磁盘文件。
             self.session.commit()

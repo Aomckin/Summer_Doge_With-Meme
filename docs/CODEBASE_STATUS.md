@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.5.6 实现状态（2026-08-06）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.6 实现状态（2026-08-07）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -9,6 +9,10 @@
 - 图片管理：向已有 Meme 追加单图、删除非最后图片、HTML 拖拽排序；完整删除会清理整组图片文件。
 - 桌面优先的原生 TypeScript 前端：超大/大/中/小响应式瀑布流封面卡片、图片数量角标、纵向图片组详情、可前后切换的原图查看器，以及明确的忙碌/错误状态；超大档使用原图，其余档使用缩略图。
 - 主资料库通过 `GET /api/memes/page` 只读取当前页，支持 24/48/96 每页数量、完整总数、越界收敛和基于 Meme ID/seed 的稳定乱序；模板管理器在完整模板数组上每页渲染 12 条。
+- 多模态语义索引：标题、描述、规范化标签、模板和前 5 张有序图片由集中构建器生成一个 1024 维融合向量，归一化后以小端 Float32 BLOB 保存在 SQLite。
+- 自然语言搜索：查询向量调用当前 `qwen3-vl-embedding`，标签在排序前按 AND 过滤；当前模型兼容的 ready 文档向量由进程内 NumPy 矩阵计算余弦 score，翻页复用 10 分钟 LRU 结果。
+- 相似 Meme：完全使用已保存的同模型、同维度融合向量，不调用 Provider；前端与人工直接关联分区展示。
+- 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
 - Template 系统：网页 CRUD、Meme 手动归类、单张参考图、管理界面双侧缩略图预览、原子创建、独立图像向量模型和 Top-10 视觉候选。
 - AI 组级分析：一次请求按顺序读取完整图片组，生成一条中文建议标题、一份中文描述、2 至 8 个标签建议和一个已有模板 ID 或 `null`；用户确认后才写入所选内容，建议标题默认不采用。
@@ -20,7 +24,7 @@
 
 ## 明确尚未实现
 
-- 尚未实现聊天场景推荐 Meme、语义搜索、Meme 制作器、用户系统、分享权限或云端对象存储。
+- 尚未实现聊天记录解析与场景推荐界面、Meme 制作器、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
 
@@ -172,6 +176,46 @@ POST /api/import-jobs
 - 应用启动把遗留 `running`/`cancelling` 标记为 `interrupted`；导入执行器 `max_workers=1`，第一版不使用 Celery、Redis 或 WebSocket。
 - 前端在普通图片/ZIP 两种模式间切换；ZIP 只显示归档摘要，轮询进度，弹窗关闭后继续，任务 ID 通过 localStorage 恢复，失败项分页展示。
 
+### 多模态语义索引与任务线程边界
+
+```text
+Meme / Tag / Template / 图片写事务
+  -> DerivedDataInvalidation 在同一事务中把已有 MemeEmbedding 标记为 stale
+  -> 同一事务递增数据库 semantic index generation
+  -> commit
+  -> 不调用 Provider，也不通知内存对象
+
+EmbeddingJob 创建
+  -> 固定当前 model record / model identifier / dimension
+  -> 集中内容构建器为候选 Meme 生成 source_hash
+  -> 持久化 EmbeddingJobItem 快照
+  -> HTTP 202
+  -> 单协调线程按 max_workers 提交外部请求
+  -> 工作线程各自创建只读 Session，预处理图片并调用 embed_fused
+  -> 协调线程顺序写向量、项目状态、计数和 Token
+```
+
+- `meme_embeddings.meme_id` 唯一并随 Meme 级联删除；ready 行必须有 BLOB。搜索还要求 `model_record_id`、`model_id_snapshot`、1024 维和 `meme_fused_v1` 全部兼容。
+- `meme_embedding_content.py` 是文档文本、图片选择、source hash 和图片 Data URI 的唯一构建位置；API、Job 和搜索服务不重复拼接文档内容。
+- 文档 hash 不含时间、绝对路径、source、Caption、直接关联、历史分析或模板参考图。图片只含前 5 张的 `position` 和 `file_hash`，因此相同业务内容产生相同 hash。
+- 图片优先缩略图、缺失时回退原图；Pillow 处理 EXIF、GIF 首帧、1024 最大边和透明 PNG/RGB JPEG，不产生永久衍生文件。
+- `embedding_vectors.py` 统一拒绝空、零范数、NaN、Infinity 和维度错误；读取 BLOB 必须精确等于 `dimension * 4` 字节。
+- 基础 `MemeService`、`TagService`、`TemplateService` 只依赖轻量 `DerivedDataInvalidation`；导入这些服务不会加载 NumPy、`SemanticIndex` 或 Embedding Provider。
+- `MemeEmbeddingRepository` 只管理 Meme 向量和数据库 generation，`EmbeddingJobRepository` 只管理 Job/Item；单项重建和批量任务共用 `MemeEmbeddingService` 的生成、校验和持久化流程。
+- `SemanticIndex` 首次查询才从 SQLite 加载当前模型 ready 向量，不保留 ORM 对象；查询时比较数据库 generation，变化后在锁内惰性重建矩阵，不使用全局实例注册表或通知双写。
+- `app.models` 是唯一 ORM 模型注册入口；`Meme.embedding` 和 `MemeEmbedding.model_record` 等无消费者 relationship 已删除，数据库外键仍保留。
+- `SemanticSearchResultCache` 的 key 包含模型记录、模型标识、index generation、规范化 query 和 tags；TTL 10 分钟、上限 50、LRU 淘汰，重启清空。
+- 任务取消后不再提交新请求，已发请求允许完成；启动时 running/cancelling 改为 interrupted，不自动恢复。运行中模型或 Provider 配置变化会停止继续提交，已写结果保留。
+- 第一版只支持单进程本地部署和 DashScope `qwen3-vl-embedding` fusion；没有 Redis、向量数据库、定时消费、自动上传向量化或多进程同步。
+
+### 自然语言搜索与相似 Meme API
+
+- `POST /api/semantic-search` 校验 2～500 字符 query、24/48/96 page size，查询使用独立 retrieval instruction；标签过滤在余弦排序前执行，同分按 Meme ID 升序。
+- `GET /api/memes/{id}/similar` 不调用外部服务，排除自身，只比较当前兼容 ready 向量；Meme 不存在为 404，当前 Meme 无有效向量为 409。
+- `POST /api/memes/{id}/embedding/rebuild` 仅服务单个 Meme，并把配置、超时和上游错误映射为 503/504/502。
+- 前端语义模式不对输入做自动请求；Enter/按钮显式提交，标签、分页和卡片密度继续有效，普通排序隐藏，score 以小数显示且不解释为概率。
+- 详情相似请求使用 AbortController 与 Meme ID 检查；未索引时只显示手动重建入口，不自动产生 Provider 费用。
+
 ### AI 有序多图分析
 
 ```text
@@ -249,10 +293,10 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.5.6 发布验证：TypeScript 类型检查通过，101 项 Vitest 通过，生产构建通过，175 项 Pytest 通过。主资料库正式分页、浏览密度、稳定乱序和模板管理前端分页已落地；v0.5.5 标签管理与标签芯片、v0.5.4 下载/导出和 v0.5.3 ZIP 导入继续参与全量回归。
+v0.6-R 将语义功能从基础业务导入链中解耦：数据库 stale 状态与 generation 是缓存事实来源，ORM 由 `app.models` 统一注册，单项与批量重建共享核心服务，Luna 标签维护使用独立的轻量服务。TypeScript 类型检查、109 项 Vitest、生产构建、12 项架构专项测试和 200 项 Pytest 全量回归均通过。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
 ## 下一阶段
 
-下一阶段为 v0.6 语义搜索与向量化；聊天场景推荐 Meme 在向量化完成后于 v0.6.1 实现，Meme 制作器顺延至 v0.7。
+v0.6-R 仅完成语义模块解耦，不增加用户可见功能。下一阶段仍为 v0.6.1 聊天场景推荐 Meme；Meme 制作器顺延至 v0.7。

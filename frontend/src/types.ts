@@ -404,7 +404,78 @@ export interface ListMemePageOptions {
   signal?: AbortSignal;
 }
 
+export type SearchMode = "keyword" | "semantic";
+
+export interface ScoredMemeResponse {
+  meme: MemeResponse;
+  score: number;
+}
+
+export interface SemanticSearchResponse {
+  items: ScoredMemeResponse[];
+  total: number;
+  page: number;
+  page_size: MemePageSize;
+  total_pages: number;
+  indexed_count: number;
+  missing_count: number;
+  model_id: string;
+}
+
+export interface SemanticSearchInput {
+  query: string;
+  tags: string[];
+  page: number;
+  page_size: MemePageSize;
+  signal?: AbortSignal;
+}
+
+export interface SemanticIndexStatus {
+  total_memes: number;
+  ready_count: number;
+  missing_count: number;
+  stale_count: number;
+  failed_count: number;
+  incompatible_count: number;
+  active_model_id: string | null;
+  dimension: number;
+  running_job: { id: number; status: string; processed_count: number; total_count: number } | null;
+}
+
+export type EmbeddingJobScope = "missing_or_stale" | "failed" | "all";
+export interface EmbeddingJobResponse {
+  id: number; status: string; scope: EmbeddingJobScope;
+  model_record_id: number; model_id_snapshot: string; dimension: number; max_workers: number;
+  total_count: number; processed_count: number; success_count: number; skipped_count: number; failed_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number;
+  error_message: string | null; created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EmbeddingJobItemResponse {
+  id: number; job_id: number; meme_id: number; source_hash: string; status: string; attempt_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number; error_message: string | null;
+  created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EmbeddingJobItemPage {
+  items: EmbeddingJobItemResponse[]; total: number; offset: number; limit: number;
+}
+
+export interface MemeEmbeddingStatus {
+  meme_id: number; status: "ready" | "stale" | "failed"; model_id: string; dimension: number;
+  embedding_kind: string; indexed_image_count: number; total_image_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number; last_error: string | null; indexed_at: string | null;
+}
+
 export interface AppState {
+  searchMode: SearchMode;
+  semanticSubmittedQuery: string;
+  semanticScores: Record<number, number>;
+  similarMemes: ScoredMemeResponse[];
+  similarLoading: boolean;
+  similarError: string | null;
+  similarExpanded: boolean;
+  rebuildingEmbedding: boolean;
   relatedMemes: MemeResponse[];
   relationQuery: string;
   selectedRelationIds: number[];

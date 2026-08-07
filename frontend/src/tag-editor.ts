@@ -145,13 +145,13 @@ export class TagEditor {
       input.placeholder = "输入标签……";
       input.value = this.inputValue;
       input.setAttribute("aria-label", "输入标签");
-      input.addEventListener("input", () => {
+      input.addEventListener("input", (event) => {
         this.inputValue = input.value;
         this.error = null;
-        this.render(true);
+        if (!(event instanceof InputEvent) || !event.isComposing) this.render(true);
       });
       input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
+        if (event.key === "Enter" && !event.isComposing) {
           event.preventDefault();
           this.commit(input.value);
         } else if (event.key === "Escape") {

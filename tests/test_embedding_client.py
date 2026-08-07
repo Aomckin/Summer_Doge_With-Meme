@@ -3,6 +3,7 @@ import json
 
 import httpx
 import pytest
+import httpx
 
 from app.ai.client import AIInvalidResponseError, AIUpstreamError
 from app.ai.embedding_client import DashScopeEmbeddingClient
@@ -189,3 +190,60 @@ def test_dashscope_embedding_client_rejects_invalid_vector() -> None:
     ) as http_client:
         with pytest.raises(AIInvalidResponseError, match="invalid vector"):
             client(http_client).embed_image(b"png", "image/png")
+
+
+def test_qwen3_fused_payload_usage_and_request_id() -> None:
+    captured = {}
+    vector = [0.25] * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            **embedding_response(("fusion", vector)),
+            "usage": {"input_tokens": 11, "image_tokens": 22, "total_tokens": 33},
+            "request_id": "req-fusion",
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        result = client(http_client).embed_fused(
+            [{"text": "scene"}, {"image": "data:image/png;base64,cG5n"}],
+            dimension=1024,
+            instruct="document instruction",
+        )
+    assert captured["payload"]["parameters"] == {
+        "dimension": 1024, "enable_fusion": True, "instruct": "document instruction"
+    }
+    assert result.input_tokens == 11
+    assert result.image_tokens == 22
+    assert result.total_tokens == 33
+    assert result.request_id == "req-fusion"
+
+
+def test_embedding_retry_429_and_non_retryable_400(monkeypatch) -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json=embedding_response(("fusion", [0.1] * 1024)))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        retrying = DashScopeEmbeddingClient(
+            api_key="token", model="qwen3-vl-embedding", base_url="https://example.test",
+            timeout_seconds=1, max_retries=1, retry_delay_seconds=0, http_client=http_client,
+        )
+        retrying.embed_fused([{"text": "query"}])
+    assert calls == 2
+
+    calls = 0
+    with httpx.Client(transport=httpx.MockTransport(
+        lambda _: (globals(), httpx.Response(400, json={"code": "bad"}))[1]
+    )) as http_client:
+        non_retrying = DashScopeEmbeddingClient(
+            api_key="token", model="qwen3-vl-embedding", base_url="https://example.test",
+            timeout_seconds=1, max_retries=3, retry_delay_seconds=0, http_client=http_client,
+        )
+        with pytest.raises(AIUpstreamError, match="HTTP 400"):
+            non_retrying.embed_fused([{"text": "query"}])

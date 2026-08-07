@@ -11,12 +11,15 @@ export interface EditDraft {
 
 export interface AppElements {
   searchInput: HTMLInputElement;
+  searchMode: HTMLSelectElement;
+  semanticSearchButton: HTMLButtonElement;
   randomButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
   openDownloadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
   openTagsButton: HTMLButtonElement;
+  openSemanticIndexButton: HTMLButtonElement;
   operationError: HTMLElement;
   tagFilters: HTMLElement;
   libraryHeading: HTMLElement;
@@ -120,13 +123,16 @@ export function mountShell(root: HTMLElement): AppElements {
           </div>
         </div>
         <div class="toolbar">
+          <select id="search-mode" aria-label="搜索模式"><option value="keyword">关键词</option><option value="semantic">语义</option></select>
           <label class="search-box" for="meme-search">
             <span aria-hidden="true">⌕</span>
             <input id="meme-search" type="search" placeholder="搜索标题或描述…" aria-label="搜索 Meme" autocomplete="off">
           </label>
+          <button id="semantic-search-button" class="button button-primary" type="button" hidden>语义搜索</button>
           <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
+          <button id="open-semantic-index" class="button button-secondary" type="button">语义索引</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
@@ -320,7 +326,7 @@ export function mountShell(root: HTMLElement): AppElements {
         </label>
         <label class="check-row">
           <input name="supports_image_embedding" type="checkbox">
-          <span>支持模板视觉检索向量</span>
+          <span>支持图像与语义向量</span>
         </label>
         <label class="check-row">
           <input name="enabled" type="checkbox" checked>
@@ -396,12 +402,15 @@ export function mountShell(root: HTMLElement): AppElements {
 
   return {
     searchInput: required(root, "#meme-search"),
+    searchMode: required(root, "#search-mode"),
+    semanticSearchButton: required(root, "#semantic-search-button"),
     randomButton: required(root, "#random-button"),
     openUploadButton: required(root, "#open-upload"),
     openDownloadButton: required(root, "#open-download"),
     openSettingsButton: required(root, "#open-settings"),
     openTemplatesButton: required(root, "#open-templates"),
     openTagsButton: required(root, "#open-tags"),
+    openSemanticIndexButton: required(root, "#open-semantic-index"),
     operationError: required(root, "#operation-error"),
     tagFilters: required(root, "#tag-filters"),
     libraryHeading: required(root, "#library-heading"),
@@ -612,6 +621,7 @@ function cardMarkup(
   meme: MemeResponse,
   selected: boolean,
   cardSize: MemeCardSize,
+  score?: number,
 ): string {
   const thumbnail = meme.thumbnail_url ?? meme.image_url;
   const image = cardSize === "extra-large" ? meme.image_url : thumbnail;
@@ -638,6 +648,7 @@ function cardMarkup(
       </span>
       <span class="card-overlay">
         <strong>${escapeHtml(meme.title)}</strong>
+        ${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}
         <span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span>
       </span>
     </button>
@@ -665,11 +676,19 @@ export function renderLibrary(
   const pageSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-page-size]");
   const cardSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-card-size]");
   const reshuffle = elements.browsingControls.querySelector<HTMLButtonElement>("[data-reshuffle]");
-  if (sort) { sort.value = state.listSort; sort.disabled = state.loadingList; }
+  elements.searchMode.value = state.searchMode;
+  elements.semanticSearchButton.hidden = state.searchMode !== "semantic";
+  elements.searchInput.placeholder = state.searchMode === "semantic" ? "描述想找的场景、情绪或用途" : "搜索标题或描述…";
+  if (sort) {
+    sort.value = state.listSort;
+    sort.disabled = state.loadingList || state.searchMode === "semantic";
+    const label = sort.closest("label");
+    if (label) label.hidden = state.searchMode === "semantic";
+  }
   if (pageSize) { pageSize.value = String(state.pageSize); pageSize.disabled = state.loadingList; }
   if (cardSize) cardSize.value = state.cardSize;
   if (reshuffle) {
-    reshuffle.hidden = state.listSort !== "shuffle";
+    reshuffle.hidden = state.searchMode === "semantic" || state.listSort !== "shuffle";
     reshuffle.disabled = state.loadingList;
   }
   if (state.loadingList) {
@@ -692,7 +711,12 @@ export function renderLibrary(
       ? `第 ${state.page} / ${state.totalPages} 页`
       : "还没有符合条件的 Meme";
     elements.memeGrid.innerHTML = state.memes
-      .map((meme) => cardMarkup(meme, meme.id === state.selectedMeme?.id, state.cardSize))
+      .map((meme) => cardMarkup(
+        meme,
+        meme.id === state.selectedMeme?.id,
+        state.cardSize,
+        state.searchMode === "semantic" ? state.semanticScores[meme.id] : undefined,
+      ))
       .join("");
     bindImageFallbacks(elements.memeGrid);
   }
@@ -863,6 +887,32 @@ function relatedMemesMarkup(state: AppState): string {
       ${state.relationError ? `<p class="form-error relation-error" data-relation-error role="alert">${escapeHtml(state.relationError)}</p>` : ""}
     </section>
   `;
+}
+
+function similarMemesMarkup(state: AppState): string {
+  const visible = state.similarMemes.slice(0, state.similarExpanded ? 12 : 6);
+  let content: string;
+  if (state.similarLoading) {
+    content = '<p class="muted">正在加载语义相似 Meme…</p>';
+  } else if (state.similarError) {
+    content = `<p class="muted">${escapeHtml(state.similarError)}</p>
+      ${state.similarError.includes("尚未建立") || state.similarError.includes("valid semantic")
+        ? `<button class="button button-secondary" type="button" data-rebuild-embedding ${state.rebuildingEmbedding ? "disabled" : ""}>${state.rebuildingEmbedding ? "正在建立…" : "为此 Meme 建立索引"}</button>`
+        : ""}`;
+  } else if (visible.length) {
+    content = `<div class="relation-list">${visible.map(({ meme, score }) => `
+      <button type="button" class="relation-target semantic-similar-target" data-similar-meme="${meme.id}">
+        <span class="relation-thumbnail"><img src="${escapeHtml(meme.thumbnail_url || meme.image_url)}" alt="" loading="lazy"></span>
+        <span><strong>${escapeHtml(meme.title)}</strong><small>相关度 ${score.toFixed(3)}</small></span>
+      </button>`).join("")}</div>
+      ${state.similarMemes.length > 6 ? `<button class="button button-ghost" type="button" data-toggle-similar>${state.similarExpanded ? "收起" : "展开至 12 个"}</button>` : ""}`;
+  } else {
+    content = '<p class="muted">没有可比较的语义相似 Meme</p>';
+  }
+  return `<section class="related-memes semantic-similar" aria-labelledby="semantic-similar-title">
+    <div class="related-heading"><div><p class="eyebrow">SEMANTIC · VECTOR</p><h3 id="semantic-similar-title">语义相似 Meme</h3></div></div>
+    ${content}
+  </section>`;
 }
 
 function detailError(message: string | null): string {
@@ -1086,6 +1136,7 @@ export function renderDetail(
             <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
           </dl>
           ${relatedMemesMarkup(state)}
+          ${similarMemesMarkup(state)}
           ${aiAnalysisMarkup(state)}
           <div data-caption-lab-host></div>
           ${detailError(state.actionError)}

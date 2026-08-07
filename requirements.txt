@@ -3,6 +3,7 @@ httpx
 sqlalchemy
 pydantic
 pillow
+numpy
 python-multipart
 cryptography
 pytest

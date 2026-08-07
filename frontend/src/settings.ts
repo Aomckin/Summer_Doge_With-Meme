@@ -311,12 +311,12 @@ export class AISettingsController {
                 <div class="settings-meta">
                   <span>${escapeHtml(provider?.name ?? "厂商已删除")}</span>
                   <span class="capability${model.supports_vision ? " supports" : ""}">${model.supports_vision ? "支持视觉" : "仅文本"}</span>
-                  ${model.supports_image_embedding ? '<span class="capability supports">模板视觉检索</span>' : ""}
+                  ${model.supports_image_embedding ? '<span class="capability supports">图像与语义向量</span>' : ""}
                   <span>${model.enabled ? "已启用" : "已停用"}</span>
                 </div>
                 <div class="settings-actions">
                   <button class="button ${model.is_active ? "button-primary" : "button-secondary"}" type="button" data-activate-model ${!model.enabled || !model.supports_vision || !provider?.enabled || this.state.busy ? "disabled" : ""}>${model.is_active ? "当前分析模型" : "用于图片分析"}</button>
-                  ${model.supports_image_embedding ? `<button class="button ${model.is_embedding_active ? "button-primary" : "button-secondary"}" type="button" data-activate-embedding-model ${!model.enabled || !provider?.enabled || this.state.busy ? "disabled" : ""}>${model.is_embedding_active ? "当前视觉检索模型" : "用于模板视觉检索"}</button>` : ""}
+                  ${model.supports_image_embedding ? `<button class="button ${model.is_embedding_active ? "button-primary" : "button-secondary"}" type="button" data-activate-embedding-model ${!model.enabled || !provider?.enabled || this.state.busy ? "disabled" : ""}>${model.is_embedding_active ? "当前图像与语义向量模型" : "用于图像与语义向量"}</button>` : ""}
                   <button class="button button-secondary" type="button" data-edit-model>编辑</button>
                   <button class="button button-danger" type="button" data-delete-model>删除</button>
                 </div>

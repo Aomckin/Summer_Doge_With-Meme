@@ -1746,13 +1746,13 @@ describe("MemeVaultApp", () => {
     await vi.waitFor(() => {
       expect(document.querySelector("[data-model-record-id='9']")).not.toBeNull();
     });
-    button("用于模板视觉检索").click();
+    button("用于图像与语义向量").click();
 
     await vi.waitFor(() => {
       expect(api.updateAIModel).toHaveBeenCalledWith(9, {
         is_embedding_active: true,
       });
-      expect(button("当前视觉检索模型")).toBeTruthy();
+      expect(button("当前图像与语义向量模型")).toBeTruthy();
     });
   });
 

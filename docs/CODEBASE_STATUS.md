@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.6 实现状态（2026-08-07）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.6.1 实现状态（2026-08-08）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -15,10 +15,11 @@
 - 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
 - Template 系统：网页 CRUD、Meme 手动归类、单张参考图、管理界面双侧缩略图预览、原子创建、独立图像向量模型和 Top-10 视觉候选。
-- AI 组级分析：一次请求按顺序读取完整图片组，生成一条中文建议标题、一份中文描述、2 至 8 个标签建议和一个已有模板 ID 或 `null`；用户确认后才写入所选内容，建议标题默认不采用。
+- AI 元数据整理：网页单项、Provider 批量 Job 与 Luna 离线候选统一写入 `MemeEnrichmentSuggestion`；Luna 导入直接进入人工审核池，不再经过 dry-run/CLI apply；建议创建和拒绝不修改 Meme，网页审核可按字段安全采用并写审计。
+- 持久化 EnrichmentJob：支持全部、当前筛选、缺描述/标签/模板、文件名标题、从未分析和过期建议范围；1/2/4/8 并发、取消、失败重试、启动中断恢复和 Token 统计。
 - 网页内 API 设置：维护 AI 提供商、图片分析模型和独立的模板视觉检索模型；密钥加密落盘。
 - 文案实验室：每个 Meme 可保存多条独立文案；详情页支持统一编辑器、场景/语气/长度、复制、编辑、删除、未保存提醒，以及 AI 临时生成和草稿改写。
-- Codex 离线标签维护：本地页面按批次导出并显示完整有序图片组，提供 Luna 提示词与 PowerShell 预设；候选严格校验，导入默认 dry-run，apply 前备份并写审计。
+- Codex 离线元数据维护：默认每批 20、可选 10/20/50，导出完整有序图片组、当前元数据、标签和模板词典；新格式显式导入只创建统一 Suggestion，不直接修改 Meme。
 - 标签管理：聚合统计每个标签的 Meme 使用数，主资料库默认隐藏零引用标签；独立管理器支持搜索、排序、重命名、按来源优先级合并、删除单个空标签和二次确认清理全部空标签。
 - 标签芯片输入：Meme 编辑、普通批量上传和 ZIP 导入共用可访问的数组编辑器，支持键盘确认/取消、去重、删除和最多 8 条使用中标签自动补全；提交前仍由 API 客户端统一规范化。
 
@@ -91,6 +92,8 @@ SQLite 启动时先由 ORM 创建新表，再以 `INSERT ... SELECT ... WHERE NO
 - 新建含参考图模板通过单次事务完成文件保存、独立图片向量化和模板写入；任一步失败都会回滚记录并清理新文件。
 - `qwen3-vl-embedding` 请求只发送 Base64 Data URI，独立图片模式不启用融合，接受单个 `type=image` 或 `type=vl` 向量；旧 `tongyi-embedding-vision` 保持兼容。通用 `embed_multimodal` 为后续 Meme 融合向量保留独立入口。
 - `meme_ai_analyses` 保存一条完整 Meme 对应的一次组级建议快照；`suggested_title` 可空以兼容升级前的历史分析。
+- `meme_enrichment_suggestions` 保存 Luna/Provider/手动导入的标题、描述、标签增删和已有模板建议、生成来源、模型快照、字段置信度、状态、稳定 source hash 与审核时间；历史保留，旧 pending 可标记 superseded。
+- `enrichment_jobs` / `enrichment_job_items` 保存批量范围、分析字段、模型快照、并发、计数、Token、失败明细和 Suggestion 关联；`enrichment_audits` 保存创建、拒绝和 Apply 的字段及前后快照。
 - `ai_providers`、`ai_models` 保存提供商、图片分析模型和独立图像向量模型设置。
 - API Key 使用 Fernet 加密；密钥默认位于被忽略的 `data/.ai_settings.key`。
 
@@ -230,6 +233,26 @@ POST /api/memes/{meme_id}/analyze
 
 分析快照的建议标题通过 `suggested_title` 返回。确认请求的 `apply_title` 默认为 `false`，只有用户显式勾选后才会在同一事务中更新 Meme 标题；历史快照没有建议标题时仍可继续使用描述、标签和模板确认。未配置模型/密钥返回 503，超时返回 504，上游或结构化输出错误返回 502。
 
+### v0.6.1 统一元数据整理
+
+```text
+POST /api/memes/{id}/enrichment 或 EnrichmentJob / Luna importer
+  -> MemeEnrichmentService 读取完整有序图片组和当前元数据
+  -> Provider 或 Luna 生成统一 Candidate
+  -> Luna importer 直接创建 pending Suggestion
+  -> 规范化标签并按名称解析已有模板
+  -> 保存 MemeEnrichmentSuggestion；不修改 Meme、不使 embedding stale
+  -> 审核台按字段 Apply
+  -> 重新加载 Meme + 校验 source_hash + 单事务修改
+  -> DerivedDataInvalidation + EnrichmentAudit + commit
+```
+
+- source hash 固定包含标题、描述、排序标签、模板 ID 和全部图片的 position/file_hash；Meme 后续变化会把待审候选标为 stale，默认拒绝 Apply。
+- Provider Prompt 允许标题/描述返回 null，优先复用最多 500 个已有标签，只按已有模板名称返回结果，不要求模型生成伪精确置信度。
+- Job 协调线程是唯一 SQLite 写入者；外部请求线程只读图片并调用 Provider。429、5xx、网络和超时按 Provider 上限退避重试，支持 Retry-After；其他 4xx 不重试。
+- 工作台显示完整图片组和当前值/建议值，支持筛选、字段选择、全部采用、拒绝、重分析、Luna/Provider 来源、过期警告、A/S/R/J/K/方向键及 IME 保护。
+- 第一版安全批量操作只自动采用未过期建议中的新增标签；覆盖标题/描述、删除标签和改模板必须逐项确认。
+
 ### 文案实验室与 AI 文案
 
 ```text
@@ -247,7 +270,7 @@ POST .../captions/generate 或 .../rewrite
 
 `CaptionLabController` 独立维护当前 Meme 的列表、草稿快照、编辑状态、候选、错误和请求代次。`app.ts` 仅在选择 Meme 时调用 `setMeme`；详情重绘后由挂载事件恢复实验室。切换 Meme 会中止列表请求并通过代次忽略已经返回的旧列表或 AI 结果。非空脏草稿在新建、切换、折叠和离开页面前确认；临时候选本身不触发确认。
 
-## v0.5 API
+## 主要 API
 
 - `GET /api/memes/page`
 - `POST /api/memes/{meme_id}/images`
@@ -272,6 +295,13 @@ POST .../captions/generate 或 .../rewrite
 - `GET/PATCH/DELETE /api/tags...`
 - `POST /api/tags/{source_tag_id}/merge`
 - `POST /api/tags/cleanup-empty`
+- `POST /api/enrichment-jobs`
+- `GET /api/enrichment-jobs/{job_id}` 与 `/items`
+- `POST /api/enrichment-jobs/{job_id}/cancel` 与 `/retry-failed`
+- `DELETE /api/enrichment-jobs/{job_id}`
+- `GET /api/enrichment-suggestions` 与 `/{suggestion_id}`
+- `POST /api/enrichment-suggestions/{suggestion_id}/apply|reject|reanalyze`
+- `POST /api/memes/{meme_id}/enrichment`
 
 所有 Meme 响应包含有序 `images` 与 `image_count`；旧 `image_url`、`thumbnail_url`、尺寸、哈希等字段直接从 `images[0]` 派生并继续对应首图。
 
@@ -293,10 +323,10 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.6-R 将语义功能从基础业务导入链中解耦：数据库 stale 状态与 generation 是缓存事实来源，ORM 由 `app.models` 统一注册，单项与批量重建共享核心服务，Luna 标签维护使用独立的轻量服务。TypeScript 类型检查、109 项 Vitest、生产构建、12 项架构专项测试和 200 项 Pytest 全量回归均通过。
+v0.6.1 在保持 v0.6-R 分层的基础上增加统一候选、Provider 后台 Job、Luna 双生产源和安全审核 Apply。Luna 候选一次提交即进入审核池，不存在独立 dry-run/CLI apply；建议创建/拒绝与真实元数据解耦，只有网页审核实际采用字段才使语义向量过期。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
 ## 下一阶段
 
-v0.6-R 仅完成语义模块解耦，不增加用户可见功能。下一阶段仍为 v0.6.1 聊天场景推荐 Meme；Meme 制作器顺延至 v0.7。
+下一阶段为 v0.6.2 聊天场景推荐 Meme；Meme 制作器顺延至 v0.7。

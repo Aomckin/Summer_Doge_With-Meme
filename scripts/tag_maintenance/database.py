@@ -26,18 +26,3 @@ def close_session(session: Session) -> None:
     session.close()
     if isinstance(bind, Engine):
         bind.dispose()
-
-
-def backup_sqlite_database(database_path: Path, backup_dir: Path) -> Path:
-    """Create a consistent SQLite backup using SQLite's backup API."""
-    from datetime import UTC, datetime
-
-    source_path = database_path.resolve()
-    if not source_path.is_file():
-        raise FileNotFoundError(f"SQLite database does not exist: {source_path}")
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
-    target_path = backup_dir / f"{source_path.stem}_{timestamp}{source_path.suffix}"
-    with sqlite3.connect(source_path) as source, sqlite3.connect(target_path) as target:
-        source.backup(target)
-    return target_path

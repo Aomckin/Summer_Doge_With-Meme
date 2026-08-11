@@ -11,6 +11,7 @@ from app.database import Base, get_db
 from app.main import create_app
 from app.models.meme import Meme
 from app.models.tag import MemeTag, Tag
+from app.models.template import Template
 
 
 def request(app, path: str):
@@ -51,10 +52,13 @@ def pagination_context(tmp_path: Path):
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     cat = Tag(name="猫")
     irony = Tag(name="反讽")
-    session.add_all([cat, irony])
+    reaction_template = Template(name="反应图")
+    session.add_all([cat, irony, reaction_template])
     session.flush()
     for number in range(1, 106):
         meme = build_meme(number)
+        if number <= 10:
+            meme.template_id = reaction_template.id
         session.add(meme)
         session.flush()
         if number % 2 == 0:
@@ -115,6 +119,19 @@ def test_page_search_and_multi_tag_and_count_are_consistent(pagination_context) 
     assert empty.json()["total"] == 0
     assert empty.json()["page"] == 1
     assert empty.json()["total_pages"] == 0
+
+
+def test_page_filters_by_template_and_combines_with_tags(pagination_context) -> None:
+    template_only = request(pagination_context, "/api/memes/page?template_id=1")
+    combined = request(
+        pagination_context,
+        "/api/memes/page?template_id=1&tags=%E7%8C%AB",
+    )
+    assert template_only.json()["total"] == 10
+    assert ids(template_only) == list(range(1, 11))
+    assert combined.json()["total"] == 5
+    assert ids(combined) == [2, 4, 6, 8, 10]
+    assert request(pagination_context, "/api/memes/page?template_id=0").status_code == 422
 
 
 def test_shuffle_validation_stability_pages_and_filters(pagination_context) -> None:

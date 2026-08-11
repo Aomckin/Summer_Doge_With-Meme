@@ -6,8 +6,11 @@ from pydantic import ValidationError
 
 from app.config import DATABASE_PATH
 from app.services.tag_maintenance_service import TagMaintenancePlan, TagMaintenanceService
+from app.schemas.enrichment import EnrichmentCandidate
+from app.services.meme_enrichment_service import MemeEnrichmentService
+from app.storage.image_storage import ImageStorage
 
-from .database import backup_sqlite_database, close_session, make_session
+from .database import close_session, make_session
 from .schemas import TagCandidate
 
 
@@ -35,12 +38,11 @@ def _audit_record(
     candidate: TagCandidate,
     plan: TagMaintenancePlan,
     *,
-    applied: bool,
-    backup_path: Path | None,
+    suggestion_id: int,
 ) -> dict[str, object]:
     return {
         "timestamp": datetime.now(UTC).isoformat(),
-        "mode": "apply" if applied else "dry-run",
+        "mode": "submitted-for-review",
         "meme_id": candidate.meme_id,
         "add_tags": list(plan.add_tags),
         "remove_tags": list(plan.remove_tags),
@@ -48,7 +50,10 @@ def _audit_record(
         "after": [{"name": name, "source": source} for name, source in plan.after],
         "confidence": candidate.confidence,
         "reason": candidate.reason,
-        "backup_path": str(backup_path) if backup_path else None,
+        "suggested_title": candidate.suggested_title,
+        "suggested_description": candidate.suggested_description,
+        "suggested_template_name": candidate.suggested_template_name,
+        "suggestion_id": suggestion_id,
     }
 
 
@@ -56,9 +61,7 @@ def import_candidates(
     candidates_path: Path,
     *,
     database_path: Path = DATABASE_PATH,
-    apply: bool = False,
     allow_protected_removal: bool = False,
-    backup_dir: Path | None = None,
     audit_path: Path | None = None,
 ) -> dict[str, object]:
     database_path = database_path.resolve()
@@ -66,9 +69,12 @@ def import_candidates(
         raise FileNotFoundError(f"SQLite database does not exist: {database_path}")
     candidates = load_candidates(candidates_path)
     session = make_session(database_path)
-    backup_path: Path | None = None
     try:
         service = TagMaintenanceService(session)
+        enrichment = MemeEnrichmentService(
+            session,
+            ImageStorage(database_path.parent / "images", database_path.parent / "thumbnails"),
+        )
         plans = [
             service.plan(
                 candidate.meme_id,
@@ -78,51 +84,51 @@ def import_candidates(
             )
             for candidate in candidates
         ]
-        if apply:
-            backup_path = backup_sqlite_database(
-                database_path,
-                (backup_dir or database_path.parent / "tagging_work" / "backups").resolve(),
-            )
-
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
         resolved_audit_path = (
             audit_path
             or candidates_path.parent / f"audit_{timestamp}.jsonl"
         ).resolve()
         resolved_audit_path.parent.mkdir(parents=True, exist_ok=True)
-        changed = 0
-        with resolved_audit_path.open("x", encoding="utf-8", newline="\n") as audit:
+        audit_records: list[dict[str, object]] = []
+        try:
             for candidate, plan in zip(candidates, plans, strict=True):
-                if not plan.add_tags and not plan.remove_tags:
+                has_metadata = bool({
+                    "suggested_title", "suggested_description", "suggested_template_name"
+                } & candidate.model_fields_set)
+                if not has_metadata and not plan.add_tags and not plan.remove_tags:
                     continue
-                if apply:
-                    plan = service.apply(
-                        candidate.meme_id,
-                        add_tags=candidate.add_tags,
-                        remove_tags=candidate.remove_tags,
-                        confidence=candidate.confidence,
-                        allow_protected_removal=allow_protected_removal,
-                    )
-                audit.write(
-                    json.dumps(
-                        _audit_record(
-                            candidate,
-                            plan,
-                            applied=apply,
-                            backup_path=backup_path,
-                        ),
-                        ensure_ascii=False,
-                    )
-                    + "\n"
+                confidence = candidate.confidence
+                if isinstance(confidence, (int, float)):
+                    confidence = {"tags": float(confidence)}
+                suggestion = enrichment.create_suggestion(
+                    EnrichmentCandidate(
+                        meme_id=candidate.meme_id,
+                        suggested_title=candidate.suggested_title,
+                        suggested_description=candidate.suggested_description,
+                        add_tags=list(plan.add_tags),
+                        remove_tags=list(plan.remove_tags),
+                        suggested_template_name=candidate.suggested_template_name,
+                        confidence=confidence,
+                        reason=candidate.reason,
+                    ),
+                    source="luna",
+                    commit=False,
                 )
-                audit.flush()
-                changed += 1
+                audit_records.append(_audit_record(candidate, plan, suggestion_id=suggestion.id))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        with resolved_audit_path.open("x", encoding="utf-8", newline="\n") as audit:
+            for record in audit_records:
+                audit.write(json.dumps(record, ensure_ascii=False) + "\n")
     finally:
         close_session(session)
     return {
-        "mode": "apply" if apply else "dry-run",
+        "mode": "submitted-for-review",
         "candidate_count": len(candidates),
-        "changed_meme_count": changed,
+        "changed_meme_count": len(audit_records),
+        "suggestion_count": len(audit_records),
         "audit_path": resolved_audit_path,
-        "backup_path": backup_path,
     }

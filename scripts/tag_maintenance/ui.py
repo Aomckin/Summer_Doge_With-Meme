@@ -68,13 +68,12 @@ def render_page(
     )
     export_command = (
         ".\\.venv\\Scripts\\python.exe -m scripts.tag_maintenance export "
-        f"--batch {batch_number} --batch-size 10"
+        f"--batch {batch_number} --batch-size 20"
     )
-    dry_run_command = (
+    import_command = (
         ".\\.venv\\Scripts\\python.exe -m scripts.tag_maintenance import "
         f"{relative_batch}\\candidates.jsonl"
     )
-    apply_command = dry_run_command + " --apply"
 
     cards = ""
     if manifest:
@@ -95,6 +94,7 @@ def render_page(
                 f'<article><h3>#{meme["meme_id"]} {escape(meme["title"])}</h3>'
                 f'<p>{escape(meme["description"] or "无描述")}</p>'
                 f'<p><strong>当前标签：</strong>{escape(tags)}</p>'
+                f'<p><strong>当前模板：</strong>{escape(meme.get("current_template") or "未归类")}</p>'
                 f'<div class="images">{images}</div></article>'
             )
     else:
@@ -113,12 +113,12 @@ figcaption{{color:#666}}.copy{{display:flex;gap:8px}}textarea{{width:100%;min-he
 </style></head><body><h1>Meme Vault 离线标签</h1>{notice}
 <section><h2>批次操作</h2><form method="post" action="/export">
 <label>批次<input name="batch" type="number" min="1" value="{batch_number}"></label>
-<label>每批 Meme<input name="batch_size" type="number" min="1" max="100" value="10"></label>
+<label>每批 Meme<select name="batch_size"><option>10</option><option selected>20</option><option>50</option></select></label>
 <button>导出并显示</button></form>
-<form method="post" action="/dry-run"><input name="batch" type="hidden" value="{batch_number}">
-<button>校验 / dry-run 当前候选</button></form></section>
+<form method="post" action="/submit-review"><input name="batch" type="hidden" value="{batch_number}">
+<button>提交到元数据整理审核池</button></form></section>
 <section><h2>PowerShell 预设</h2>{_copy_block("导出", export_command)}
-{_copy_block("dry-run", dry_run_command)}{_copy_block("apply（人工确认后使用）", apply_command)}</section>
+{_copy_block("提交到人工审核", import_command)}</section>
 <section class="prompt"><h2>交给 Codex Luna 的提示词</h2>{_copy_block("直接复制整段", prompt)}</section>
 <section><h2>{batch_name} 图片</h2>{cards}</section>
 <script>function copyPrevious(button){{navigator.clipboard.writeText(button.previousElementSibling.value);button.textContent='已复制'}}</script>
@@ -171,7 +171,7 @@ def run_ui(
                 form = parse_qs(self.rfile.read(length).decode("utf-8"))
                 batch = int(form.get("batch", ["1"])[0])
                 if self.path == "/export":
-                    size = int(form.get("batch_size", ["10"])[0])
+                    size = int(form.get("batch_size", ["20"])[0])
                     if _load_manifest(resolved_work_dir, batch):
                         message = f"batch_{batch:04d} 已存在，直接显示；候选文件未覆盖"
                     else:
@@ -182,12 +182,15 @@ def run_ui(
                             batch_size=size,
                         )
                         message = f"batch_{batch:04d} 已导出"
-                elif self.path == "/dry-run":
+                elif self.path == "/submit-review":
                     result = import_candidates(
                         _batch_dir(resolved_work_dir, batch) / "candidates.jsonl",
                         database_path=database_path,
                     )
-                    message = f"dry-run 完成：{result['changed_meme_count']} 个 Meme 有变化"
+                    message = (
+                        f"已提交 {result['suggestion_count']} 条 Luna 建议；"
+                        "请前往 Meme Vault 的“元数据整理”进行人工审核"
+                    )
                 else:
                     self.send_error(404)
                     return

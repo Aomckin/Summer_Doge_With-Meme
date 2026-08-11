@@ -334,9 +334,9 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 - [x] 按 `meme_id` 分批导出完整有序图片组、现有标签、标签词典和候选模板。
 - [x] 提供仅监听本机的轻量页面、图片预览、PowerShell 预设和 Luna 提示词复制。
-- [x] 候选使用严格 Schema；导入默认 dry-run，保护手动标签，apply 前备份并写审计。
+- [x] 候选使用严格 Schema并保护手动标签；原 v0.5.2 双阶段导入已在 v0.6.1 统一审核池中移除。
 
-验收：不调用应用配置的外部 AI Provider；已有批次不覆盖；真实数据库只有显式 `--apply` 才可写入。
+验收：不调用应用配置的外部 AI Provider；已有批次不覆盖；Luna 候选只进入人工审核池，不能直接修改 Meme。
 
 ### v0.5.3：ZIP 压缩包批量导入（已完成）
 
@@ -395,7 +395,7 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 - [x] 前端新增关键词/语义模式、显式提交、score 展示、索引管理器和独立的语义相似 Meme 详情区域；旧响应由 AbortController/请求身份保护。
 - [x] 完成向量、内容哈希、融合客户端、任务协调、失效、搜索缓存、相似推荐和前端交互测试，并更新 README、代码现状和版本。
 
-验收：向量只保存在本地 SQLite，搜索只使用当前激活模型兼容的 ready 向量并由本地 NumPy 排序；翻页不重复调用 Provider；索引任务不并发写 SQLite且不会在启动时自动恢复消费；关键词分页、稳定乱序、上传、下载、标签、模板和 AI 全量回归继续通过。聊天记录解析保留给 v0.6.1。
+验收：向量只保存在本地 SQLite，搜索只使用当前激活模型兼容的 ready 向量并由本地 NumPy 排序；翻页不重复调用 Provider；索引任务不并发写 SQLite且不会在启动时自动恢复消费；关键词分页、稳定乱序、上传、下载、标签、模板和 AI 全量回归继续通过。
 
 ### v0.6-R：语义模块解耦（已完成）
 
@@ -407,7 +407,18 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：本轮只调整依赖方向和内部职责，不改变 API、向量格式、索引算法、搜索排序或前端行为；v0.6.1 未开始。
 
-### v0.6.1：聊天场景推荐 Meme
+### v0.6.1：AI 分析工作流重构与批量元数据补全（已完成）
+
+- [x] 新增统一 `MemeEnrichmentSuggestion`、稳定 source hash、历史状态、审计记录和字段级安全 Apply。
+- [x] 网页单项分析、Provider 后台批量 Job 和 Luna 离线候选共用 `MemeEnrichmentService` 与审核池。
+- [x] Provider Job 支持范围筛选、1/2/4/8 并发、限流重试、取消、失败重试、启动中断和 Token 统计，不自动修改 Meme。
+- [x] Luna 导出升级为标题、描述、标签和已有模板候选，默认 20、可选 10/20/50；导入不再区分 dry-run/apply，所有格式都直接创建待人工审核 Suggestion。
+- [x] 前端新增“元数据整理”任务与建议审核工作台，支持字段选择、全部采用、拒绝、重分析、过滤、来源、过期警告、安全批量新增标签和 IME 安全快捷键。
+- [x] 保留旧 `MemeAIAnalysis` 与 v0.5.2 标签 JSONL 兼容路径；Suggestion 创建/拒绝不使向量过期，实际 Apply 才调用 DerivedDataInvalidation。
+
+验收：AI 和 Luna 只生产候选；Meme 修改后旧候选默认不可静默覆盖；后台任务单项失败不终止整批且重启不自动继续消费；单项与批量不复制保存逻辑；现有 Caption、语义、上传、分页、下载、标签和模板流程继续通过。
+
+### v0.6.2：聊天场景推荐 Meme
 
 - [ ] 基于 v0.6 完成的向量化能力，根据聊天场景推荐 Meme
 
@@ -472,7 +483,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.6 多模态语义索引、自然语言搜索与相似 Meme，以及 v0.6-R 语义模块解耦已完成
+当前状态：v0.6.1 AI 分析工作流重构与批量元数据补全已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -480,6 +491,6 @@ ORM：SQLAlchemy
 图片处理：Pillow
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
-AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图组级分析 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：v0.6.1——聊天场景推荐 Meme（本阶段未开始）
+AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
+下一步：v0.6.2——聊天场景推荐 Meme（本阶段未开始）
 ```

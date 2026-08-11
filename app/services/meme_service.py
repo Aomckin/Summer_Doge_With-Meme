@@ -326,9 +326,12 @@ class MemeService:
         limit: int = 100,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
-        return self.repository.list(offset=offset, limit=limit, tags=tags, q=q)
+        return self.repository.list(
+            offset=offset, limit=limit, tags=tags, q=q, template_id=template_id
+        )
 
     def list_meme_page(
         self,
@@ -337,6 +340,7 @@ class MemeService:
         page_size: int = 24,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
         sort: str = "default",
         shuffle_seed: int | None = None,
     ) -> MemePage:
@@ -356,7 +360,9 @@ class MemeService:
                 )
             effective_seed = shuffle_seed
 
-        total = self.repository.count_filtered(tags=tags, q=q)
+        total = self.repository.count_filtered(
+            tags=tags, q=q, template_id=template_id
+        )
         total_pages = (total + page_size - 1) // page_size
         effective_page = min(page, total_pages) if total_pages else 1
         items = self.repository.list_page(
@@ -364,6 +370,7 @@ class MemeService:
             limit=page_size,
             tags=tags,
             q=q,
+            template_id=template_id,
             sort=sort,
             shuffle_seed=effective_seed,
         )
@@ -424,9 +431,11 @@ class MemeService:
         # 当前只是简单转发，仍保留 Service 入口，避免 API 直接依赖数据层。
         return self.tag_repository.list()
 
-    def get_random_meme(self, *, tags: Sequence[str] | None = None) -> Meme:
+    def get_random_meme(
+        self, *, tags: Sequence[str] | None = None, template_id: int | None = None
+    ) -> Meme:
         # Repository 负责随机查询，Service 负责解释“没有结果”及检查文件。
-        meme = self.repository.get_random(tags=tags)
+        meme = self.repository.get_random(tags=tags, template_id=template_id)
         if meme is None:
             raise NoMemesAvailableError("No Meme matches the requested range")
         self._ensure_files_exist(meme)

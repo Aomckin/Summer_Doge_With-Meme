@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -32,7 +33,22 @@ class AIUpstreamError(AIClientError):
 
 
 class AIInvalidResponseError(AIClientError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        model_name: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        total_tokens: int = 0,
+        response_summary: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.model_name = model_name
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.total_tokens = total_tokens
+        self.response_summary = response_summary
 
 
 @dataclass(frozen=True)
@@ -61,6 +77,21 @@ class AIImageResult:
 
 
 @dataclass(frozen=True)
+class AIEnrichmentResult:
+    model_name: str
+    suggested_title: str | None
+    suggested_description: str | None
+    add_tags: tuple[str, ...]
+    remove_tags: tuple[str, ...]
+    suggested_template_name: str | None
+    confidence: dict[str, float | None] | None
+    reason: str | None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass(frozen=True)
 class AIInputImage:
     image_bytes: bytes
     mime_type: str
@@ -74,6 +105,9 @@ class AICaptionResult:
 
 
 class AIClient(Protocol):
+    def analyze_enrichment(self, *, images: Sequence[AIInputImage], title: str,
+        description: str | None, tags: Sequence[str], template: str | None,
+        existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIEnrichmentResult: ...
     def analyze_images(self, *, images: Sequence[AIInputImage], existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIImageResult: ...
     def analyze_image(
         self,
@@ -172,6 +206,41 @@ ANALYSIS_SCHEMA = {
     "additionalProperties": False,
 }
 
+ENRICHMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggested_title": {"type": ["string", "null"], "maxLength": 255},
+        "suggested_description": {"type": ["string", "null"], "maxLength": 2000},
+        "add_tags": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 100}},
+        "remove_tags": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 100}},
+        "suggested_template_name": {"type": ["string", "null"], "maxLength": 100},
+        "confidence": {
+            "type": ["object", "null"],
+            "properties": {
+                "title": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+                "description": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+                "tags": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+                "template": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+            },
+            "required": ["title", "description", "tags", "template"],
+            "additionalProperties": False,
+        },
+        "reason": {"type": ["string", "null"], "maxLength": 2000},
+    },
+    "required": ["suggested_title", "suggested_description", "add_tags", "remove_tags", "suggested_template_name", "confidence", "reason"],
+    "additionalProperties": False,
+}
+
+ENRICHMENT_SYSTEM_PROMPT = (
+    "你是 Meme 元数据整理助手。完整理解按顺序提供的图片组，并只提出最小必要修改。"
+    "当前标题合理时 suggested_title 返回 null；当前描述充分时 suggested_description 返回 null。"
+    "标签优先复用已有标签词典，避免图片、搞笑、表情包等低信息标签；只删除明显错误且非人工维护的标签。"
+    "模板只能按名称从已有模板列表选择，没有合适模板时返回 null，不得创建模板。"
+    "不要为了修改而修改。无法可靠给出置信度时 confidence 返回 null，不要编造伪精确概率。"
+    "输出必须是一个 JSON 对象，并严格包含以下字段：suggested_title、suggested_description、"
+    "add_tags、remove_tags、suggested_template_name、confidence、reason。不得省略字段或增加字段。"
+)
+
 CAPTION_SYSTEM_PROMPT = (
     "你是中文 Meme 文案创作助手。根据用户提供的完整有序图片组和资料生成"
     "可直接用于 Meme 的简体中文文案。文案要自然、具体、有梗，不要解释创作过程，"
@@ -239,6 +308,7 @@ class _HTTPAIClient:
     def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            response: httpx.Response | None = None
             try:
                 if self.http_client is not None:
                     response = self.http_client.post(
@@ -273,8 +343,15 @@ class _HTTPAIClient:
                     raise AIUpstreamError(
                         f"AI service returned HTTP {response.status_code}"
                     )
-            if self.retry_delay_seconds:
-                time.sleep(self.retry_delay_seconds * (attempt + 1))
+            retry_after = 0.0
+            if response is not None and response.status_code == 429:
+                try:
+                    retry_after = max(0.0, float(response.headers.get("Retry-After", "0")))
+                except ValueError:
+                    retry_after = 0.0
+            delay = min(30.0, max(retry_after, self.retry_delay_seconds * (2 ** attempt)))
+            if delay:
+                time.sleep(delay)
         raise AIUpstreamError("AI service is unavailable") from last_error
 
     @staticmethod
@@ -378,6 +455,149 @@ class _HTTPAIClient:
             tags=tags,
             template_id=template_id,
         )
+
+    @staticmethod
+    def _response_usage(response_payload: object) -> tuple[str, int, int, int]:
+        model_name = ""
+        input_tokens = output_tokens = total_tokens = 0
+        if isinstance(response_payload, dict):
+            model_name = str(response_payload.get("model") or "").strip()
+            usage = response_payload.get("usage")
+            if isinstance(usage, dict):
+                try:
+                    input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+                    output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                    total_tokens = int(usage.get("total_tokens") or input_tokens + output_tokens)
+                except (TypeError, ValueError):
+                    input_tokens = output_tokens = total_tokens = 0
+        return model_name, input_tokens, output_tokens, total_tokens
+
+    @staticmethod
+    def _response_summary(output_text: str, maximum: int = 2000) -> str | None:
+        text = output_text.strip()
+        if not text:
+            return None
+        text = re.sub(r"data:[^;\s]+;base64,[A-Za-z0-9+/=]+", "[redacted data URL]", text)
+        text = re.sub(
+            r'(?i)(["\']?(?:api[-_ ]?key|authorization|bearer|token)["\']?\s*:\s*)["\'][^"\']*["\']',
+            r'\1"[redacted]"',
+            text,
+        )
+        text = re.sub(
+            r'(?i)(api[-_ ]?key|authorization|bearer|token)(\s*[=:]\s*|\s+)["\']?[A-Za-z0-9._-]{8,}',
+            r"\1\2[redacted]",
+            text,
+        )
+        return text[:maximum]
+
+    @staticmethod
+    def _load_enrichment_json(output_text: str) -> object:
+        """Conservatively unwrap transport noise without rewriting model data."""
+        cleaned = output_text.lstrip("\ufeff").strip()
+        candidates = [cleaned]
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            candidates.append(fenced.group(1).strip())
+        first, last = cleaned.find("{"), cleaned.rfind("}")
+        if 0 <= first < last:
+            candidates.append(cleaned[first:last + 1])
+        last_error: Exception | None = None
+        for candidate in dict.fromkeys(candidates):
+            try:
+                return json.loads(candidate)
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                last_error = error
+        raise ValueError("response does not contain a valid JSON object") from last_error
+
+    def _parse_enrichment_result(self, response_payload: object, output_text: str) -> AIEnrichmentResult:
+        model_name, input_tokens, output_tokens, total_tokens = self._response_usage(response_payload)
+        try:
+            value = self._load_enrichment_json(output_text)
+            if not isinstance(value, dict):
+                raise TypeError
+            def optional_text(name: str, maximum: int) -> str | None:
+                raw = value[name]
+                if raw is None:
+                    return None
+                if not isinstance(raw, str):
+                    raise TypeError
+                text = raw.strip()
+                if not text or len(text) > maximum:
+                    raise ValueError
+                return text
+            def tags(name: str) -> tuple[str, ...]:
+                raw = value[name]
+                if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+                    raise TypeError
+                normalized = tuple(dict.fromkeys(item.strip().lower() for item in raw if item.strip()))
+                if len(normalized) > 8 or any(len(item) > 100 for item in normalized):
+                    raise ValueError
+                return normalized
+            add_tags = tags("add_tags")
+            remove_tags = tags("remove_tags")
+            if set(add_tags) & set(remove_tags):
+                raise ValueError
+            confidence = value["confidence"]
+            if confidence is not None:
+                if not isinstance(confidence, dict) or set(confidence) != {"title", "description", "tags", "template"}:
+                    raise TypeError
+                if any(
+                    score is not None
+                    and (isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1)
+                    for score in confidence.values()
+                ):
+                    raise ValueError
+            reason = optional_text("reason", 2000)
+            return AIEnrichmentResult(
+                model_name=model_name or self.model,
+                suggested_title=optional_text("suggested_title", 255),
+                suggested_description=optional_text("suggested_description", 2000),
+                add_tags=add_tags,
+                remove_tags=remove_tags,
+                suggested_template_name=optional_text("suggested_template_name", 100),
+                confidence=confidence,
+                reason=reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise AIInvalidResponseError(
+                "AI service returned an invalid enrichment response",
+                model_name=model_name or self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                response_summary=self._response_summary(output_text),
+            ) from error
+
+    def _invalid_enrichment_response(
+        self,
+        message: str,
+        response_payload: object,
+        response_text: str,
+    ) -> AIInvalidResponseError:
+        model_name, input_tokens, output_tokens, total_tokens = self._response_usage(response_payload)
+        return AIInvalidResponseError(
+            message,
+            model_name=model_name or self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            response_summary=self._response_summary(response_text),
+        )
+
+    @staticmethod
+    def _enrichment_context(*, title: str, description: str | None, tags: Sequence[str],
+                            template: str | None, existing_tags: Sequence[str],
+                            existing_templates: Sequence[AITemplateCandidate]) -> str:
+        template_names = ", ".join(item.name for item in existing_templates[:200]) or "（无）"
+        dictionary = ", ".join(existing_tags[:500]) or "（无）"
+        return "\n".join((
+            f"当前标题：{title}", f"当前描述：{description or '（空）'}",
+            f"当前标签：{', '.join(tags) or '（无）'}", f"当前模板：{template or '（未归类）'}",
+            f"可复用标签词典：{dictionary}", f"可复用模板名称：{template_names}",
+        ))
 
     @staticmethod
     def _template_prompt(
@@ -515,6 +735,38 @@ class OpenAIResponsesClient(_HTTPAIClient):
 
         response = self._post("/responses", payload)
         return self._parse_response(response)
+
+    def analyze_enrichment(self, *, images: Sequence[AIInputImage], title: str,
+        description: str | None, tags: Sequence[str], template: str | None,
+        existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIEnrichmentResult:
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        parts: list[dict[str, object]] = [{"type": "input_text", "text": self._enrichment_context(
+            title=title, description=description, tags=tags, template=template,
+            existing_tags=existing_tags, existing_templates=existing_templates,
+        )}]
+        for image in sorted(images, key=lambda item: item.position):
+            parts.append({"type": "input_text", "text": f"完整 Meme 的第 {image.position + 1} 张图片："})
+            parts.append({"type": "input_image", "image_url": f"data:{image.mime_type};base64,{base64.b64encode(image.image_bytes).decode('ascii')}", "detail": "auto"})
+        response = self._post("/responses", {
+            "model": self.model, "store": False,
+            "input": [
+                {"role": "system", "content": [{"type": "input_text", "text": ENRICHMENT_SYSTEM_PROMPT}]},
+                {"role": "user", "content": parts},
+            ],
+            "text": {"format": {"type": "json_schema", "name": "meme_enrichment", "strict": True, "schema": ENRICHMENT_SCHEMA}},
+        })
+        payload: object = None
+        try:
+            payload = response.json()
+            output_text = self._extract_output_text(payload)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise self._invalid_enrichment_response(
+                "AI service returned no structured enrichment output",
+                payload,
+                response.text,
+            ) from error
+        return self._parse_enrichment_result(payload, output_text)
 
     def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
         return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)
@@ -745,6 +997,43 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                 "AI service returned no structured output"
             ) from error
         return self._parse_result(response_payload, output_text)
+
+    def analyze_enrichment(self, *, images: Sequence[AIInputImage], title: str,
+        description: str | None, tags: Sequence[str], template: str | None,
+        existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate]) -> AIEnrichmentResult:
+        if not images:
+            raise AIInvalidResponseError("At least one Meme image is required")
+        parts: list[dict[str, object]] = [{"type": "text", "text": self._enrichment_context(
+            title=title, description=description, tags=tags, template=template,
+            existing_tags=existing_tags, existing_templates=existing_templates,
+        )}]
+        for image in sorted(images, key=lambda item: item.position):
+            parts.append({"type": "text", "text": f"完整 Meme 的第 {image.position + 1} 张图片："})
+            parts.append({"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{base64.b64encode(image.image_bytes).decode('ascii')}"}})
+        request_payload: dict[str, object] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": ENRICHMENT_SYSTEM_PROMPT + "\nJSON Schema：" + json.dumps(ENRICHMENT_SCHEMA, ensure_ascii=False)},
+                {"role": "user", "content": parts},
+            ],
+            "response_format": {"type": "json_object"}, "max_tokens": 1600,
+        }
+        if "dashscope.aliyuncs.com" in self.base_url.lower():
+            request_payload["enable_thinking"] = False
+        response = self._post("/chat/completions", request_payload)
+        payload: object = None
+        try:
+            payload = response.json()
+            output_text = payload["choices"][0]["message"]["content"]
+            if not isinstance(output_text, str):
+                raise TypeError
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise self._invalid_enrichment_response(
+                "AI service returned no structured enrichment output",
+                payload,
+                response.text,
+            ) from error
+        return self._parse_enrichment_result(payload, output_text)
 
     def analyze_image(self, *, image_bytes: bytes, mime_type: str, existing_tags: Sequence[str], existing_templates: Sequence[AITemplateCandidate] = ()) -> AIImageResult:
         return self.analyze_images(images=[AIInputImage(image_bytes, mime_type, 0)], existing_tags=existing_tags, existing_templates=existing_templates)

@@ -9,6 +9,7 @@ from app.schemas.meme import MemeResponse
 class SemanticSearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=500)
     tags: list[str] = Field(default_factory=list)
+    template_id: int | None = Field(default=None, ge=1)
     page: int = Field(default=1, ge=1)
     page_size: Literal[24, 48, 96] = 48
 

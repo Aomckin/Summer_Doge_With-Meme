@@ -227,6 +227,7 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
         limit: options.pageSize,
         q: options.q,
         tags: options.tags,
+        templateId: options.templateId,
         signal: options.signal,
       });
       const total = items.length === options.pageSize
@@ -477,7 +478,7 @@ describe("MemeVaultApp", () => {
       .toBe("/media/images/stored-7.png");
   });
 
-  it("paginates templates by twelve, jumps by Enter, creates on the last page, and backs up after deletion", async () => {
+  it("paginates templates by six, jumps by Enter, creates on the last page, and backs up after deletion", async () => {
     let templates = Array.from({ length: 25 }, (_, index) => ({
       ...dogeTemplate,
       id: index + 1,
@@ -497,10 +498,10 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), api);
     await app.start();
     button("模板管理").click();
-    expect(document.querySelectorAll(".template-row")).toHaveLength(12);
+    expect(document.querySelectorAll(".template-row")).toHaveLength(6);
 
     document.querySelector<HTMLButtonElement>('[data-template-page="2"]')?.click();
-    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 2 / 3 页");
+    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 2 / 5 页");
     const jump = document.querySelector<HTMLInputElement>("[data-template-page-input]")!;
     jump.value = "99";
     jump.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -510,12 +511,38 @@ describe("MemeVaultApp", () => {
     (form.elements.namedItem("name") as HTMLInputElement).value = "新模板";
     form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.querySelector('[data-edit-template="26"]')).not.toBeNull());
-    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 3 / 3 页");
+    expect(document.querySelector("#template-pagination")?.textContent).toContain("第 5 / 5 页");
 
     document.querySelector<HTMLButtonElement>('[data-delete-template="25"]')?.click();
     await vi.waitFor(() => expect(document.querySelector('[data-delete-template="25"]')).toBeNull());
     document.querySelector<HTMLButtonElement>('[data-delete-template="26"]')?.click();
-    await vi.waitFor(() => expect(document.querySelector("#template-pagination")?.textContent).toContain("第 2 / 2 页"));
+    await vi.waitFor(() => expect(document.querySelector("#template-pagination")?.textContent).toContain("第 4 / 4 页"));
+  });
+
+  it("filters the main library by one template and combines it with tags", async () => {
+    const listMemePage = vi.fn().mockResolvedValue(memePage([]));
+    const api = makeApi({
+      listMemePage,
+      listTemplates: vi.fn().mockResolvedValue([dogeTemplate, wojakTemplate]),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    document.querySelector<HTMLButtonElement>('[data-template-filter="3"]')?.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateId: 3, tags: [] }),
+    ));
+    expect(document.querySelector('[data-template-filter="3"]')?.classList.contains("is-active")).toBe(true);
+
+    button("funny").click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateId: 3, tags: ["funny"] }),
+    ));
+
+    document.querySelector<HTMLButtonElement>('[data-template-filter=""]')?.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateId: null, tags: ["funny"] }),
+    ));
   });
 
   it("keeps one shuffle seed across paging and filters, then reshuffles and clears it", async () => {
@@ -708,7 +735,7 @@ describe("MemeVaultApp", () => {
 
     button("随机一个").click();
     await vi.runAllTimersAsync();
-    expect(api.getRandomMeme).toHaveBeenCalledWith(["funny"]);
+    expect(api.getRandomMeme).toHaveBeenCalledWith(["funny"], null);
     expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
       "随机 Meme",
     );

@@ -12,6 +12,7 @@ from app.api.memes import router as meme_router
 from app.api.import_jobs import router as import_job_router
 from app.api.export_jobs import router as export_job_router
 from app.api.embedding_jobs import router as embedding_job_router
+from app.api.enrichment import router as enrichment_router
 from app.api.semantic import router as semantic_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
@@ -33,6 +34,7 @@ from app.database import SessionLocal, create_tables
 from app.services.import_job_service import ImportJobManager
 from app.services.export_job_service import ExportJobManager
 from app.services.embedding_job_manager import EmbeddingJobManager
+from app.services.enrichment_job_manager import EnrichmentJobManager
 from app.services.semantic_index import SemanticIndex, SemanticSearchResultCache
 
 
@@ -43,12 +45,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.import_job_manager.recover_interrupted()
     application.state.export_job_manager.startup()
     application.state.embedding_job_manager.startup()
+    application.state.enrichment_job_manager.startup()
     try:
         yield
     finally:
         application.state.import_job_manager.shutdown()
         application.state.export_job_manager.shutdown()
         application.state.embedding_job_manager.shutdown()
+        application.state.enrichment_job_manager.shutdown()
 
 
 def health_check() -> dict[str, str]:
@@ -82,7 +86,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.6.0",
+        version="0.6.1",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -109,6 +113,12 @@ def create_app(
         resolved_thumbnails,
         ai_settings_key_file.resolve(),
     )
+    application.state.enrichment_job_manager = EnrichmentJobManager(
+        SessionLocal,
+        resolved_images,
+        resolved_thumbnails,
+        ai_settings_key_file.resolve(),
+    )
     application.mount(
         IMAGES_URL_PREFIX,
         StaticFiles(directory=resolved_images),
@@ -127,6 +137,7 @@ def create_app(
     application.include_router(import_job_router)
     application.include_router(export_job_router)
     application.include_router(embedding_job_router)
+    application.include_router(enrichment_router)
     application.include_router(semantic_router)
     application.include_router(caption_router)
     application.include_router(tag_router)

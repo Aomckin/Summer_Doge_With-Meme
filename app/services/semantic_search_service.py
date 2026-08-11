@@ -91,7 +91,13 @@ class SemanticSearchService:
             raise
 
     def search(
-        self, *, query: str, tags: list[str], page: int, page_size: int
+        self,
+        *,
+        query: str,
+        tags: list[str],
+        page: int,
+        page_size: int,
+        template_id: int | None = None,
     ) -> dict[str, object]:
         model = self.active_model()
         if model is None:
@@ -104,6 +110,7 @@ class SemanticSearchService:
             self.semantic_index.generation,
             normalized_query,
             normalized_tags,
+            template_id,
         )
         hits = self.result_cache.get(key)
         if hits is None:
@@ -117,11 +124,11 @@ class SemanticSearchService:
             )
             vector = normalize_vector(result.vector, dimension=EMBEDDING_DIMENSION)
             allowed = None
-            if normalized_tags:
+            if normalized_tags or template_id is not None:
                 allowed = {
                     meme.id
                     for meme in MemeRepository(self.session).list_all_for_export(
-                        tags=normalized_tags
+                        tags=normalized_tags, template_id=template_id
                     )
                 }
             hits = self.semantic_index.search(

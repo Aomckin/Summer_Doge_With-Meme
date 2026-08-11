@@ -2,6 +2,11 @@ import {
   ApiError,
   analyzeMeme,
   confirmAIAnalysis,
+  enrichMeme,
+  createEnrichmentJob, estimateEnrichmentJob, getEnrichmentJob, cancelEnrichmentJob,
+  retryFailedEnrichmentJob, listEnrichmentSuggestions,
+  applyEnrichmentSuggestion, rejectEnrichmentSuggestion,
+  reanalyzeEnrichmentSuggestion, getMeme,
   createCaption,
   createAIModel,
   createAIProvider,
@@ -69,6 +74,7 @@ import type {
   SemanticSearchInput, SemanticSearchResponse, ScoredMemeResponse,
   SemanticIndexStatus, EmbeddingJobScope, EmbeddingJobResponse,
   EmbeddingJobItemPage, MemeEmbeddingStatus,
+  EnrichmentSuggestionResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -98,12 +104,15 @@ import {
   renderOperationError,
   renderRelationDialog,
   renderTags,
+  renderTemplateFilters,
   renderTemplateManager,
   renderTemplateReferenceInputPreview,
   renderToolbar,
+  TEMPLATE_PAGE_SIZE,
 } from "./ui";
 import { clampPage } from "./pagination";
 import { SemanticIndexManager } from "./semantic-index-manager";
+import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -152,7 +161,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   deleteTemplate(id: number): Promise<void>;
   uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse>;
   deleteTemplateReferenceImage(id: number): Promise<void>;
-  getRandomMeme(tags: string[], signal?: AbortSignal): Promise<MemeResponse>;
+  getRandomMeme(tags: string[], templateId?: number | null, signal?: AbortSignal): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
   createImportJob(input: CreateImportJobInput): Promise<ImportJobResponse>;
   getImportJob(id: number): Promise<ImportJobResponse>;
@@ -186,6 +195,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   cancelEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
   retryFailedEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
   deleteEmbeddingJob?(id: number): Promise<void>;
+  enrichMeme?(id: number): Promise<EnrichmentSuggestionResponse>;
   analyzeMeme(id: number): Promise<AIAnalysisResponse>;
   confirmAIAnalysis(
     memeId: number,
@@ -229,6 +239,7 @@ const defaultApi: MemeApi = {
   deleteEmbeddingJob,
   analyzeMeme,
   confirmAIAnalysis,
+  enrichMeme,
   listAIProviderPresets,
   listAIProviders,
   createAIProvider,
@@ -268,6 +279,8 @@ function initialState(): AppState {
     query: "",
     selectedTags: [],
     tagsExpanded: false,
+    selectedTemplateId: null,
+    templatesExpanded: false,
     page: 1,
     pageSize: storedPageSize(),
     totalMemes: 0,
@@ -338,6 +351,7 @@ export class MemeVaultApp {
   private readonly captionLab: CaptionLabController;
   private readonly tagManager: TagManagerController;
   private readonly semanticIndexManager: SemanticIndexManager;
+  private readonly enrichmentWorkbench: EnrichmentWorkbenchController;
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
@@ -364,6 +378,34 @@ export class MemeVaultApp {
         retryFailed: id => (this.api.retryFailedEmbeddingJob ?? retryFailedEmbeddingJob)(id),
         deleteJob: id => (this.api.deleteEmbeddingJob ?? deleteEmbeddingJob)(id),
       },
+    );
+    this.enrichmentWorkbench = new EnrichmentWorkbenchController(
+      this.elements.openEnrichmentButton,
+      {
+        createJob: input => createEnrichmentJob(input),
+        estimateJob: input => estimateEnrichmentJob(input),
+        getJob: id => getEnrichmentJob(id),
+        cancelJob: id => cancelEnrichmentJob(id),
+        retryFailed: id => retryFailedEnrichmentJob(id),
+        listSuggestions: (status, source) => listEnrichmentSuggestions(status, source),
+        applySuggestion: (id, fields, allowStale) => applyEnrichmentSuggestion(id, fields, allowStale),
+        rejectSuggestion: id => rejectEnrichmentSuggestion(id),
+        reanalyzeSuggestion: id => reanalyzeEnrichmentSuggestion(id),
+        getMeme: id => getMeme(id),
+        listTemplates: () => this.api.listTemplates(),
+      },
+      async memeId => {
+        if (this.state.selectedMeme?.id === memeId) {
+          this.replaceMeme(await getMeme(memeId));
+        }
+        await Promise.all([
+          this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh(),
+        ]);
+        renderTags(this.elements, this.state);
+        renderLibrary(this.elements, this.state);
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      },
+      () => ({ query: this.state.query, tags: [...this.state.selectedTags] }),
     );
     this.settings = new AISettingsController(this.elements, this.api);
     this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
@@ -538,6 +580,22 @@ export class MemeVaultApp {
       this.state.page = 1;
       void this.reloadMemes();
     });
+
+    this.elements.templateFilters.addEventListener("click", (event) => {
+      const target = (event.target as Element).closest<HTMLButtonElement>("button");
+      if (!target) return;
+      if (target.matches("[data-expand-templates]")) {
+        this.state.templatesExpanded = !this.state.templatesExpanded;
+        renderTemplateFilters(this.elements, this.state);
+        return;
+      }
+      if (!target.hasAttribute("data-template-filter")) return;
+      const id = Number(target.dataset.templateFilter);
+      this.state.selectedTemplateId = Number.isInteger(id) && id > 0 ? id : null;
+      this.state.page = 1;
+      renderTemplateFilters(this.elements, this.state);
+      void this.reloadMemes();
+    });
     this.elements.pagination.addEventListener("click", (event) => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-page]");
       if (button) void this.goToPage(Number(button.dataset.page));
@@ -582,7 +640,7 @@ export class MemeVaultApp {
       this.batchDownload.open({
         query: this.state.query,
         tags: this.state.selectedTags,
-        templateId: null,
+        templateId: this.state.selectedTemplateId,
       });
     });
     this.elements.templateForm
@@ -760,7 +818,7 @@ export class MemeVaultApp {
       if (!button || this.templateBusy) return;
       this.state.templatePage = clampPage(
         Number(button.dataset.templatePage),
-        Math.ceil(this.state.availableTemplates.length / 12),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
       );
       renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
     });
@@ -770,7 +828,7 @@ export class MemeVaultApp {
       event.preventDefault();
       this.state.templatePage = clampPage(
         Number(input.value),
-        Math.ceil(this.state.availableTemplates.length / 12),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
       );
       renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
     });
@@ -848,6 +906,7 @@ export class MemeVaultApp {
   private render(): void {
     renderToolbar(this.elements, this.state);
     renderOperationError(this.elements, this.state);
+    renderTemplateFilters(this.elements, this.state);
     renderTags(this.elements, this.state);
     renderLibrary(this.elements, this.state);
     renderDetail(
@@ -862,9 +921,17 @@ export class MemeVaultApp {
   private async refreshTemplates(): Promise<void> {
     try {
       this.state.availableTemplates = await this.api.listTemplates();
+      if (
+        this.state.selectedTemplateId !== null
+        && !this.state.availableTemplates.some(
+          template => template.id === this.state.selectedTemplateId,
+        )
+      ) {
+        this.state.selectedTemplateId = null;
+      }
       this.state.templatePage = clampPage(
         this.state.templatePage,
-        Math.ceil(this.state.availableTemplates.length / 12),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
       );
       if (this.state.aiAnalysis?.suggested_template) {
         const currentSuggestion = this.state.availableTemplates.find(
@@ -881,6 +948,7 @@ export class MemeVaultApp {
         }
       }
       this.batchUpload.setTemplates(this.state.availableTemplates);
+      renderTemplateFilters(this.elements, this.state);
       renderDetail(
         this.elements,
         this.state,
@@ -955,7 +1023,7 @@ export class MemeVaultApp {
       if (creating) {
         this.state.templatePage = Math.max(
           1,
-          Math.ceil(this.state.availableTemplates.length / 12),
+          Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
         );
       }
     } catch (error) {
@@ -1042,13 +1110,16 @@ export class MemeVaultApp {
       );
       this.state.templatePage = clampPage(
         this.state.templatePage,
-        Math.ceil(this.state.availableTemplates.length / 12),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
       );
       if (this.state.selectedMeme?.template?.id === templateId) {
         this.state.selectedMeme = {
           ...this.state.selectedMeme,
           template: null,
         };
+      }
+      if (this.state.selectedTemplateId === templateId) {
+        this.state.selectedTemplateId = null;
       }
       if (this.state.aiAnalysis?.suggested_template?.id === templateId) {
         this.state.aiAnalysis = {
@@ -1103,6 +1174,7 @@ export class MemeVaultApp {
         ? await (this.api.semanticSearch ?? semanticSearch)({
             query: this.state.semanticSubmittedQuery,
             tags: this.state.selectedTags,
+            template_id: this.state.selectedTemplateId,
             page: this.state.page,
             page_size: this.state.pageSize,
             signal: controller.signal,
@@ -1112,6 +1184,7 @@ export class MemeVaultApp {
             pageSize: this.state.pageSize,
             q: this.state.query,
             tags: this.state.selectedTags,
+            templateId: this.state.selectedTemplateId,
             sort: this.state.listSort,
             shuffleSeed: this.state.shuffleSeed,
             signal: controller.signal,
@@ -1462,7 +1535,10 @@ export class MemeVaultApp {
     this.state.actionError = null;
     renderToolbar(this.elements, this.state);
     try {
-      const meme = await this.api.getRandomMeme(this.state.selectedTags);
+      const meme = await this.api.getRandomMeme(
+        this.state.selectedTags,
+        this.state.selectedTemplateId,
+      );
       this.selectMeme(meme);
     } catch (error) {
       this.state.actionError = readableError(error);
@@ -1710,6 +1786,13 @@ export class MemeVaultApp {
     this.state.aiError = null;
     renderDetail(this.elements, this.state, this.editing, this.editDraft);
     try {
+      if (this.api.enrichMeme) {
+        const suggestion = await this.api.enrichMeme(meme.id);
+        if (this.state.selectedMeme?.id === meme.id) {
+          await this.enrichmentWorkbench.openSuggestion(suggestion);
+        }
+        return;
+      }
       const analysis = await this.api.analyzeMeme(meme.id);
       if (this.state.selectedMeme?.id !== meme.id) {
         return;

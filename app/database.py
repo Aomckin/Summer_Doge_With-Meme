@@ -84,6 +84,26 @@ def run_startup_migrations(bind: Engine = engine) -> None:
             "snapshot_json",
             "ALTER TABLE export_jobs ADD COLUMN snapshot_json TEXT NOT NULL DEFAULT '[]'",
         ),
+        (
+            "meme_enrichment_suggestions",
+            "review_source_hash",
+            "ALTER TABLE meme_enrichment_suggestions ADD COLUMN review_source_hash VARCHAR(64)",
+        ),
+        (
+            "enrichment_jobs",
+            "start_meme_id",
+            "ALTER TABLE enrichment_jobs ADD COLUMN start_meme_id INTEGER",
+        ),
+        (
+            "enrichment_jobs",
+            "end_meme_id",
+            "ALTER TABLE enrichment_jobs ADD COLUMN end_meme_id INTEGER",
+        ),
+        (
+            "enrichment_job_items",
+            "response_summary",
+            "ALTER TABLE enrichment_job_items ADD COLUMN response_summary TEXT",
+        ),
     )
     with bind.begin() as connection:
         for table_name, column_name, statement in upgrades:

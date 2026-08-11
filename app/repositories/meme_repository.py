@@ -39,6 +39,7 @@ class MemeRepository:
         limit: int = 100,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
     ) -> list[Meme]:
         statement = select(Meme)
         search = (q or "").strip().lower()
@@ -67,6 +68,8 @@ class MemeRepository:
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
+        if template_id is not None:
+            statement = statement.where(Meme.template_id == template_id)
         statement = statement.order_by(Meme.id).offset(offset).limit(limit)
         return list(self.session.scalars(statement))
 
@@ -75,6 +78,7 @@ class MemeRepository:
         *,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
     ):
         statement = select(Meme.id.label("meme_id"))
         search = (q or "").strip().lower()
@@ -99,6 +103,8 @@ class MemeRepository:
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
+        if template_id is not None:
+            statement = statement.where(Meme.template_id == template_id)
         return statement
 
     def count_filtered(
@@ -106,8 +112,11 @@ class MemeRepository:
         *,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
     ) -> int:
-        filtered_ids = self._build_filtered_ids_statement(tags=tags, q=q).subquery()
+        filtered_ids = self._build_filtered_ids_statement(
+            tags=tags, q=q, template_id=template_id
+        ).subquery()
         return int(
             self.session.scalar(select(func.count()).select_from(filtered_ids)) or 0
         )
@@ -119,10 +128,13 @@ class MemeRepository:
         limit: int,
         tags: Sequence[str] | None = None,
         q: str | None = None,
+        template_id: int | None = None,
         sort: str = "default",
         shuffle_seed: int | None = None,
     ) -> list[Meme]:
-        filtered_ids = self._build_filtered_ids_statement(tags=tags, q=q).subquery()
+        filtered_ids = self._build_filtered_ids_statement(
+            tags=tags, q=q, template_id=template_id
+        ).subquery()
         statement = select(Meme).join(
             filtered_ids,
             Meme.id == filtered_ids.c.meme_id,
@@ -178,7 +190,9 @@ class MemeRepository:
         self.session.refresh(meme)
         return meme
 
-    def get_random(self, *, tags: Sequence[str] | None = None) -> Meme | None:
+    def get_random(
+        self, *, tags: Sequence[str] | None = None, template_id: int | None = None
+    ) -> Meme | None:
         statement = select(Meme)
         normalized_tags = list(
             dict.fromkeys(tag.strip().lower() for tag in tags or [] if tag.strip())
@@ -192,6 +206,8 @@ class MemeRepository:
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
+        if template_id is not None:
+            statement = statement.where(Meme.template_id == template_id)
         # SQLite 的 random() 为候选行生成随机顺序，只取第一条。
         statement = statement.order_by(func.random()).limit(1)
         return self.session.scalar(statement)

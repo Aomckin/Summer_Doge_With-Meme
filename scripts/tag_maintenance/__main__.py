@@ -17,14 +17,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--database", type=Path, default=DATABASE_PATH)
     export_parser.add_argument("--work-dir", type=Path)
     export_parser.add_argument("--batch", type=int, default=1)
-    export_parser.add_argument("--batch-size", type=int, default=10)
+    export_parser.add_argument("--batch-size", type=int, choices=(10, 20, 50), default=20)
 
-    import_parser = subparsers.add_parser("import", help="Validate or apply candidates")
+    import_parser = subparsers.add_parser("import", help="Submit candidates for metadata review")
     import_parser.add_argument("candidates", type=Path)
     import_parser.add_argument("--database", type=Path, default=DATABASE_PATH)
-    import_parser.add_argument("--apply", action="store_true")
     import_parser.add_argument("--allow-protected-removal", action="store_true")
-    import_parser.add_argument("--backup-dir", type=Path)
     import_parser.add_argument("--audit-path", type=Path)
 
     ui_parser = subparsers.add_parser("ui", help="Open the local maintenance UI")
@@ -57,9 +55,7 @@ def main() -> None:
     result = import_candidates(
         args.candidates,
         database_path=args.database,
-        apply=args.apply,
         allow_protected_removal=args.allow_protected_removal,
-        backup_dir=args.backup_dir,
         audit_path=args.audit_path,
     )
     print(json.dumps(result, ensure_ascii=False, default=str))

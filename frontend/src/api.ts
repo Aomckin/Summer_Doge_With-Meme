@@ -41,7 +41,55 @@ import type {
   EmbeddingJobItemPage,
   ScoredMemeResponse,
   MemeEmbeddingStatus,
+  EnrichmentField,
+  EnrichmentJobCreateInput,
+  EnrichmentJobItemPage,
+  EnrichmentJobResponse,
+  EnrichmentSuggestionPage,
+  EnrichmentSuggestionResponse,
 } from "./types";
+
+export function createEnrichmentJob(input: EnrichmentJobCreateInput): Promise<EnrichmentJobResponse> {
+  return requestJson<EnrichmentJobResponse>("/api/enrichment-jobs", jsonRequest("POST", input));
+}
+export function estimateEnrichmentJob(input: EnrichmentJobCreateInput): Promise<{total_count: number; estimated_requests: number}> {
+  return requestJson<{total_count: number; estimated_requests: number}>("/api/enrichment-jobs/estimate", jsonRequest("POST", input));
+}
+export function getEnrichmentJob(id: number): Promise<EnrichmentJobResponse> {
+  return requestJson<EnrichmentJobResponse>(`/api/enrichment-jobs/${id}`);
+}
+export function listEnrichmentJobItems(id: number, offset = 0, limit = 50, status?: string): Promise<EnrichmentJobItemPage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (status) params.append("status", status);
+  return requestJson<EnrichmentJobItemPage>(`/api/enrichment-jobs/${id}/items?${params}`);
+}
+export function cancelEnrichmentJob(id: number): Promise<EnrichmentJobResponse> {
+  return requestJson<EnrichmentJobResponse>(`/api/enrichment-jobs/${id}/cancel`, { method: "POST" });
+}
+export function retryFailedEnrichmentJob(id: number): Promise<EnrichmentJobResponse> {
+  return requestJson<EnrichmentJobResponse>(`/api/enrichment-jobs/${id}/retry-failed`, { method: "POST" });
+}
+export async function deleteEnrichmentJob(id: number): Promise<void> {
+  await requestJson<void>(`/api/enrichment-jobs/${id}`, { method: "DELETE" });
+}
+export function listEnrichmentSuggestions(status?: string, source?: string): Promise<EnrichmentSuggestionPage> {
+  const params = new URLSearchParams({ limit: "200", latest_only: "true" });
+  if (status) params.append("status", status);
+  if (source) params.append("source", source);
+  return requestJson<EnrichmentSuggestionPage>(`/api/enrichment-suggestions?${params}`);
+}
+export function applyEnrichmentSuggestion(id: number, fields: EnrichmentField[], allowStale = false): Promise<EnrichmentSuggestionResponse> {
+  return requestJson<EnrichmentSuggestionResponse>(`/api/enrichment-suggestions/${id}/apply`, jsonRequest("POST", { fields, allow_stale: allowStale }));
+}
+export function rejectEnrichmentSuggestion(id: number): Promise<EnrichmentSuggestionResponse> {
+  return requestJson<EnrichmentSuggestionResponse>(`/api/enrichment-suggestions/${id}/reject`, { method: "POST" });
+}
+export function reanalyzeEnrichmentSuggestion(id: number): Promise<EnrichmentSuggestionResponse> {
+  return requestJson<EnrichmentSuggestionResponse>(`/api/enrichment-suggestions/${id}/reanalyze`, { method: "POST" });
+}
+export function enrichMeme(id: number): Promise<EnrichmentSuggestionResponse> {
+  return requestJson<EnrichmentSuggestionResponse>(`/api/memes/${id}/enrichment`, { method: "POST" });
+}
 
 export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSearchResponse> {
   return requestJson<SemanticSearchResponse>("/api/semantic-search", {
@@ -50,6 +98,7 @@ export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSear
     body: JSON.stringify({
       query: input.query,
       tags: normalizeTags(input.tags),
+      template_id: input.template_id,
       page: input.page,
       page_size: input.page_size,
     }),
@@ -260,6 +309,7 @@ export function listMemes(options: ListMemesOptions): Promise<MemeResponse[]> {
   for (const tag of normalizeTags(options.tags ?? [])) {
     params.append("tags", tag);
   }
+  if (options.templateId) params.set("template_id", String(options.templateId));
 
   return requestJson<MemeResponse[]>(`/api/memes?${params}`, {
     signal: options.signal,
@@ -289,6 +339,7 @@ export function listMemePage(
   const query = options.q?.trim();
   if (query) params.set("q", query);
   for (const tag of options.tags ?? []) params.append("tags", tag);
+  if (options.templateId) params.set("template_id", String(options.templateId));
   if (options.sort === "shuffle" && options.shuffleSeed !== null && options.shuffleSeed !== undefined) {
     params.set("shuffle_seed", String(options.shuffleSeed));
   }
@@ -377,12 +428,14 @@ export function deleteTemplateReferenceImage(id: number): Promise<void> {
 
 export function getRandomMeme(
   tags: string[],
+  templateId: number | null = null,
   signal?: AbortSignal,
 ): Promise<MemeResponse> {
   const params = new URLSearchParams();
   for (const tag of normalizeTags(tags)) {
     params.append("tags", tag);
   }
+  if (templateId) params.set("template_id", String(templateId));
   const query = params.size ? `?${params}` : "";
   return requestJson<MemeResponse>(`/api/memes/random${query}`, { signal });
 }
@@ -542,6 +595,10 @@ export function deleteMemeImage(id: number, imageId: number): Promise<MemeRespon
 
 export function listMemeRelations(id: number): Promise<MemeResponse[]> {
   return requestJson<MemeResponse[]>(`/api/memes/${id}/relations`);
+}
+
+export function getMeme(id: number): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(`/api/memes/${id}`);
 }
 
 export function addMemeRelations(id: number, memeIds: number[]): Promise<MemeResponse[]> {

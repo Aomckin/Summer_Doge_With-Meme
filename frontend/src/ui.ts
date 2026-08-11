@@ -20,7 +20,9 @@ export interface AppElements {
   openTemplatesButton: HTMLButtonElement;
   openTagsButton: HTMLButtonElement;
   openSemanticIndexButton: HTMLButtonElement;
+  openEnrichmentButton: HTMLButtonElement;
   operationError: HTMLElement;
+  templateFilters: HTMLElement;
   tagFilters: HTMLElement;
   libraryHeading: HTMLElement;
   browsingControls: HTMLElement;
@@ -133,6 +135,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
           <button id="open-semantic-index" class="button button-secondary" type="button">语义索引</button>
+          <button id="open-enrichment" class="button button-secondary" type="button">元数据整理</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
@@ -149,6 +152,7 @@ export function mountShell(root: HTMLElement): AppElements {
               <h1>我的 Meme</h1>
             </div>
           </div>
+          <div id="template-filters" class="tag-filters template-filters" aria-label="模板筛选"></div>
           <div id="tag-filters" class="tag-filters" aria-label="标签筛选"></div>
           <div id="browsing-controls" class="browsing-controls" aria-label="资料库浏览设置">
             <strong data-meme-total>共 0 个 Meme</strong>
@@ -411,7 +415,9 @@ export function mountShell(root: HTMLElement): AppElements {
     openTemplatesButton: required(root, "#open-templates"),
     openTagsButton: required(root, "#open-tags"),
     openSemanticIndexButton: required(root, "#open-semantic-index"),
+    openEnrichmentButton: required(root, "#open-enrichment"),
     operationError: required(root, "#operation-error"),
+    templateFilters: required(root, "#template-filters"),
     tagFilters: required(root, "#tag-filters"),
     libraryHeading: required(root, "#library-heading"),
     browsingControls: required(root, "#browsing-controls"),
@@ -477,6 +483,8 @@ function templateOptions(
   ].join("");
 }
 
+export const TEMPLATE_PAGE_SIZE = 6;
+
 export function renderTemplateManager(
   elements: AppElements,
   state: AppState,
@@ -520,10 +528,10 @@ export function renderTemplateManager(
     editing?.reference_thumbnail_url ?? null,
     editing ? `${editing.name} 当前参考图` : "参考图预览",
   );
-  const totalPages = Math.ceil(state.availableTemplates.length / 12);
+  const totalPages = Math.ceil(state.availableTemplates.length / TEMPLATE_PAGE_SIZE);
   const page = clampPage(state.templatePage, totalPages);
-  const start = (page - 1) * 12;
-  const templates = state.availableTemplates.slice(start, start + 12);
+  const start = (page - 1) * TEMPLATE_PAGE_SIZE;
+  const templates = state.availableTemplates.slice(start, start + TEMPLATE_PAGE_SIZE);
   elements.templateList.innerHTML = templates.length
     ? templates
         .map(
@@ -575,11 +583,37 @@ export function renderOperationError(
 }
 
 const COLLAPSED_TAG_LIMIT = 8;
+const COLLAPSED_TEMPLATE_LIMIT = 8;
+
+export function renderTemplateFilters(elements: AppElements, state: AppState): void {
+  if (!state.availableTemplates.length) {
+    elements.templateFilters.innerHTML =
+      '<span class="filter-kind">模板</span><span class="muted">还没有可筛选的模板</span>';
+    return;
+  }
+  const collapsed = state.availableTemplates.length > COLLAPSED_TEMPLATE_LIMIT;
+  const visibleTemplates = state.templatesExpanded
+    ? state.availableTemplates
+    : state.availableTemplates.filter(
+        (template, index) =>
+          index < COLLAPSED_TEMPLATE_LIMIT || template.id === state.selectedTemplateId,
+      );
+  const hiddenCount = state.availableTemplates.length - visibleTemplates.length;
+  const allSelected = state.selectedTemplateId === null;
+  const templates = visibleTemplates.map((template) => {
+    const selected = template.id === state.selectedTemplateId;
+    return `<button class="filter-chip${selected ? " is-active" : ""}" type="button" data-template-filter="${template.id}" aria-pressed="${selected}">${escapeHtml(template.name)}</button>`;
+  }).join("");
+  const toggle = collapsed
+    ? `<button class="filter-toggle" type="button" data-expand-templates aria-expanded="${state.templatesExpanded}">${state.templatesExpanded ? "收起模板" : `展开全部模板（+${hiddenCount}）`}</button>`
+    : "";
+  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}`;
+}
 
 export function renderTags(elements: AppElements, state: AppState): void {
   if (!state.availableTags.length) {
     elements.tagFilters.innerHTML =
-      '<span class="muted">还没有可筛选的标签</span>';
+      '<span class="filter-kind">标签</span><span class="muted">还没有可筛选的标签</span>';
     return;
   }
   const collapsed = state.availableTags.length > COLLAPSED_TAG_LIMIT;
@@ -614,7 +648,7 @@ export function renderTags(elements: AppElements, state: AppState): void {
       >${state.tagsExpanded ? "收起标签" : `展开全部标签（+${hiddenCount}）`}</button>
     `
     : "";
-  elements.tagFilters.innerHTML = `${tags}${toggle}`;
+  elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span>${tags}${toggle}`;
 }
 
 function cardMarkup(

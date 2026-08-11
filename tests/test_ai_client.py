@@ -88,6 +88,133 @@ def caption_response_payload(captions: list[str]) -> dict[str, object]:
     }
 
 
+def test_responses_enrichment_prompt_includes_current_metadata_and_allows_nulls() -> None:
+    captured: dict[str, object] = {}
+    result_text = json.dumps({
+        "suggested_title": None, "suggested_description": "补充描述",
+        "add_tags": ["无语"], "remove_tags": [],
+        "suggested_template_name": None, "confidence": None, "reason": "必要补充",
+    }, ensure_ascii=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "vision-test", "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16},
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": result_text}]}],
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAIResponsesClient(api_key="secret", model="vision-test", http_client=http_client)
+        result = client.analyze_enrichment(
+            images=[AIInputImage(b"one", "image/png", 1), AIInputImage(b"zero", "image/png", 0)],
+            title="当前标题", description=None, tags=["人工标签"], template=None,
+            existing_tags=["人工标签", "无语"],
+            existing_templates=[AITemplateCandidate(1, "震惊猫", None)],
+        )
+    text = json.dumps(captured, ensure_ascii=False)
+    assert "当前标题" in text and "人工标签" in text and "震惊猫" in text
+    assert text.index("第 1 张") < text.index("第 2 张")
+    assert result.suggested_title is None
+    assert (result.input_tokens, result.output_tokens, result.total_tokens) == (12, 4, 16)
+
+
+def test_enrichment_parser_losslessly_unwraps_json_fence() -> None:
+    client = OpenAICompatibleChatClient(
+        api_key="secret", model="qwen3.6-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        timeout_seconds=10,
+    )
+    raw = {
+        "suggested_title": None,
+        "suggested_description": "原样保留  空格",
+        "add_tags": ["无语"],
+        "remove_tags": [],
+        "suggested_template_name": None,
+        "confidence": None,
+        "reason": "必要补充",
+    }
+    result = client._parse_enrichment_result(
+        {"model": "qwen3.6-plus", "usage": {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12}},
+        "```json\n" + json.dumps(raw, ensure_ascii=False) + "\n```",
+    )
+    assert result.suggested_description == "原样保留  空格"
+    assert (result.input_tokens, result.output_tokens, result.total_tokens) == (9, 3, 12)
+
+
+def test_invalid_enrichment_response_preserves_usage_and_sanitized_summary() -> None:
+    client = OpenAICompatibleChatClient(
+        api_key="secret", model="qwen3.6-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        timeout_seconds=10,
+    )
+    with pytest.raises(AIInvalidResponseError) as caught:
+        client._parse_enrichment_result(
+            {"model": "qwen3.6-plus", "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}},
+            '{"suggested_title": null, "token": "super-secret-value"}',
+        )
+    error = caught.value
+    assert (error.input_tokens, error.output_tokens, error.total_tokens) == (10, 4, 14)
+    assert error.response_summary is not None
+    assert "super-secret-value" not in error.response_summary
+    assert "[redacted]" in error.response_summary
+
+
+def test_dashscope_enrichment_disables_thinking_and_sends_schema() -> None:
+    captured: dict[str, object] = {}
+    result_text = json.dumps({
+        "suggested_title": None, "suggested_description": None,
+        "add_tags": [], "remove_tags": [], "suggested_template_name": None,
+        "confidence": None, "reason": None,
+    })
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "qwen3.6-plus",
+            "choices": [{"message": {"content": result_text}}],
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAICompatibleChatClient(
+            api_key="secret", model="qwen3.6-plus",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout_seconds=10,
+            http_client=http_client,
+        )
+        client.analyze_enrichment(
+            images=[AIInputImage(b"image", "image/png", 0)],
+            title="标题", description=None, tags=[], template=None,
+            existing_tags=[], existing_templates=[],
+        )
+    assert captured["enable_thinking"] is False
+    assert "suggested_description" in captured["messages"][0]["content"]
+
+
+def test_enrichment_response_without_content_still_preserves_usage() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "model": "qwen3.6-plus",
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
+            "choices": [],
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = OpenAICompatibleChatClient(
+            api_key="secret", model="qwen3.6-plus",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout_seconds=10, http_client=http_client,
+        )
+        with pytest.raises(AIInvalidResponseError) as caught:
+            client.analyze_enrichment(
+                images=[AIInputImage(b"image", "image/png", 0)],
+                title="标题", description=None, tags=[], template=None,
+                existing_tags=[], existing_templates=[],
+            )
+    assert caught.value.total_tokens == 9
+    assert caught.value.response_summary is not None
+    assert '"choices":[]' in caught.value.response_summary.replace(" ", "")
+
+
 def test_responses_client_sends_complete_meme_images_in_position_order() -> None:
     captured: dict[str, object] = {}
 

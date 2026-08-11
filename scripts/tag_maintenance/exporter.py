@@ -5,6 +5,7 @@ from pathlib import Path
 from app.config import DATABASE_PATH
 from app.repositories.meme_repository import MemeRepository
 from app.repositories.tag_repository import TagRepository
+from app.repositories.template_repository import TemplateRepository
 
 from .database import close_session, make_session
 from .schemas import TagCandidate
@@ -22,7 +23,7 @@ def export_batch(
     database_path: Path = DATABASE_PATH,
     work_dir: Path | None = None,
     batch_number: int = 1,
-    batch_size: int = 10,
+    batch_size: int = 20,
 ) -> Path:
     if batch_number < 1:
         raise ValueError("batch_number must be at least 1")
@@ -76,6 +77,7 @@ def export_batch(
                     "meme_id": meme.id,
                     "title": meme.title,
                     "description": meme.description,
+                    "current_template": meme.template.name if meme.template else None,
                     "images": images,
                     "current_tags": current_tags,
                 }
@@ -87,9 +89,12 @@ def export_batch(
             candidates.append(
                 {
                     "meme_id": meme.id,
+                    "suggested_title": None,
+                    "suggested_description": None,
                     "add_tags": [],
                     "remove_tags": [],
-                    "confidence": 0.0,
+                    "suggested_template_name": None,
+                    "confidence": None,
                     "reason": "TODO: Codex local image review",
                 }
             )
@@ -111,8 +116,13 @@ def export_batch(
             }
             for tag in TagRepository(session).list()
         ]
+        templates = [
+            {"id": template.id, "name": template.name, "description": template.description}
+            for template in TemplateRepository(session).list()
+        ]
         _json_dump(batch_dir / "manifest.json", manifest)
         _json_dump(batch_dir / "tags.json", tags)
+        _json_dump(batch_dir / "templates.json", templates)
         _json_dump(batch_dir / "image_paths.json", image_paths)
         _json_dump(batch_dir / "candidate.schema.json", TagCandidate.model_json_schema())
         with (batch_dir / "candidates.jsonl").open("w", encoding="utf-8", newline="\n") as handle:

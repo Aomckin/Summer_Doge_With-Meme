@@ -9,6 +9,8 @@ from app.database import Base
 from app.models.meme import Meme
 from app.models.meme_image import MemeImage
 from app.models.tag import MemeTag, Tag
+from app.models.enrichment import MemeEnrichmentSuggestion
+from scripts.tag_maintenance.__main__ import build_parser
 from scripts.tag_maintenance.exporter import export_batch
 from scripts.tag_maintenance.importer import import_candidates, load_candidates
 from scripts.tag_maintenance.ui import _image_path, render_page
@@ -99,6 +101,41 @@ def tag_links(database_path: Path, meme_id: int) -> list[tuple[str, str, float |
         session.close()
 
 
+def test_new_luna_candidate_imports_suggestion_without_modifying_meme(tmp_path: Path) -> None:
+    database = tmp_path / "vault.db"
+    session = create_database(database)
+    meme = seed_meme(session, 1, tags=(("old", "ai"),))
+    session.close()
+    path = write_candidates(tmp_path / "candidates.jsonl", [{
+        "meme_id": meme.id, "suggested_title": "新标题",
+        "suggested_description": None, "add_tags": ["无语"],
+        "remove_tags": ["old"], "suggested_template_name": None,
+        "confidence": None, "reason": "完整图片组判断",
+    }])
+    result = import_candidates(path, database_path=database)
+    assert result["changed_meme_count"] == 1
+    assert result["mode"] == "submitted-for-review"
+    session = create_database(database)
+    try:
+        stored = session.get(Meme, meme.id)
+        assert stored is not None and stored.title == "Meme 1"
+        assert [link.tag.name for link in stored.tag_links] == ["old"]
+        suggestion = session.scalar(select(MemeEnrichmentSuggestion))
+        assert suggestion is not None and suggestion.source == "luna"
+        assert suggestion.suggested_title == "新标题"
+    finally:
+        session.close()
+
+
+def test_import_cli_submits_directly_without_apply_flag() -> None:
+    args = build_parser().parse_args(["import", "candidates.jsonl"])
+
+    assert not hasattr(args, "apply")
+    assert not hasattr(args, "backup_dir")
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["import", "candidates.jsonl", "--apply"])
+
+
 def test_export_preserves_multi_image_position_order(tmp_path: Path) -> None:
     database = tmp_path / "vault.db"
     session = create_database(database)
@@ -133,7 +170,9 @@ def test_local_ui_displays_exported_images_and_luna_prompt(tmp_path: Path) -> No
     assert first < second
     assert "交给 Codex Luna 的提示词" in page
     assert str((work_dir / "batch_0001").resolve()) in page
-    assert "--apply" in page
+    assert "提交到元数据整理审核池" in page
+    assert "--apply" not in page
+    assert "dry-run" not in page
     assert _image_path(work_dir, 1, meme.id, 0) == images_dir / "meme-1-0.png"
 
 
@@ -210,7 +249,7 @@ def test_protects_manual_and_user_tags_from_removal(tmp_path: Path) -> None:
         import_candidates(candidates, database_path=database)
 
 
-def test_dry_run_does_not_modify_database(tmp_path: Path) -> None:
+def test_legacy_tag_candidate_is_submitted_for_review_without_modifying_meme(tmp_path: Path) -> None:
     database = tmp_path / "vault.db"
     session = create_database(database)
     meme = seed_meme(session, 1, tags=(("old", "ai"),))
@@ -222,58 +261,22 @@ def test_dry_run_does_not_modify_database(tmp_path: Path) -> None:
 
     result = import_candidates(candidates, database_path=database)
 
-    assert result["mode"] == "dry-run"
+    assert result["mode"] == "submitted-for-review"
+    assert result["suggestion_count"] == 1
     assert tag_links(database, meme.id) == [("old", "ai", None)]
     assert Path(result["audit_path"]).is_file()
-
-
-def test_apply_imports_changes_and_writes_audit(tmp_path: Path) -> None:
-    database = tmp_path / "vault.db"
-    session = create_database(database)
-    meme = seed_meme(session, 1, tags=(("old", "ai"), ("keep", "user")))
-    session.close()
-    candidates = write_candidates(
-        tmp_path / "candidates.jsonl",
-        [candidate(meme.id, add_tags=["new"], remove_tags=["old"], confidence=0.93)],
-    )
-
-    result = import_candidates(
-        candidates,
-        database_path=database,
-        apply=True,
-        backup_dir=tmp_path / "backups",
-    )
-
-    assert tag_links(database, meme.id) == [
-        ("keep", "user", None),
-        ("new", "codex", 0.93),
-    ]
     records = [
         json.loads(line)
         for line in Path(result["audit_path"]).read_text(encoding="utf-8").splitlines()
     ]
-    assert records[0]["mode"] == "apply"
+    assert records[0]["mode"] == "submitted-for-review"
     assert records[0]["add_tags"] == ["new"]
-
-
-def test_apply_creates_pre_change_database_backup(tmp_path: Path) -> None:
-    database = tmp_path / "vault.db"
     session = create_database(database)
-    meme = seed_meme(session, 1)
-    session.close()
-    candidates = write_candidates(
-        tmp_path / "candidates.jsonl",
-        [candidate(meme.id, add_tags=["new"])],
-    )
-
-    result = import_candidates(
-        candidates,
-        database_path=database,
-        apply=True,
-        backup_dir=tmp_path / "backups",
-    )
-
-    backup_path = Path(result["backup_path"])
-    assert backup_path.is_file()
-    assert tag_links(backup_path, meme.id) == []
-    assert tag_links(database, meme.id) == [("new", "codex", 0.8)]
+    try:
+        suggestion = session.scalar(select(MemeEnrichmentSuggestion))
+        assert suggestion is not None
+        assert suggestion.status == "pending"
+        assert json.loads(suggestion.add_tags_json) == ["new"]
+        assert json.loads(suggestion.remove_tags_json) == ["old"]
+    finally:
+        session.close()

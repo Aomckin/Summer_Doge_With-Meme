@@ -377,7 +377,50 @@ export interface ListMemesOptions {
   limit: number;
   q?: string;
   tags?: string[];
+  templateId?: number | null;
   signal?: AbortSignal;
+}
+
+export type EnrichmentField = "title" | "description" | "add_tags" | "remove_tags" | "template";
+export type EnrichmentScope = "all" | "filtered" | "missing_description" | "missing_tags" | "missing_template" | "filename_title" | "never_analyzed" | "stale_suggestions" | "id_range";
+
+export interface EnrichmentSuggestionResponse {
+  id: number; meme_id: number; source: "luna" | "provider" | "manual_import";
+  provider_id: number | null; model_record_id: number | null; model_id_snapshot: string | null; job_id: number | null;
+  suggested_title: string | null; suggested_description: string | null; suggested_template_id: number | null;
+  add_tags: string[]; remove_tags: string[]; confidence: Record<string, number | null>;
+  reason: string | null; status: string; source_hash: string; stale: boolean; applied_fields: EnrichmentField[];
+  created_at: string; reviewed_at: string | null; applied_at: string | null;
+}
+
+export interface EnrichmentSuggestionPage {
+  items: EnrichmentSuggestionResponse[]; total: number; offset: number; limit: number;
+}
+
+export interface EnrichmentJobCreateInput {
+  scope: EnrichmentScope; query: string | null; tags: string[];
+  start_meme_id: number | null; end_meme_id: number | null;
+  analyze_title: boolean; analyze_description: boolean; analyze_tags: boolean; analyze_template: boolean;
+  max_workers: 1 | 2 | 4 | 8;
+}
+
+export interface EnrichmentJobResponse {
+  id: number; status: string; scope: EnrichmentScope; provider_id: number | null; model_record_id: number | null;
+  start_meme_id: number | null; end_meme_id: number | null;
+  model_id_snapshot: string; analyze_title: boolean; analyze_description: boolean; analyze_tags: boolean; analyze_template: boolean;
+  total_count: number; processed_count: number; success_count: number; skipped_count: number; failed_count: number;
+  input_tokens: number; output_tokens: number; total_tokens: number; max_workers: number;
+  error_message: string | null; created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EnrichmentJobItemResponse {
+  id: number; job_id: number; meme_id: number; status: string; attempt_count: number; suggestion_id: number | null;
+  error_message: string | null; input_tokens: number; output_tokens: number; total_tokens: number;
+  started_at: string | null; completed_at: string | null;
+}
+
+export interface EnrichmentJobItemPage {
+  items: EnrichmentJobItemResponse[]; total: number; offset: number; limit: number;
 }
 
 export type MemeListSort = "default" | "shuffle";
@@ -399,6 +442,7 @@ export interface ListMemePageOptions {
   pageSize: MemePageSize;
   q?: string;
   tags?: string[];
+  templateId?: number | null;
   sort: MemeListSort;
   shuffleSeed?: number | null;
   signal?: AbortSignal;
@@ -425,6 +469,7 @@ export interface SemanticSearchResponse {
 export interface SemanticSearchInput {
   query: string;
   tags: string[];
+  template_id: number | null;
   page: number;
   page_size: MemePageSize;
   signal?: AbortSignal;
@@ -492,6 +537,8 @@ export interface AppState {
   query: string;
   selectedTags: string[];
   tagsExpanded: boolean;
+  selectedTemplateId: number | null;
+  templatesExpanded: boolean;
   page: number;
   pageSize: MemePageSize;
   totalMemes: number;

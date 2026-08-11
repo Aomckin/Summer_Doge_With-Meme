@@ -90,6 +90,69 @@ def test_old_sqlite_database_adds_reference_image_and_embedding_columns(
         ).scalar_one() == "Doge"
 
 
+def test_old_enrichment_suggestions_table_adds_review_source_hash(
+    tmp_path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'old-enrichment.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE meme_enrichment_suggestions ("
+                "id INTEGER PRIMARY KEY, source_hash VARCHAR(64) NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO meme_enrichment_suggestions (id, source_hash) "
+                "VALUES (1, 'legacy-hash')"
+            )
+        )
+
+    run_startup_migrations(engine)
+    run_startup_migrations(engine)
+
+    assert "review_source_hash" in {
+        column["name"]
+        for column in inspect(engine).get_columns("meme_enrichment_suggestions")
+    }
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT source_hash, review_source_hash "
+                "FROM meme_enrichment_suggestions WHERE id = 1"
+            )
+        ).one()
+        assert row == ("legacy-hash", None)
+
+
+def test_old_enrichment_jobs_table_adds_id_range_columns(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'old-enrichment-job.db'}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE enrichment_jobs (id INTEGER PRIMARY KEY, scope VARCHAR(40) NOT NULL)"
+        ))
+
+    run_startup_migrations(engine)
+    run_startup_migrations(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("enrichment_jobs")}
+    assert {"start_meme_id", "end_meme_id"} <= columns
+
+
+def test_old_enrichment_job_items_table_adds_response_summary(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'old-enrichment-items.db'}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE enrichment_job_items (id INTEGER PRIMARY KEY, error_message TEXT)"
+        ))
+
+    run_startup_migrations(engine)
+    run_startup_migrations(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("enrichment_job_items")}
+    assert "response_summary" in columns
+
+
 def test_non_sqlite_database_skips_sqlite_migrations() -> None:
     class Dialect:
         name = "postgresql"

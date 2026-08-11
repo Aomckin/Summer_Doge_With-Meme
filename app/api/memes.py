@@ -180,11 +180,18 @@ def list_memes(
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     tags: Annotated[list[str] | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
+    template_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[MemeResponse]:
     # q 搜标题和描述；同名 tags 可重复，并与 q、分页组合使用。
     return [
         meme_to_response(meme)
-        for meme in service.list_memes(offset=offset, limit=limit, tags=tags, q=q)
+        for meme in service.list_memes(
+            offset=offset,
+            limit=limit,
+            tags=tags,
+            q=q,
+            template_id=template_id,
+        )
     ]
 
 
@@ -195,6 +202,7 @@ def list_meme_page(
     page_size: int = 24,
     tags: Annotated[list[str] | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
+    template_id: Annotated[int | None, Query(ge=1)] = None,
     sort: Literal["default", "shuffle"] = "default",
     shuffle_seed: int | None = None,
 ) -> MemePageResponse:
@@ -204,6 +212,7 @@ def list_meme_page(
             page_size=page_size,
             tags=tags,
             q=q,
+            template_id=template_id,
             sort=sort,
             shuffle_seed=shuffle_seed,
         )
@@ -225,9 +234,10 @@ def list_meme_page(
 def get_random_meme(
     service: ServiceDependency,
     tags: Annotated[list[str] | None, Query()] = None,
+    template_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> MemeResponse:
     try:
-        meme = service.get_random_meme(tags=tags)
+        meme = service.get_random_meme(tags=tags, template_id=template_id)
     except NoMemesAvailableError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except MemeFileMissingError as error:

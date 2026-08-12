@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.6.1 实现状态（2026-08-08）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.6.2 实现状态（2026-08-11）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -11,6 +11,7 @@
 - 主资料库通过 `GET /api/memes/page` 只读取当前页，支持 24/48/96 每页数量、完整总数、越界收敛和基于 Meme ID/seed 的稳定乱序；模板管理器在完整模板数组上每页渲染 12 条。
 - 多模态语义索引：标题、描述、规范化标签、模板和前 5 张有序图片由集中构建器生成一个 1024 维融合向量，归一化后以小端 Float32 BLOB 保存在 SQLite。
 - 自然语言搜索：查询向量调用当前 `qwen3-vl-embedding`，标签在排序前按 AND 过滤；当前模型兼容的 ready 文档向量由进程内 NumPy 矩阵计算余弦 score，翻页复用 10 分钟 LRU 结果。
+- 聊天场景推荐：独立输入最近聊天内容和可选回应意图，服务端构造 Scene Query 后复用现有语义搜索；默认每批 12 条，后续批次保持原语义排名，前端支持详情、原图查看器和下载。
 - 相似 Meme：完全使用已保存的同模型、同维度融合向量，不调用 Provider；前端与人工直接关联分区展示。
 - 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
@@ -25,7 +26,7 @@
 
 ## 明确尚未实现
 
-- 尚未实现聊天记录解析与场景推荐界面、Meme 制作器、用户系统、分享权限或云端对象存储。
+- 尚未实现自动聊天记录解析、聊天平台接入、Meme 制作器、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
 
@@ -219,6 +220,23 @@ EmbeddingJob 创建
 - 前端语义模式不对输入做自动请求；Enter/按钮显式提交，标签、分页和卡片密度继续有效，普通排序隐藏，score 以小数显示且不解释为概率。
 - 详情相似请求使用 AbortController 与 Meme ID 检查；未索引时只显示手动重建入口，不自动产生 Provider 费用。
 
+### v0.6.2 聊天场景推荐
+
+```text
+POST /api/meme-recommendations/chat
+  -> ChatRecommendationRequest 校验并 trim context / response_intent
+  -> build_scene_query 优先表达显式回应意图
+  -> ChatRecommendationService
+  -> SemanticSearchService.search(tags=[], template_id=None, page_size=12)
+  -> 当前 Embedding Provider 生成查询向量
+  -> SemanticIndex 返回原排序分页结果
+```
+
+- `context` 必填且最多 4000 字符，`response_intent` 可空且最多 200 字符；两者保持独立，快捷 Chip 不参与 Tag Filter。
+- Scene Query Builder 是纯逻辑，不调用 LLM；推荐不创建聊天表、不写查询正文、不修改 Meme、不触发 Embedding rebuild。
+- `ChatRecommendationController` 独立维护 Dialog 状态；关闭时中止请求并清空正文、意图和结果，不写 localStorage/sessionStorage。
+- 推荐卡片显示封面、标题、核心标签和 score，详情与原图通过现有应用回调打开，下载继续使用原有 Meme 下载接口；“再来一批”只是语义搜索后续页。
+
 ### AI 有序多图分析
 
 ```text
@@ -323,10 +341,10 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.6.1 在保持 v0.6-R 分层的基础上增加统一候选、Provider 后台 Job、Luna 双生产源和安全审核 Apply。Luna 候选一次提交即进入审核池，不存在独立 dry-run/CLI apply；建议创建/拒绝与真实元数据解耦，只有网页审核实际采用字段才使语义向量过期。
+v0.6.2 在保持 v0.6.1 元数据审核与现有语义搜索行为不变的基础上增加聊天场景查询薄封装和独立前端 Dialog。聊天正文只进入本次 Embedding 查询，不持久化；排序、向量格式和索引结构均未改变。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
 ## 下一阶段
 
-下一阶段为 v0.6.2 聊天场景推荐 Meme；Meme 制作器顺延至 v0.7。
+下一阶段为 v0.7 Meme 制作器。

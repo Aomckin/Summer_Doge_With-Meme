@@ -47,6 +47,7 @@ import {
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
   semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  recommendChatMemes,
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
@@ -75,6 +76,7 @@ import type {
   SemanticIndexStatus, EmbeddingJobScope, EmbeddingJobResponse,
   EmbeddingJobItemPage, MemeEmbeddingStatus,
   EnrichmentSuggestionResponse,
+  ChatRecommendationInput, ChatRecommendationResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -113,6 +115,7 @@ import {
 import { clampPage } from "./pagination";
 import { SemanticIndexManager } from "./semantic-index-manager";
 import { EnrichmentWorkbenchController } from "./enrichment-workbench";
+import { ChatRecommendationController } from "./chat-recommendation";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -186,6 +189,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   addMemeRelations(id: number, ids: number[]): Promise<MemeResponse[]>;
   deleteMemeRelation(id: number, relatedId: number): Promise<void>;
   semanticSearch?(input: SemanticSearchInput): Promise<SemanticSearchResponse>;
+  recommendChatMemes?(input: ChatRecommendationInput): Promise<ChatRecommendationResponse>;
   listSimilarMemes?(id: number, limit?: number, signal?: AbortSignal): Promise<{ items: ScoredMemeResponse[] }>;
   rebuildMemeEmbedding?(id: number): Promise<MemeEmbeddingStatus>;
   getSemanticIndexStatus?(): Promise<SemanticIndexStatus>;
@@ -234,6 +238,7 @@ const defaultApi: MemeApi = {
   appendMemeImage, deleteMemeImage, reorderMemeImages,
   listMemeRelations, addMemeRelations, deleteMemeRelation,
   semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  recommendChatMemes,
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
@@ -361,6 +366,20 @@ export class MemeVaultApp {
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    new ChatRecommendationController(
+      this.elements.openChatRecommendationButton,
+      {
+        recommend: input => (this.api.recommendChatMemes ?? recommendChatMemes)(input),
+      },
+      {
+        openDetail: meme => this.selectMeme(meme),
+        openViewer: meme => {
+          this.viewerMeme = meme;
+          this.viewerIndex = 0;
+          openImageViewer(this.elements, meme, 0);
+        },
+      },
+    );
     this.semanticIndexManager = new SemanticIndexManager(
       this.elements.openSemanticIndexButton,
       {

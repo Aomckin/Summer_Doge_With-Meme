@@ -21,6 +21,7 @@ export interface AppElements {
   openTagsButton: HTMLButtonElement;
   openSemanticIndexButton: HTMLButtonElement;
   openEnrichmentButton: HTMLButtonElement;
+  openChatRecommendationButton: HTMLButtonElement;
   operationError: HTMLElement;
   templateFilters: HTMLElement;
   tagFilters: HTMLElement;
@@ -136,6 +137,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
           <button id="open-semantic-index" class="button button-secondary" type="button">语义索引</button>
           <button id="open-enrichment" class="button button-secondary" type="button">元数据整理</button>
+          <button id="open-chat-recommendation" class="button button-primary" type="button">场景召唤</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
@@ -416,6 +418,7 @@ export function mountShell(root: HTMLElement): AppElements {
     openTagsButton: required(root, "#open-tags"),
     openSemanticIndexButton: required(root, "#open-semantic-index"),
     openEnrichmentButton: required(root, "#open-enrichment"),
+    openChatRecommendationButton: required(root, "#open-chat-recommendation"),
     operationError: required(root, "#operation-error"),
     templateFilters: required(root, "#template-filters"),
     tagFilters: required(root, "#tag-filters"),

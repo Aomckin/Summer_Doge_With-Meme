@@ -475,6 +475,24 @@ export interface SemanticSearchInput {
   signal?: AbortSignal;
 }
 
+export interface ChatRecommendationInput {
+  context: string;
+  response_intent: string | null;
+  page: number;
+  signal?: AbortSignal;
+}
+
+export interface ChatRecommendationResponse {
+  items: ScoredMemeResponse[];
+  total: number;
+  page: number;
+  page_size: 12;
+  total_pages: number;
+  indexed_count: number;
+  missing_count: number;
+  model_id: string;
+}
+
 export interface SemanticIndexStatus {
   total_memes: number;
   ready_count: number;

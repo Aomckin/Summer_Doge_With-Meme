@@ -47,6 +47,8 @@ import type {
   EnrichmentJobResponse,
   EnrichmentSuggestionPage,
   EnrichmentSuggestionResponse,
+  ChatRecommendationInput,
+  ChatRecommendationResponse,
 } from "./types";
 
 export function createEnrichmentJob(input: EnrichmentJobCreateInput): Promise<EnrichmentJobResponse> {
@@ -104,6 +106,25 @@ export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSear
     }),
     signal: input.signal,
   });
+}
+
+export function recommendChatMemes(
+  input: ChatRecommendationInput,
+): Promise<ChatRecommendationResponse> {
+  return requestJson<ChatRecommendationResponse>(
+    "/api/meme-recommendations/chat",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: input.context,
+        response_intent: input.response_intent,
+        page: input.page,
+        page_size: 12,
+      }),
+      signal: input.signal,
+    },
+  );
 }
 
 export function getSemanticIndexStatus(): Promise<SemanticIndexStatus> {

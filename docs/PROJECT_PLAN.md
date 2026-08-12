@@ -418,9 +418,15 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：AI 和 Luna 只生产候选；Meme 修改后旧候选默认不可静默覆盖；后台任务单项失败不终止整批且重启不自动继续消费；单项与批量不复制保存逻辑；现有 Caption、语义、上传、分页、下载、标签和模板流程继续通过。
 
-### v0.6.2：聊天场景推荐 Meme
+### v0.6.2：聊天场景推荐 Meme（已完成）
 
-- [ ] 基于 v0.6 完成的向量化能力，根据聊天场景推荐 Meme
+- [x] 使用独立 Context 与可选 Intent 构造 Scene Query，显式回应意图优先表达，不调用 LLM。
+- [x] 新增薄推荐 API，复用现有 `SemanticSearchService`、Embedding Provider、查询缓存和 `SemanticIndex`，默认每批 12 条。
+- [x] 顶部新增“场景召唤” Dialog、快捷意图、加载/错误/空状态和原语义排序的“再来一批”。
+- [x] 推荐项支持查看详情、打开原图和下载；关闭 Dialog 清空私人聊天正文并中止旧请求，不写浏览器存储或数据库。
+- [x] 补充 Query Builder、API 错误映射、前端竞态与隐私边界测试，并更新版本和项目文档。
+
+验收：聊天上下文与回应意图保持独立；聊天正文只发送给当前 Embedding Provider，不持久化；推荐不调用额外 LLM、不修改 Meme、不重建 Embedding，现有语义搜索与浏览/详情/下载行为保持兼容。
 
 ### v0.7：Meme 制作器
 
@@ -483,7 +489,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.6.1 AI 分析工作流重构与批量元数据补全已完成
+当前状态：v0.6.2 聊天场景推荐 Meme 已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -492,5 +498,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：v0.6.2——聊天场景推荐 Meme（本阶段未开始）
+下一步：v0.7——Meme 制作器（本阶段未开始）
 ```

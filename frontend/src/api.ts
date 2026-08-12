@@ -49,6 +49,8 @@ import type {
   EnrichmentSuggestionResponse,
   ChatRecommendationInput,
   ChatRecommendationResponse,
+  SimilarityInspectionInput,
+  SimilarityInspectionResponse,
 } from "./types";
 
 export function createEnrichmentJob(input: EnrichmentJobCreateInput): Promise<EnrichmentJobResponse> {
@@ -124,6 +126,45 @@ export function recommendChatMemes(
       }),
       signal: input.signal,
     },
+  );
+}
+
+export function inspectMemeSimilarity(
+  input: SimilarityInspectionInput,
+): Promise<SimilarityInspectionResponse> {
+  return requestJson<SimilarityInspectionResponse>(
+    "/api/similarity-inspection",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_meme_id: input.start_meme_id,
+        end_meme_id: input.end_meme_id,
+        top_k: input.top_k,
+        similarity_threshold: input.similarity_threshold,
+      }),
+      signal: input.signal,
+    },
+  );
+}
+
+export function ignoreMemeSimilarity(
+  memeAId: number,
+  memeBId: number,
+): Promise<{ meme_a_id: number; meme_b_id: number }> {
+  return requestJson("/api/meme-similarity-ignores", jsonRequest("POST", {
+    meme_a_id: memeAId,
+    meme_b_id: memeBId,
+  }));
+}
+
+export function mergeMemes(
+  targetMemeId: number,
+  sourceMemeId: number,
+): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(
+    `/api/memes/${targetMemeId}/merge`,
+    jsonRequest("POST", { source_meme_id: sourceMemeId }),
   );
 }
 

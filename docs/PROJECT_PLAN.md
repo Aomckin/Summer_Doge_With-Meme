@@ -428,6 +428,17 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：聊天上下文与回应意图保持独立；聊天正文只发送给当前 Embedding Provider，不持久化；推荐不调用额外 LLM、不修改 Meme、不重建 Embedding，现有语义搜索与浏览/详情/下载行为保持兼容。
 
+### v0.6.3：近重复巡检与复合 Meme 合并（已完成）
+
+- [x] 新增 ID Range 即时巡检，复用当前兼容 ready 向量和 `SemanticIndex`，支持 Top K、阈值、Pair 规范化去重、全索引范围外匹配与缺失统计。
+- [x] 新增最小 `MemeSimilarityIgnore`，Pair 自动规范化、唯一约束、双 FK Cascade，并支持创建和撤销 API。
+- [x] 新增单事务 Source → Target Merge，迁移有序图片、标签、Caption 和规范化弱关联，保留 Target 元数据并删除 Source。
+- [x] Merge 不复制或删除图片文件，不迁移 Source 机器判断；Target Embedding 标记 stale，Source 派生数据和 Ignore 由 Cascade 清理。
+- [x] 顶部新增“宝库巡检”对比界面，支持导航、查看完整图片组、双向主 Meme 选择、明确二次确认、弱关联和 Ignore。
+- [x] 补充巡检、Ignore、图片/标签/Caption/关系/派生数据/回滚与前端竞态测试，并更新版本和文档。
+
+验收：Semantic Similarity 只用于找值得人工检查的 Pair，不描述为重复概率且不自动操作；Merge 中途失败完整回滚，物理文件不动；合并后所有涉及 Source/Target 的旧候选立即移除，需重建 Target Embedding 后再巡检。
+
 ### v0.7：Meme 制作器
 
 - [ ] 选择 Meme 模板
@@ -489,7 +500,7 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.6.2 聊天场景推荐 Meme 已完成
+当前状态：v0.6.3 近重复巡检与复合 Meme 合并已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

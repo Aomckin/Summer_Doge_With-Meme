@@ -493,6 +493,29 @@ export interface ChatRecommendationResponse {
   model_id: string;
 }
 
+export interface SimilarityInspectionInput {
+  start_meme_id: number;
+  end_meme_id: number;
+  top_k: number;
+  similarity_threshold: number;
+  signal?: AbortSignal;
+}
+
+export interface SimilarityInspectionPair {
+  meme_a: MemeResponse;
+  meme_b: MemeResponse;
+  score: number;
+  weak_relation_exists: boolean;
+}
+
+export interface SimilarityInspectionResponse {
+  requested_count: number;
+  ready_count: number;
+  missing_or_stale_count: number;
+  candidate_pair_count: number;
+  pairs: SimilarityInspectionPair[];
+}
+
 export interface SemanticIndexStatus {
   total_memes: number;
   ready_count: number;

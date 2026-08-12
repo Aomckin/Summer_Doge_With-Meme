@@ -48,6 +48,7 @@ import {
   listMemeRelations, addMemeRelations, deleteMemeRelation,
   semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
   recommendChatMemes,
+  inspectMemeSimilarity, ignoreMemeSimilarity, mergeMemes,
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
@@ -77,6 +78,7 @@ import type {
   EmbeddingJobItemPage, MemeEmbeddingStatus,
   EnrichmentSuggestionResponse,
   ChatRecommendationInput, ChatRecommendationResponse,
+  SimilarityInspectionInput, SimilarityInspectionResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -116,6 +118,7 @@ import { clampPage } from "./pagination";
 import { SemanticIndexManager } from "./semantic-index-manager";
 import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
+import { VaultInspectorController } from "./vault-inspector";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -190,6 +193,9 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   deleteMemeRelation(id: number, relatedId: number): Promise<void>;
   semanticSearch?(input: SemanticSearchInput): Promise<SemanticSearchResponse>;
   recommendChatMemes?(input: ChatRecommendationInput): Promise<ChatRecommendationResponse>;
+  inspectMemeSimilarity?(input: SimilarityInspectionInput): Promise<SimilarityInspectionResponse>;
+  ignoreMemeSimilarity?(memeAId: number, memeBId: number): Promise<unknown>;
+  mergeMemes?(targetMemeId: number, sourceMemeId: number): Promise<MemeResponse>;
   listSimilarMemes?(id: number, limit?: number, signal?: AbortSignal): Promise<{ items: ScoredMemeResponse[] }>;
   rebuildMemeEmbedding?(id: number): Promise<MemeEmbeddingStatus>;
   getSemanticIndexStatus?(): Promise<SemanticIndexStatus>;
@@ -239,6 +245,7 @@ const defaultApi: MemeApi = {
   listMemeRelations, addMemeRelations, deleteMemeRelation,
   semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
   recommendChatMemes,
+  inspectMemeSimilarity, ignoreMemeSimilarity, mergeMemes,
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
@@ -377,6 +384,32 @@ export class MemeVaultApp {
           this.viewerMeme = meme;
           this.viewerIndex = 0;
           openImageViewer(this.elements, meme, 0);
+        },
+      },
+    );
+    new VaultInspectorController(
+      this.elements.openVaultInspectorButton,
+      {
+        inspect: input => (this.api.inspectMemeSimilarity ?? inspectMemeSimilarity)(input),
+        ignore: (left, right) => (this.api.ignoreMemeSimilarity ?? ignoreMemeSimilarity)(left, right),
+        relate: (id, relatedIds) => this.api.addMemeRelations(id, relatedIds),
+        merge: (targetId, sourceId) => (this.api.mergeMemes ?? mergeMemes)(targetId, sourceId),
+      },
+      {
+        openViewer: meme => {
+          this.viewerMeme = meme;
+          this.viewerIndex = 0;
+          openImageViewer(this.elements, meme, 0);
+        },
+        onMerge: async (target, sourceId) => {
+          const index = this.state.memes.findIndex(item => item.id === target.id);
+          if (index >= 0) this.state.memes[index] = target;
+          this.state.memes = this.state.memes.filter(item => item.id !== sourceId);
+          if (this.state.selectedMeme?.id === sourceId || this.state.selectedMeme?.id === target.id) {
+            this.selectMeme(target);
+          }
+          await Promise.all([this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh()]);
+          renderLibrary(this.elements, this.state);
         },
       },
     );

@@ -11,6 +11,7 @@ from .meme import Meme
 from .meme_embedding import MemeEmbedding, SemanticIndexState
 from .meme_image import MemeImage
 from .meme_relation import MemeRelation
+from .meme_similarity_ignore import MemeSimilarityIgnore
 from .tag import MemeTag, Tag
 from .template import Template
 
@@ -19,5 +20,6 @@ __all__ = [
     "EnrichmentAudit", "EnrichmentJob", "EnrichmentJobItem",
     "ExportJob", "ExportJobItem", "ImportJob", "ImportJobItem", "Meme",
     "MemeAIAnalysis", "MemeEmbedding", "MemeEnrichmentSuggestion", "MemeImage", "MemeRelation",
+    "MemeSimilarityIgnore",
     "MemeTag", "SemanticIndexState", "Tag", "Template",
 ]

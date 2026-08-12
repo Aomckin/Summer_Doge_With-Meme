@@ -15,6 +15,7 @@ from app.api.embedding_jobs import router as embedding_job_router
 from app.api.enrichment import router as enrichment_router
 from app.api.semantic import router as semantic_router
 from app.api.recommendations import router as recommendation_router
+from app.api.similarity_inspection import router as similarity_inspection_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
 from app.config import (
@@ -87,7 +88,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.6.2",
+        version="0.6.3",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -141,6 +142,7 @@ def create_app(
     application.include_router(enrichment_router)
     application.include_router(semantic_router)
     application.include_router(recommendation_router)
+    application.include_router(similarity_inspection_router)
     application.include_router(caption_router)
     application.include_router(tag_router)
     application.include_router(ai_settings_router)

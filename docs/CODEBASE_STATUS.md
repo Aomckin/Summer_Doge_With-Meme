@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.6.2 实现状态（2026-08-11）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.6.3 实现状态（2026-08-12）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -12,6 +12,8 @@
 - 多模态语义索引：标题、描述、规范化标签、模板和前 5 张有序图片由集中构建器生成一个 1024 维融合向量，归一化后以小端 Float32 BLOB 保存在 SQLite。
 - 自然语言搜索：查询向量调用当前 `qwen3-vl-embedding`，标签在排序前按 AND 过滤；当前模型兼容的 ready 文档向量由进程内 NumPy 矩阵计算余弦 score，翻页复用 10 分钟 LRU 结果。
 - 聊天场景推荐：独立输入最近聊天内容和可选回应意图，服务端构造 Scene Query 后复用现有语义搜索；默认每批 12 条，后续批次保持原语义排名，前端支持详情、原图查看器和下载。
+- 宝库巡检：以最多 1000 个 Meme ID 范围为源，在整个当前 SemanticIndex 内寻找 Top K 近似 Pair；只读已有兼容 ready 向量，支持阈值、去重、Ignore 和缺失统计，不调用 Provider。
+- 复合 Meme 合并：显式 Source → Target，单事务迁移有序图片、标签、Caption 和弱关联；Target 元数据与首图保留，Source 删除，物理图片文件不复制、不移动、不删除。
 - 相似 Meme：完全使用已保存的同模型、同维度融合向量，不调用 Provider；前端与人工直接关联分区展示。
 - 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
@@ -29,6 +31,7 @@
 - 尚未实现自动聊天记录解析、聊天平台接入、Meme 制作器、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
+- 巡检不提供自动判断、全库后台 Job、聚类、像素差异、Merge Undo 或 Ignore 管理器；语义相似度不等于重复概率。
 
 ### 原图下载与批量导出
 
@@ -237,6 +240,31 @@ POST /api/meme-recommendations/chat
 - `ChatRecommendationController` 独立维护 Dialog 状态；关闭时中止请求并清空正文、意图和结果，不写 localStorage/sessionStorage。
 - 推荐卡片显示封面、标题、核心标签和 score，详情与原图通过现有应用回调打开，下载继续使用原有 Meme 下载接口；“再来一批”只是语义搜索后续页。
 
+### v0.6.3 近重复巡检与 Merge
+
+```text
+POST /api/similarity-inspection
+  -> 校验 inclusive ID Range / Top K / threshold
+  -> 读取范围内当前模型 compatible ready MemeEmbedding
+  -> 每个源 BLOB 反序列化后调用 SemanticIndex.search(exclude self)
+  -> Top K -> threshold -> canonical Pair -> Ignore 过滤 -> score DESC
+  -> 公共 Meme mapper 返回左右详情和弱关联状态
+
+POST /api/memes/{target_id}/merge
+  -> MemeMergeService 显式加载 Target / Source
+  -> Source 图片临时负 position -> 改归属 -> Target 后连续重排
+  -> 复用 TagRepository 来源/置信度优先级合并 Tag
+  -> Caption 改归属 -> 收集并规范化重建 Weak Relation
+  -> 同事务 invalidate Target -> 删除 Source -> commit
+```
+
+- `meme_similarity_ignores` 只保存规范化 `(meme_a_id, meme_b_id)`，具有唯一与 `a < b` 约束；任一 Meme 删除后 FK Cascade 清理，不迁移到合并后的 Target。
+- Merge 保留 Target 标题、描述、来源、模板、created_at 和原首图；Source 图片按原顺序追加，不复制或删除磁盘文件。
+- Tag union 使用现有 `user/manual > codex > ai` 规则，同来源选更高 confidence，用户来源 confidence 为 null；Caption 原记录完整迁移，不去重。
+- Source 关系先收集邻居，再删除所有 Target/Source 边并重建 Target 规范无向边，避免自环与重复。
+- Source Embedding、AI Analysis、Enrichment Suggestion 等机器判断不迁移；Source 删除 Cascade 清理，Target Embedding 标记 stale，不自动 rebuild。
+- `VaultInspectorController` 即时保存候选；Ignore/弱关联移除当前 Pair，Merge 移除所有涉及两端的旧 Pair，旧请求由 AbortController 与 generation 保护。
+
 ### AI 有序多图分析
 
 ```text
@@ -341,7 +369,7 @@ npm.cmd --prefix frontend run build
 git diff --check
 ```
 
-v0.6.2 在保持 v0.6.1 元数据审核与现有语义搜索行为不变的基础上增加聊天场景查询薄封装和独立前端 Dialog。聊天正文只进入本次 Embedding 查询，不持久化；排序、向量格式和索引结构均未改变。
+v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补齐批量导入后的人工治理闭环。巡检候选即时计算且不持久化；只有 Merge、现有 Weak Relation 和 Ignore 产生长期数据。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 

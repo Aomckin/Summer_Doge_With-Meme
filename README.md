@@ -1,8 +1,8 @@
-# Meme Vault v0.6.2
+# Meme Vault v0.6.3
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6.2，在现有语义索引之上新增轻量“场景召唤”：输入最近聊天内容和可选回应意图，即可分页推荐适合作为回复的 Meme。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6.3，新增“宝库巡检”：使用已有语义向量找出值得人工检查的近似 Meme Pair，并可安全合并为复合 Meme、建立弱关联或持久化忽略。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## 环境要求
 
@@ -113,7 +113,7 @@ Luna 导入不再区分 dry-run 与 apply，也不会直接修改 Meme；所有�
 
 ## TypeScript 前端
 
-- 顶部工具栏提供标题/描述搜索、API 设置、模板管理、标签管理、元数据整理、场景召唤、随机抽取和统一的“图片上传”入口。
+- 顶部工具栏提供标题/描述搜索、API 设置、模板管理、标签管理、元数据整理、场景召唤、宝库巡检、随机抽取和统一的“图片上传”入口。
 - 左侧资料库使用服务端正式分页，显示筛选后的总数和总页数，并支持首页、末页、上一页、下一页、数字页码与输入页码跳转。
 - 每页可显示 24、48 或 96 个 Meme，默认 24；卡片可切换超大、大、中、小四档响应式瀑布流密度。超大卡片直接显示原图，其余档使用缩略图。两项偏好保存在浏览器本地，卡片大小变化不会重新请求列表数据。
 - 资料库可在默认顺序与稳定随机顺序间切换；同一乱序种子可连续翻页，点击“重新洗牌”会生成新排列。顶部“随机一个”仍只抽取单个 Meme。
@@ -219,6 +219,12 @@ $env:AI_TIMEOUT_SECONDS = "30"
 
 推荐卡片显示封面、标题、核心标签和相关度，并可打开 Meme 详情、原图查看器或直接下载。聊天文本只为本次查询发送给当前配置的 Embedding Provider：不写数据库、日志正文、localStorage 或 sessionStorage；关闭 Dialog 后会中止旧请求并清空输入与结果。本功能不调用 LLM、不重建 Meme 向量，也不会修改 Meme 元数据。
 
+## 宝库巡检与复合 Meme 合并
+
+顶部“宝库巡检”按最多 1000 个 Meme ID 的范围读取已有 ready/compatible 向量，并以这些 Meme 为源到整个当前 `SemanticIndex` 中寻找 Top K 相似项。候选按规范化 Pair 去重、排除持久化 Ignore，并按 score 降序展示。界面中的数值始终称为“语义相似度”；它不是重复概率，也不会触发 AI Provider、LLM、查询向量生成或自动 Embedding rebuild。
+
+对每个 Pair，用户可以建立现有弱关联、忽略此对，或明确选择左/右侧作为主 Meme 执行二次确认 Merge。Merge 在单个数据库事务内把 Source 图片直接改归属并追加到 Target、合并标签来源优先级、迁移 Caption、规范化重连弱关联，然后删除 Source；不会复制、移动或删除图片文件。Target 的标题、描述、来源、模板、创建时间和首图保持不变，其旧 Embedding 标记为 `stale`，Source 的机器派生记录和 Ignore Pair 由 FK Cascade 清理。Merge 当前没有自动撤销，需在操作前确认。
+
 ## 数据库配置
 
 默认数据库文件为 `data/meme_vault.db`，首次建立连接时自动生成。该文件已被 Git 忽略。
@@ -301,6 +307,9 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 - `POST /api/memes/{id}/embedding/rebuild`：只为单个 Meme 同步重建向量。
 - `POST /api/semantic-search`：自然语言查询、标签 AND 筛选和 24/48/96 正式分页。
 - `POST /api/meme-recommendations/chat`：接收必填聊天上下文、可选回应意图和 12 条分页参数，构造 Scene Query 后复用语义搜索；聊天正文不持久化。
+- `POST /api/similarity-inspection`：按 Meme ID 范围即时生成全索引近似 Pair，不调用 Provider。
+- `POST /api/meme-similarity-ignores`、`DELETE /api/meme-similarity-ignores/{a}/{b}`：持久化或撤销规范化 Ignore Pair。
+- `POST /api/memes/{target_id}/merge`：将显式 Source 合并到 Target，并返回合并后的 Target。
 - `GET /api/memes/{id}/similar?limit=12`：完全使用本地已保存向量返回相似 Meme。
 
 ## ZIP 导入的事务与清理

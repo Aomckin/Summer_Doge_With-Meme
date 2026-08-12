@@ -208,6 +208,14 @@ class TagRepository:
         target_confidence = float("-inf") if target.confidence is None else target.confidence
         return source_confidence > target_confidence
 
+    @classmethod
+    def preferred_link_values(
+        cls, source: MemeTag, target: MemeTag
+    ) -> tuple[str, float | None]:
+        winner = source if cls._prefer_source(source, target) else target
+        confidence = None if winner.source in {"user", "manual"} else winner.confidence
+        return winner.source, confidence
+
     def merge(self, source: Tag, target: Tag) -> Tag:
         source_links = list(
             self.session.scalars(

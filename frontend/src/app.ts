@@ -52,6 +52,8 @@ import {
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
+  listCollections, getCollection, createCollection, updateCollection,
+  deleteCollection, removeCollectionMeme, getMemeCollections, replaceMemeCollections,
 } from "./api";
 import type {
   AIAnalysisConfirmPayload,
@@ -79,6 +81,7 @@ import type {
   EnrichmentSuggestionResponse,
   ChatRecommendationInput, ChatRecommendationResponse,
   SimilarityInspectionInput, SimilarityInspectionResponse,
+  CollectionSummary, CollectionDetail, CollectionPayload, MemeCollectionsResponse,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -119,6 +122,7 @@ import { SemanticIndexManager } from "./semantic-index-manager";
 import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
+import { CollectionManagerController } from "./collection-manager";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -205,6 +209,14 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   cancelEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
   retryFailedEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
   deleteEmbeddingJob?(id: number): Promise<void>;
+  listCollections?(signal?: AbortSignal): Promise<CollectionSummary[]>;
+  getCollection?(id: number, signal?: AbortSignal): Promise<CollectionDetail>;
+  createCollection?(payload: CollectionPayload): Promise<CollectionSummary>;
+  updateCollection?(id: number, payload: CollectionPayload): Promise<CollectionSummary>;
+  deleteCollection?(id: number): Promise<void>;
+  removeCollectionMeme?(collectionId: number, memeId: number): Promise<void>;
+  getMemeCollections?(memeId: number, signal?: AbortSignal): Promise<MemeCollectionsResponse>;
+  replaceMemeCollections?(memeId: number, collectionIds: number[]): Promise<MemeCollectionsResponse>;
   enrichMeme?(id: number): Promise<EnrichmentSuggestionResponse>;
   analyzeMeme(id: number): Promise<AIAnalysisResponse>;
   confirmAIAnalysis(
@@ -249,6 +261,8 @@ const defaultApi: MemeApi = {
   getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
   listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
   deleteEmbeddingJob,
+  listCollections, getCollection, createCollection, updateCollection,
+  deleteCollection, removeCollectionMeme, getMemeCollections, replaceMemeCollections,
   analyzeMeme,
   confirmAIAnalysis,
   enrichMeme,
@@ -364,6 +378,7 @@ export class MemeVaultApp {
   private readonly tagManager: TagManagerController;
   private readonly semanticIndexManager: SemanticIndexManager;
   private readonly enrichmentWorkbench: EnrichmentWorkbenchController;
+  private readonly collectionManager: CollectionManagerController;
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
@@ -373,6 +388,27 @@ export class MemeVaultApp {
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    this.collectionManager = new CollectionManagerController(
+      this.elements.openCollectionsButton,
+      {
+        list: signal => (this.api.listCollections ?? listCollections)(signal),
+        get: (id, signal) => (this.api.getCollection ?? getCollection)(id, signal),
+        create: payload => (this.api.createCollection ?? createCollection)(payload),
+        update: (id, payload) => (this.api.updateCollection ?? updateCollection)(id, payload),
+        delete: id => (this.api.deleteCollection ?? deleteCollection)(id),
+        removeMeme: (collectionId, memeId) => (this.api.removeCollectionMeme ?? removeCollectionMeme)(collectionId, memeId),
+        getMemberships: (memeId, signal) => (this.api.getMemeCollections ?? getMemeCollections)(memeId, signal),
+        replaceMemberships: (memeId, ids) => (this.api.replaceMemeCollections ?? replaceMemeCollections)(memeId, ids),
+      },
+      {
+        openDetail: meme => this.selectMeme(meme),
+        openViewer: meme => {
+          this.viewerMeme = meme;
+          this.viewerIndex = 0;
+          openImageViewer(this.elements, meme, 0);
+        },
+      },
+    );
     new ChatRecommendationController(
       this.elements.openChatRecommendationButton,
       {
@@ -752,6 +788,8 @@ export class MemeVaultApp {
         }
       } else if (target.closest("[data-edit-meme]")) {
         this.beginEdit();
+      } else if (target.closest("[data-manage-meme-collections]")) {
+        if (this.state.selectedMeme) void this.collectionManager.openMembership(this.state.selectedMeme);
       } else if (target.closest("[data-cancel-edit]")) {
         this.cancelEdit();
       } else if (target.closest("[data-delete-meme]")) {

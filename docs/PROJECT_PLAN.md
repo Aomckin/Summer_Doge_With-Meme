@@ -500,7 +500,15 @@ data/thumbnails/*
 ## 11. 当前状态
 
 ```text
-当前状态：v0.6.3 近重复巡检与复合 Meme 合并已完成
+### v0.6.4：Meme 牌组 / 收藏夹（已完成）
+
+- 新增 Collection / CollectionItem 多对多数据模型、CRUD、membership 同步和加入顺序。
+- 新增顶部牌组管理、牌组内容浏览及 Meme 详情多选归属。
+- 删除与移除操作保持 Meme 安全，Collection 与 Tag、Embedding、Enrichment 完全独立。
+- Merge 自动迁移 Source Collection membership 并去重、保留合理位置。
+- 已补齐后端、前端及 Merge 集成回归测试。
+
+当前状态：v0.6.4 Meme 牌组 / 收藏夹已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

@@ -36,6 +36,7 @@ data/thumbnails/*
 data/template_images/*
 data/template_thumbnails/*
 data/export_archives/*
+data/import_archives/*
 data/**/*.part
 !data/images/.gitkeep
 !data/thumbnails/.gitkeep

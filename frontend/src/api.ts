@@ -51,7 +51,46 @@ import type {
   ChatRecommendationResponse,
   SimilarityInspectionInput,
   SimilarityInspectionResponse,
+  CollectionSummary,
+  CollectionDetail,
+  CollectionPayload,
+  MemeCollectionsResponse,
 } from "./types";
+
+export function listCollections(signal?: AbortSignal): Promise<CollectionSummary[]> {
+  return requestJson<CollectionSummary[]>("/api/collections", { signal });
+}
+
+export function getCollection(id: number, signal?: AbortSignal): Promise<CollectionDetail> {
+  return requestJson<CollectionDetail>(`/api/collections/${id}`, { signal });
+}
+
+export function createCollection(payload: CollectionPayload): Promise<CollectionSummary> {
+  return requestJson<CollectionSummary>("/api/collections", jsonRequest("POST", payload));
+}
+
+export function updateCollection(id: number, payload: CollectionPayload): Promise<CollectionSummary> {
+  return requestJson<CollectionSummary>(`/api/collections/${id}`, jsonRequest("PATCH", payload));
+}
+
+export async function deleteCollection(id: number): Promise<void> {
+  await requestJson<void>(`/api/collections/${id}`, { method: "DELETE" });
+}
+
+export async function removeCollectionMeme(collectionId: number, memeId: number): Promise<void> {
+  await requestJson<void>(`/api/collections/${collectionId}/memes/${memeId}`, { method: "DELETE" });
+}
+
+export function getMemeCollections(memeId: number, signal?: AbortSignal): Promise<MemeCollectionsResponse> {
+  return requestJson<MemeCollectionsResponse>(`/api/memes/${memeId}/collections`, { signal });
+}
+
+export function replaceMemeCollections(memeId: number, collectionIds: number[]): Promise<MemeCollectionsResponse> {
+  return requestJson<MemeCollectionsResponse>(
+    `/api/memes/${memeId}/collections`,
+    jsonRequest("PUT", { collection_ids: collectionIds }),
+  );
+}
 
 export function createEnrichmentJob(input: EnrichmentJobCreateInput): Promise<EnrichmentJobResponse> {
   return requestJson<EnrichmentJobResponse>("/api/enrichment-jobs", jsonRequest("POST", input));

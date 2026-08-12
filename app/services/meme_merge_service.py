@@ -2,6 +2,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.caption import Caption
+from app.models.collection import CollectionItem
 from app.models.meme import Meme
 from app.models.meme_relation import MemeRelation
 from app.models.tag import MemeTag
@@ -33,6 +34,7 @@ class MemeMergeService:
             self._move_images(target, source)
             self._merge_tags(target, source)
             self._move_captions(target, source)
+            self._merge_collections(target.id, source.id)
             self._reconnect_relations(target.id, source.id)
             self._sync_cover(target)
             invalidate_meme_semantic_data(self.session, [target.id])
@@ -128,6 +130,27 @@ class MemeMergeService:
         for neighbor_id in sorted(neighbors):
             left, right = sorted((target_id, neighbor_id))
             self.session.add(MemeRelation(meme_a_id=left, meme_b_id=right))
+        self.session.flush()
+
+    def _merge_collections(self, target_id: int, source_id: int) -> None:
+        items = list(
+            self.session.scalars(
+                select(CollectionItem)
+                .where(CollectionItem.meme_id.in_((target_id, source_id)))
+                .order_by(CollectionItem.collection_id, CollectionItem.position)
+            )
+        )
+        target_collections = {
+            item.collection_id for item in items if item.meme_id == target_id
+        }
+        for item in items:
+            if item.meme_id != source_id:
+                continue
+            if item.collection_id in target_collections:
+                self.session.delete(item)
+            else:
+                item.meme_id = target_id
+                target_collections.add(item.collection_id)
         self.session.flush()
 
     @staticmethod

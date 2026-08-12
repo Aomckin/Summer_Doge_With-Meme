@@ -3,6 +3,7 @@
 from .ai_analysis import MemeAIAnalysis
 from .ai_settings import AIModel, AIProvider
 from .caption import Caption
+from .collection import Collection, CollectionItem
 from .embedding_job import EmbeddingJob, EmbeddingJobItem
 from .enrichment import EnrichmentAudit, EnrichmentJob, EnrichmentJobItem, MemeEnrichmentSuggestion
 from .export_job import ExportJob, ExportJobItem
@@ -16,7 +17,7 @@ from .tag import MemeTag, Tag
 from .template import Template
 
 __all__ = [
-    "AIModel", "AIProvider", "Caption", "EmbeddingJob", "EmbeddingJobItem",
+    "AIModel", "AIProvider", "Caption", "Collection", "CollectionItem", "EmbeddingJob", "EmbeddingJobItem",
     "EnrichmentAudit", "EnrichmentJob", "EnrichmentJobItem",
     "ExportJob", "ExportJobItem", "ImportJob", "ImportJobItem", "Meme",
     "MemeAIAnalysis", "MemeEmbedding", "MemeEnrichmentSuggestion", "MemeImage", "MemeRelation",

@@ -23,6 +23,7 @@ export interface AppElements {
   openEnrichmentButton: HTMLButtonElement;
   openChatRecommendationButton: HTMLButtonElement;
   openVaultInspectorButton: HTMLButtonElement;
+  openCollectionsButton: HTMLButtonElement;
   operationError: HTMLElement;
   templateFilters: HTMLElement;
   tagFilters: HTMLElement;
@@ -140,6 +141,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-enrichment" class="button button-secondary" type="button">元数据整理</button>
           <button id="open-chat-recommendation" class="button button-primary" type="button">场景召唤</button>
           <button id="open-vault-inspector" class="button button-secondary" type="button">宝库巡检</button>
+          <button id="open-collections" class="button button-secondary" type="button">牌组</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
@@ -422,6 +424,7 @@ export function mountShell(root: HTMLElement): AppElements {
     openEnrichmentButton: required(root, "#open-enrichment"),
     openChatRecommendationButton: required(root, "#open-chat-recommendation"),
     openVaultInspectorButton: required(root, "#open-vault-inspector"),
+    openCollectionsButton: required(root, "#open-collections"),
     operationError: required(root, "#operation-error"),
     templateFilters: required(root, "#template-filters"),
     tagFilters: required(root, "#tag-filters"),
@@ -657,7 +660,7 @@ export function renderTags(elements: AppElements, state: AppState): void {
   elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span>${tags}${toggle}`;
 }
 
-function cardMarkup(
+export function memeCardMarkup(
   meme: MemeResponse,
   selected: boolean,
   cardSize: MemeCardSize,
@@ -751,7 +754,7 @@ export function renderLibrary(
       ? `第 ${state.page} / ${state.totalPages} 页`
       : "还没有符合条件的 Meme";
     elements.memeGrid.innerHTML = state.memes
-      .map((meme) => cardMarkup(
+      .map((meme) => memeCardMarkup(
         meme,
         meme.id === state.selectedMeme?.id,
         state.cardSize,
@@ -789,7 +792,7 @@ export function renderMemeCard(
   }
   const template = document.createElement("template");
   const size = elements.memeGrid.dataset.cardSize as MemeCardSize | undefined;
-  template.innerHTML = cardMarkup(meme, selected, size ?? "medium").trim();
+  template.innerHTML = memeCardMarkup(meme, selected, size ?? "medium").trim();
   const replacement = template.content.firstElementChild;
   if (!(replacement instanceof HTMLElement)) {
     return;
@@ -1182,6 +1185,7 @@ export function renderDetail(
           ${detailError(state.actionError)}
           <div class="detail-actions">
             <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
+            <button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button>
             <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
             <button class="button button-danger" type="button" data-delete-meme ${state.deleting ? "disabled" : ""}>
               ${state.deleting ? "正在删除…" : "删除"}

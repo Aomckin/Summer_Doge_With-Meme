@@ -1,8 +1,16 @@
-# Meme Vault v0.6.3
+# Meme Vault v0.6.4
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6.3，新增“宝库巡检”：使用已有语义向量找出值得人工检查的近似 Meme Pair，并可安全合并为复合 Meme、建立弱关联或持久化忽略。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6.4，新增完全由用户管理的 Meme 牌组：同一 Meme 可加入多个牌组，牌组与标签、语义索引和元数据整理互不影响。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+
+## Meme 牌组
+
+- 顶部“牌组”入口可创建、编辑、删除和浏览牌组，并显示每个牌组的 Meme 数量。
+- Meme 详情中的“加入牌组”支持多选同步；取消勾选只移除关联，不会删除 Meme。
+- 牌组内复用现有 Meme 卡片、详情、原图查看和下载能力，并提供明确的“从牌组移除”。
+- 牌组是用户的快捷组织方式，不会转成 Tag，也不会令 Embedding 或 Enrichment 结果过期。
+- 合并复合 Meme 时，Source 的牌组归属会迁移给 Target，并自动去重、保留已有 Target 位置。
 
 ## 环境要求
 

@@ -11,6 +11,7 @@ from app.database import Base
 
 # 这些类型只帮助编辑器理解注解；运行时不导入，可避免 Meme 与 Tag 循环导入。
 if TYPE_CHECKING:
+    from app.models.collection import CollectionItem
     from app.models.ai_analysis import MemeAIAnalysis
     from app.models.caption import Caption
     from app.models.tag import MemeTag, Tag
@@ -79,6 +80,11 @@ class Meme(Base):
         back_populates="meme",
         cascade="all, delete-orphan",
         order_by="MemeImage.position",
+    )
+    collection_items: Mapped[list["CollectionItem"]] = relationship(
+        back_populates="meme",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     template: Mapped["Template | None"] = relationship(back_populates="memes")
 

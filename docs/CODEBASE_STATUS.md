@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.6.3 实现状态（2026-08-12）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.6.4 实现状态（2026-08-12）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -370,6 +370,18 @@ git diff --check
 ```
 
 v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补齐批量导入后的人工治理闭环。巡检候选即时计算且不持久化；只有 Merge、现有 Weak Relation 和 Ignore 产生长期数据。
+
+### v0.6.4 Meme 牌组 / 收藏夹
+
+- `Collection` 保存名称、可选描述和时间戳；`CollectionItem` 以 `(collection_id, meme_id)` 唯一约束实现 Meme 与牌组的多对多关系，并保留 `position`/`added_at`。
+- Collection API 提供 CRUD、详情内有序 Meme 列表、单项加入/移除，以及 `PUT /api/memes/{id}/collections` 原子同步多选 membership。
+- 删除牌组只级联删除 CollectionItem；删除 Meme 只清理其 CollectionItem，另一侧实体均保留。
+- 顶部牌组 Manager 负责管理与浏览；Meme 详情可加载并保存当前多选归属，操作后不刷新主图库分页、搜索、Tag Filter 或滚动位置。
+- 牌组卡片复用现有 Meme 卡片响应与详情、Viewer、下载路径；“从牌组移除”只删除关联。
+- Collection 与 Tag 职责独立：Tag 描述内容语义/分类，Collection 表达用户的私有组织与快捷取用。
+- Collection membership 不参与 Meme `source_hash`，不会触发 Embedding stale，也不属于 Enrichment Suggestion。
+- Meme Merge 在同一事务内迁移 Source membership：Target 已在牌组时保留 Target 原位置并删除重复项；仅 Source 在牌组时把原 Item 改指向 Target，尽量保留原 position。
+- v0.6.4 未实现拖拽排序、智能牌组、AI 推荐、权限、分享或云同步。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 

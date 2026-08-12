@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models.ai_settings import AIModel, AIProvider
 from app.models.caption import Caption
+from app.models.collection import Collection, CollectionItem
 from app.models.enrichment import MemeEnrichmentSuggestion
 from app.models.meme import Meme
 from app.models.meme_embedding import MemeEmbedding
@@ -272,3 +273,29 @@ def test_merge_rejects_same_or_missing_meme(merge_context) -> None:
             MemeMergeService(session).merge(target.id, target.id)
         with pytest.raises(LookupError):
             MemeMergeService(session).merge(target.id, 999)
+
+
+def test_merge_unions_collection_memberships_and_preserves_positions(merge_context) -> None:
+    factory, root = merge_context
+    with factory() as session:
+        target = add_meme(session, root, "target", 1)
+        source = add_meme(session, root, "source", 1)
+        c1, c2, c3 = Collection(name="C1"), Collection(name="C2"), Collection(name="C3")
+        session.add_all([c1, c2, c3])
+        session.flush()
+        session.add_all([
+            CollectionItem(collection_id=c1.id, meme_id=target.id, position=4),
+            CollectionItem(collection_id=c1.id, meme_id=source.id, position=8),
+            CollectionItem(collection_id=c2.id, meme_id=source.id, position=3),
+            CollectionItem(collection_id=c3.id, meme_id=source.id, position=6),
+        ])
+        target_id, source_id = target.id, source.id
+        session.commit()
+
+        MemeMergeService(session).merge(target_id, source_id)
+        items = list(session.scalars(select(CollectionItem).order_by(CollectionItem.collection_id)))
+        assert [(item.collection_id, item.meme_id, item.position) for item in items] == [
+            (c1.id, target_id, 4),
+            (c2.id, target_id, 3),
+            (c3.id, target_id, 6),
+        ]

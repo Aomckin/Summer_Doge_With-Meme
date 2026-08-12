@@ -2864,3 +2864,237 @@ label small {
     transition-duration: 0.01ms !important;
   }
 }
+.settings-shell.collection-shell,
+.settings-shell.membership-shell {
+  grid-template-rows: none;
+  height: auto;
+  max-height: calc(100vh - 48px);
+  margin: 24px auto;
+  overflow-y: auto;
+}
+
+.settings-shell.collection-shell {
+  width: min(760px, calc(100vw - 32px));
+  padding-bottom: 18px;
+}
+
+.collection-shell .settings-header,
+.membership-shell .settings-header {
+  padding: 18px 20px;
+}
+
+.collection-shell > .form-error,
+.collection-shell > .status-line,
+.membership-shell > .form-error,
+.membership-shell > .status-line {
+  margin: 14px 18px 0;
+}
+
+.collection-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(320px, 38vh);
+  padding: 14px 18px 0;
+  overflow-y: auto;
+}
+
+.collection-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 1.5%);
+}
+
+.collection-row > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collection-row > button span {
+  grid-column: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collection-row > button b {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.collection-row > div,
+.collection-card-actions,
+.collection-detail-toolbar,
+.collection-form .form-actions,
+.membership-shell .form-actions {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.collection-row .button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.collection-form {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+  gap: 10px 12px;
+  align-items: end;
+  margin: 16px 18px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.collection-form h3 {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 16px;
+}
+
+.collection-form label {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.collection-form input {
+  min-height: 38px;
+}
+
+.collection-form textarea {
+  min-height: 38px;
+  height: 38px;
+  padding: 8px 10px;
+}
+
+.collection-form .form-actions,
+.membership-shell .form-actions {
+  justify-content: flex-end;
+}
+
+.collection-detail-toolbar {
+  justify-content: space-between;
+  margin: 14px 18px;
+}
+
+.collection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  padding: 0 18px;
+}
+
+.collection-card {
+  display: grid;
+  gap: 7px;
+}
+
+.collection-card .meme-card {
+  min-height: 210px;
+}
+
+.collection-card-actions .button {
+  flex: 1 1 auto;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.collection-empty {
+  grid-column: 1 / -1;
+  padding: 22px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.collection-empty h3,
+.collection-empty p {
+  margin: 0;
+}
+
+.collection-empty p {
+  margin-top: 5px;
+}
+
+.settings-shell.membership-shell {
+  width: min(500px, calc(100vw - 32px));
+  padding-bottom: 16px;
+}
+
+.membership-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(330px, 48vh);
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+
+.membership-list label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: rgb(255 255 255 / 1.5%);
+}
+
+.membership-list input {
+  flex: 0 0 auto;
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+}
+
+.membership-list label span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.membership-list small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.membership-shell .form-actions {
+  padding: 0 18px;
+}
+
+@media (max-width: 680px) {
+  .collection-form {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-row {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-row > div {
+    justify-content: flex-end;
+  }
+}

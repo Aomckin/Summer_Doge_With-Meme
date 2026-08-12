@@ -57,6 +57,10 @@ def test_import_template_service_without_semantic_index() -> None:
     assert_light_import("app.services.template_service", "TemplateService")
 
 
+def test_import_collection_service_without_semantic_index() -> None:
+    assert_light_import("app.services.collection_service", "CollectionService")
+
+
 def test_tag_maintenance_does_not_import_semantic_index() -> None:
     result = run_python(
         "import sys; from scripts.tag_maintenance.importer import import_candidates; "

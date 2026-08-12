@@ -516,6 +516,34 @@ export interface SimilarityInspectionResponse {
   pairs: SimilarityInspectionPair[];
 }
 
+export interface CollectionSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  meme_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionItem {
+  position: number;
+  added_at: string;
+  meme: MemeResponse;
+}
+
+export interface CollectionDetail extends CollectionSummary {
+  items: CollectionItem[];
+}
+
+export interface CollectionPayload {
+  name: string;
+  description: string | null;
+}
+
+export interface MemeCollectionsResponse {
+  collection_ids: number[];
+}
+
 export interface SemanticIndexStatus {
   total_memes: number;
   ready_count: number;

@@ -1,16 +1,18 @@
-# Meme Vault v0.7.2
+# Meme Vault v0.7.3
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.2，Meme 制作器在自由文本框排版基础上增加会话内 Undo/Redo、基础快捷键、画布中心吸附辅助线和 Slider + Numeric 精调，并继续支持 Template Reference Image 或本地静态图片底图、原分辨率 PNG 导出与普通 Meme 入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.3，Meme 制作器新增输出比例预设与底图取景，可在独立输出画布中缩放、平移 Template Reference Image 或本地静态底图，并通过 Fit、Fill、Reset 快速构图；全部操作继续接入会话内 Undo/Redo、PNG 导出与普通 Meme 入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## Meme 制作器
 
 顶部“Meme 制作器”入口可读取现有模板参考图，或选择仅在当前会话使用的本地 PNG、JPEG、WebP 底图。加载后会创建一个默认文本框；可继续添加、选择、删除或复制文本框，并为每个文本框独立设置文字、字号、X/Y、文本区域宽度、黑/白文字、黑/白描边、左/中/右对齐与三个系统字体预设。画布支持拖动、左右 handle 调宽及方向键微调（0.5%，Shift 为 2%）；最多 20 个文本框，并可上移或下移一层。
 
-预览和导出共享同一套 Canvas 测量、换行、颜色与渲染逻辑；选中框和 resize handle 位于独立 DOM overlay，不会进入输出。保存时把 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持持久化或分支式 History、GIF Maker、图片图层、旋转、裁剪、滤镜、任意颜色/字体上传或非 PNG 输出。
+输出画布支持原图、1:1、4:3、3:4、16:9；固定比例尺寸取原图范围内最大内接矩形，不主动放大。底图可使用 10%–400% 缩放与 X/Y 百分比偏移，也可直接拖动画布空白区域平移；“适应画布”完整显示图片并允许白色留白，“填满画布”覆盖画布并允许边缘裁切，“重置底图”在当前比例下恢复 Fill + Center。裁剪通过输出画布与背景取景实现，当前不存在自由 Crop Rectangle。
 
-编辑历史保存最多 50 个轻量状态步骤，只包含文本框、当前选择和标题，不保存 Canvas、Blob、底图 Bitmap 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D` 复制、`Delete` 删除、`Escape` 取消选择。输入框聚焦时这些快捷键不会被 Maker 劫持。拖动和 resize 的多次 pointermove、Slider 的连续 input 都合并为单个历史步骤；历史在关闭制作器后清空。
+预览、导出与保存共享同一个背景矩形计算及 Canvas Renderer；选中框、resize handle 和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终输出 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持持久化或分支式 History、GIF Maker、图片图层、旋转、自由裁剪框、滤镜、任意颜色/字体上传或非 PNG 输出。
+
+编辑历史保存最多 50 个轻量状态步骤，只包含文本框、当前选择、标题、输出比例/尺寸与底图缩放偏移，不保存 Canvas、Blob、底图 Bitmap 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D` 复制、`Delete` 删除、`Escape` 取消选择。输入框聚焦时这些快捷键不会被 Maker 劫持。文本框/背景拖动和 resize 的多次 pointermove、Slider 的连续 input 都合并为单个历史步骤；历史在关闭制作器后清空。
 
 拖动文本框接近画布 X/Y 中心 1.25% 范围时会吸附到 50%，并在独立 overlay 中显示竖直或水平辅助线，松手立即隐藏且不进入 PNG。字号、X、Y、宽度和描边同时提供 Slider 与 Numeric Input；X/Y/宽度支持 0.1 精度，非法值在 change/blur 时恢复或 clamp。
 

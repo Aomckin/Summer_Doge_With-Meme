@@ -31,7 +31,7 @@ function meme(id = 8): MemeResponse {
 function setup(overrides: Partial<MemeMakerApi> = {}) {
   document.body.innerHTML = '<button data-trigger type="button">open</button>';
   const context = {
-    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
+    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
   } as unknown as CanvasRenderingContext2D;
@@ -363,6 +363,77 @@ describe("Meme Maker controller", () => {
     key(dialog, "z", { ctrlKey: true }); expect(fontNumber.value).not.toBe("12");
   });
 
+  it("switches output ratios with fill-center, preserves text boxes and supports ratio undo", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Keep me"); type(dialog, "box_x", "42.5");
+    dialog.querySelector<HTMLButtonElement>('[data-aspect-preset="1:1"]')!.click();
+    expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("600 × 600 PNG");
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Keep me");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("42.5");
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("0");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG"));
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("600 × 600 PNG"));
+  });
+
+  it("fits, fills and resets the background as individual undoable actions", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>('[data-aspect-preset="1:1"]')!.click();
+    dialog.querySelector<HTMLButtonElement>("[data-background-fit]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale"]')?.value).toBe("75");
+    dialog.querySelector<HTMLButtonElement>("[data-background-fill]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale"]')?.value).toBe("100");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale"]')?.value).toBe("75");
+    type(dialog, "background_x", "20");
+    dialog.querySelector<HTMLButtonElement>("[data-background-reset]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("0");
+  });
+
+  it("synchronizes background controls, clamps numeric input and undoes a scale edit", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    type(dialog, "background_scale", "180.5");
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale_number"]')?.value).toBe("180.5");
+    const scale = dialog.querySelector<HTMLInputElement>('[name="background_scale_number"]')!;
+    scale.focus(); type(dialog, "background_scale_number", "220.5"); scale.dispatchEvent(new Event("change", { bubbles: true })); scale.blur();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale"]')?.value).toBe("220.5");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_scale"]')?.value).toBe("180.5");
+    const x = dialog.querySelector<HTMLInputElement>('[name="background_x_number"]')!;
+    x.focus(); type(dialog, "background_x_number", "999"); x.blur(); expect(x.value).toBe("200");
+    x.focus(); x.value = ""; x.dispatchEvent(new Event("input", { bubbles: true })); x.blur(); expect(x.value).not.toBe("");
+  });
+
+  it("drags the background only on blank canvas and groups multiple moves into one history step", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Text stays");
+    const canvas = dialog.querySelector<HTMLCanvasElement>("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    const fire = (name: string, x: number, y: number, target: Element = overlay) => target.dispatchEvent(new MouseEvent(name, { bubbles: true, clientX: x, clientY: y }));
+    const textX = dialog.querySelector<HTMLInputElement>('[name="box_x"]')!.value;
+    fire("pointerdown", 10, 590); fire("pointermove", 50, 560); fire("pointermove", 90, 530);
+    expect(overlay.classList.contains("is-dragging-background")).toBe(true);
+    fire("pointerup", 90, 530);
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("10");
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_y"]')?.value).toBe("-10");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe(textX);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("0");
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_y"]')?.value).toBe("0");
+  });
+
+  it("does not move the background while dragging or resizing a text box", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Text");
+    const canvas = dialog.querySelector<HTMLCanvasElement>("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    const fire = (name: string, x: number, y: number, target: Element = overlay) => target.dispatchEvent(new MouseEvent(name, { bubbles: true, clientX: x, clientY: y }));
+    fire("pointerdown", 400, 90, dialog.querySelector("[data-selected-box]")!); fire("pointermove", 430, 120); fire("pointerup", 430, 120);
+    fire("pointerdown", 680, 120, dialog.querySelector('[data-resize-handle="right"]')!); fire("pointermove", 700, 120); fire("pointerup", 700, 120);
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("0");
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_y"]')?.value).toBe("0");
+  });
+
   it("ignores a stale template image load after a fast switch", async () => {
     let resolveFirst!: (value: ReturnType<typeof loaded>) => void;
     const loaded = (width: number) => ({ source: {} as CanvasImageSource, width, height: 600, dispose: vi.fn() });
@@ -421,5 +492,22 @@ describe("Meme Maker controller", () => {
     await vi.waitFor(() => expect(dialog.querySelector("[data-maker-notice]")?.textContent).toBe("该图片已存在"));
     expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Top");
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("uses the identical transformed background for preview, export and template save", async () => {
+    const { dialog, api, context } = setup(); await choose(dialog); type(dialog, "box_text", "Crop"); type(dialog, "title", "Crop Meme");
+    dialog.querySelector<HTMLButtonElement>('[data-aspect-preset="1:1"]')!.click();
+    type(dialog, "background_scale", "150"); type(dialog, "background_x", "12.5"); type(dialog, "background_y", "-7.5");
+    await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalled());
+    vi.mocked(context.drawImage).mockClear();
+    dialog.querySelector<HTMLButtonElement>("[data-export-maker]")!.click();
+    await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalled());
+    const exportRect = vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1);
+    expect(exportRect).toEqual([-225, -195, 1200, 900]);
+    vi.mocked(context.drawImage).mockClear();
+    dialog.querySelector<HTMLButtonElement>("[data-save-maker]")!.click();
+    await vi.waitFor(() => expect(api.uploadMeme).toHaveBeenCalled());
+    expect(vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1)).toEqual(exportRect);
+    expect(api.uploadMeme).toHaveBeenCalledWith(expect.objectContaining({ template_id: 1, source: "meme-maker" }));
   });
 });

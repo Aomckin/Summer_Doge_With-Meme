@@ -3,7 +3,7 @@ import { drawTextBox, measureTextBox, renderMemeCanvas, wrapTextBoxText, type Me
 
 function context() {
   return {
-    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
+    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: [...text].length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
   } as unknown as CanvasRenderingContext2D;
@@ -24,6 +24,18 @@ describe("TextBox renderer", () => {
     expect(ctx.fillText).toHaveBeenNthCalledWith(1, "Hello", 400, 300);
     expect(ctx.fillText).toHaveBeenNthCalledWith(2, "World", 400, 300);
     expect([...measurements.keys()]).toEqual(["one", "two"]);
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);
+  });
+
+  it("uses the same transformed background rectangle as the output canvas", () => {
+    const ctx = context();
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => ctx) } as unknown as HTMLCanvasElement;
+    renderMemeCanvas(canvas, {} as CanvasImageSource, [], 800, 400, {
+      aspectPreset: "1:1", outputWidth: 400, outputHeight: 400,
+      backgroundScale: 1, backgroundOffsetX: 10, backgroundOffsetY: -5,
+    });
+    expect([canvas.width, canvas.height]).toEqual([400, 400]);
+    expect(ctx.drawImage).toHaveBeenCalledWith(expect.anything(), -160, -20, 800, 400);
   });
 
   it.each([

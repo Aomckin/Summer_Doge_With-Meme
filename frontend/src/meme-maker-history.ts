@@ -1,9 +1,11 @@
 import type { MemeTextBox } from "./meme-renderer";
+import type { MemeCanvasState } from "./meme-background";
 
 export interface MemeMakerHistoryState {
   textBoxes: MemeTextBox[];
   selectedTextBoxId: string | null;
   title: string;
+  canvasState: MemeCanvasState;
 }
 
 export const MEME_MAKER_HISTORY_LIMIT = 50;
@@ -13,6 +15,7 @@ export function cloneHistoryState(state: MemeMakerHistoryState): MemeMakerHistor
     textBoxes: state.textBoxes.map(box => ({ ...box })),
     selectedTextBoxId: state.selectedTextBoxId,
     title: state.title,
+    canvasState: { ...state.canvasState },
   };
 }
 

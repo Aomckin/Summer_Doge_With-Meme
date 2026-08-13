@@ -6,7 +6,10 @@ const box = (fontSize: number): MemeTextBox => ({
   id: "box", text: "A", xPercent: 50, yPercent: 50, widthPercent: 50, fontSize,
   fillColor: "white", strokeWidth: 3, strokeColor: "black", align: "center", fontPreset: "classic",
 });
-const state = (fontSize: number, title = "Title"): MemeMakerHistoryState => ({ textBoxes: [box(fontSize)], selectedTextBoxId: "box", title });
+const state = (fontSize: number, title = "Title"): MemeMakerHistoryState => ({
+  textBoxes: [box(fontSize)], selectedTextBoxId: "box", title,
+  canvasState: { aspectPreset: "original", outputWidth: 800, outputHeight: 600, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0 },
+});
 
 describe("Meme Maker history", () => {
   it("undoes, redoes and invalidates redo after a branch edit", () => {
@@ -28,6 +31,8 @@ describe("Meme Maker history", () => {
     const cloned = cloneHistoryState(state(20));
     cloned.textBoxes[0].text = "changed";
     expect(state(20).textBoxes[0].text).toBe("A");
+    cloned.canvasState.backgroundOffsetX = 99;
+    expect(state(20).canvasState.backgroundOffsetX).toBe(0);
   });
 
   it("keeps only the latest 50 steps and ignores no-op records", () => {

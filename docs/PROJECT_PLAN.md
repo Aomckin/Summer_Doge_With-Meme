@@ -471,6 +471,16 @@ v0.7.1 当时仍不提供图片图层、旋转、Undo/Redo、GIF Maker、任意�
 
 History 不保存底图对象、Canvas、Blob、DOM 或渲染结果，关闭 Maker 后清空；不提供持久化 History、分支树、对象吸附、网格或自定义参考线。
 
+### v0.7.3：底图取景与输出画布（已完成）
+
+- [x] 拆分 Background Source、Output Canvas 与 Background Transform，支持原图、1:1、4:3、3:4、16:9。
+- [x] 固定比例使用原图范围内最大内接输出尺寸，不主动上采样；文本框继续使用 Output Canvas 百分比坐标。
+- [x] 背景支持 10%–400% Zoom、X/Y 百分比 Pan、空白画布直接拖动、Fit、Fill 和 Reset。
+- [x] Ratio、Zoom、Pan、Fit、Fill、Reset 与连续背景拖动进入现有 50 步 Undo/Redo。
+- [x] Preview、PNG Export 与 Save 共享相同背景几何和 Renderer；Template/Local 继续复用普通 Upload 归属规则。
+
+裁剪通过输出画布与背景取景实现，当前不存在自由 Crop Rectangle；不提供旋转、镜像、滤镜、图片图层、自定义像素尺寸或 AI 构图。
+
 ### v1.0：可公开访问版本
 
 - [ ] 用户系统、权限控制与分享链接
@@ -553,7 +563,7 @@ data/thumbnails/*
 - 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
 - Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.7.2 编辑历史与排版辅助已完成
+当前状态：v0.7.3 底图取景与输出画布已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

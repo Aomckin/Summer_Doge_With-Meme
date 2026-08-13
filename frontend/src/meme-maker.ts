@@ -15,6 +15,13 @@ import {
 } from "./meme-maker-interaction";
 import type { MemeResponse, TemplateResponse, UploadMemeInput } from "./types";
 import { MemeMakerHistory, type MemeMakerHistoryState } from "./meme-maker-history";
+import {
+  calculateFillScale,
+  calculateFitScale,
+  resetBackgroundTransform,
+  type MemeAspectPreset,
+  type MemeCanvasState,
+} from "./meme-background";
 
 interface LoadedTemplateImage {
   source: CanvasImageSource;
@@ -41,6 +48,9 @@ export interface MemeMakerOptions {
 
 const staticMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_TEXT_BOXES = 20;
+type BackgroundInteraction =
+  | { type: "idle" }
+  | { type: "dragging"; startX: number; startY: number; originalX: number; originalY: number };
 
 async function loadTemplateImage(url: string): Promise<LoadedTemplateImage> {
   const response = await fetch(url);
@@ -113,6 +123,11 @@ export class MemeMakerController {
   private selectedTextBoxId: string | null = null;
   private measurements = new Map<string, TextBoxMeasurement>();
   private interaction: InteractionState = IDLE_INTERACTION;
+  private backgroundInteraction: BackgroundInteraction = { type: "idle" };
+  private canvasState: MemeCanvasState = {
+    aspectPreset: "original", outputWidth: 0, outputHeight: 0,
+    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
+  };
   private loadGeneration = 0;
   private renderFrame: number | null = null;
   private busy = false;
@@ -154,6 +169,20 @@ export class MemeMakerController {
               <label data-template-source><span>模板</span><select name="template_id"><option value="">正在加载模板…</option></select></label>
               <label data-local-source hidden><span>本地图片</span><input name="local_image" type="file" accept="image/png,image/jpeg,image/webp"></label>
             </fieldset>
+            <fieldset class="background-framing" data-background-framing disabled><legend>底图取景</legend>
+              <div class="maker-ratio-control" role="group" aria-label="输出比例">
+                <span>输出比例</span>
+                <div>${(["original", "1:1", "4:3", "3:4", "16:9"] as const).map(preset => `<button class="button button-secondary" type="button" data-aspect-preset="${preset}">${preset === "original" ? "原图" : preset}</button>`).join("")}</div>
+              </div>
+              ${this.rangeMarkup("background_scale", "缩放", 10, 400, "%", ".1")}
+              ${this.rangeMarkup("background_x", "背景 X", -200, 200, "%", ".1")}
+              ${this.rangeMarkup("background_y", "背景 Y", -200, 200, "%", ".1")}
+              <div class="background-framing-actions">
+                <button class="button button-secondary" type="button" data-background-fit>适应画布</button>
+                <button class="button button-secondary" type="button" data-background-fill>填满画布</button>
+                <button class="button button-ghost" type="button" data-background-reset>重置底图</button>
+              </div>
+            </fieldset>
             <section class="text-box-manager" aria-labelledby="text-box-list-title">
               <div class="text-box-manager-heading"><strong id="text-box-list-title">文本框</strong><span data-box-count>0 / ${MAX_TEXT_BOXES}</span></div>
               <div class="text-box-list" data-text-box-list role="listbox" aria-label="文本框列表"></div>
@@ -191,7 +220,7 @@ export class MemeMakerController {
               <p data-preview-placeholder>请选择一个静态参考图模板</p>
             </div>
             <small data-resolution>导出将保留模板参考图的原始分辨率</small>
-            <small>拖动文本框调整位置；左右控制点调整宽度；方向键微调，Shift + 方向键快速移动。</small>
+            <small>拖动文本框调整位置；拖动画布空白区域移动底图；左右控制点调整文本宽度。</small>
           </section>
         </div>
         <div class="meme-maker-output">
@@ -217,8 +246,8 @@ export class MemeMakerController {
     this.updateUi();
   }
 
-  private rangeMarkup(name: string, label: string, min: number, max: number, unit: string): string {
-    const step = name === "box_x" || name === "box_y" || name === "box_width" ? ".1" : "1";
+  private rangeMarkup(name: string, label: string, min: number, max: number, unit: string, explicitStep?: string): string {
+    const step = explicitStep ?? (name === "box_x" || name === "box_y" || name === "box_width" ? ".1" : "1");
     return `<label class="maker-range-control"><span>${label} <output data-output="${name}">0${unit}</output></span><div><input name="${name}" type="range" min="${min}" max="${max}" step="${step}"><input name="${name}_number" type="number" min="${min}" max="${max}" step="${step}" aria-label="${label}精确值"></div></label>`;
   }
 
@@ -230,6 +259,7 @@ export class MemeMakerController {
     if (this.renderFrame !== null) this.cancelFrame(this.renderFrame);
     this.renderFrame = null;
     this.interaction = IDLE_INTERACTION;
+    this.backgroundInteraction = { type: "idle" };
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     if (this.dialog.open) this.dialog.close();
   }
@@ -255,6 +285,17 @@ export class MemeMakerController {
     this.dialog.querySelector("[data-reset-text-style]")?.addEventListener("click", () => this.resetSelectedStyle());
     this.dialog.querySelector("[data-undo]")?.addEventListener("click", () => this.undo());
     this.dialog.querySelector("[data-redo]")?.addEventListener("click", () => this.redo());
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-aspect-preset]")) {
+      button.addEventListener("click", () => this.setAspectPreset(button.dataset.aspectPreset as MemeAspectPreset));
+    }
+    this.dialog.querySelector("[data-background-fit]")?.addEventListener("click", () => this.applyBackgroundMode("fit"));
+    this.dialog.querySelector("[data-background-fill]")?.addEventListener("click", () => this.applyBackgroundMode("fill"));
+    this.dialog.querySelector("[data-background-reset]")?.addEventListener("click", () => this.applyBackgroundMode("fill"));
+    const framing = this.required<HTMLFieldSetElement>("[data-background-framing]");
+    framing.addEventListener("focusin", event => this.beginControlHistory(event.target));
+    framing.addEventListener("input", event => this.updateBackgroundFromForm(event.target));
+    framing.addEventListener("change", event => this.updateBackgroundFromForm(event.target, true));
+    framing.addEventListener("focusout", event => this.commitBackgroundControlHistory(event.target));
     this.list.addEventListener("click", event => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-text-box-id]");
       if (button?.dataset.textBoxId) this.selectTextBox(button.dataset.textBoxId);
@@ -309,6 +350,8 @@ export class MemeMakerController {
       if (generation !== this.loadGeneration || !this.dialog.open) { loaded.dispose(); return; }
       this.image = loaded;
       this.background = { type: "template", templateId: template.id, name: template.name };
+      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset);
+      this.history.clear(); this.pendingHistory = null;
       this.defaultFontSize = Math.min(300, Math.max(12, Math.round(loaded.width * 0.09)));
       if (!this.textBoxes.length) {
         const initial = createTextBox(this.defaultFontSize, 15);
@@ -359,6 +402,8 @@ export class MemeMakerController {
         dispose: () => { loaded.dispose(); URL.revokeObjectURL(objectUrl); },
       };
       this.background = { type: "local", file, name: file.name.replace(/\.[^.]+$/u, "") || "meme" };
+      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset);
+      this.history.clear(); this.pendingHistory = null;
       this.defaultFontSize = Math.min(300, Math.max(12, Math.round(loaded.width * 0.09)));
       if (!this.textBoxes.length) {
         const initial = createTextBox(this.defaultFontSize, 15); this.textBoxes = [initial]; this.selectedTextBoxId = initial.id;
@@ -458,6 +503,50 @@ export class MemeMakerController {
     if (commit) this.commitHistory();
   }
 
+  private setAspectPreset(preset: MemeAspectPreset): void {
+    if (!this.image || this.canvasState.aspectPreset === preset) return;
+    const before = this.captureHistory();
+    this.canvasState = resetBackgroundTransform(this.image.width, this.image.height, preset, "fill");
+    this.updateUi(); this.renderNow();
+    this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+  }
+
+  private applyBackgroundMode(mode: "fit" | "fill"): void {
+    if (!this.image) return;
+    const before = this.captureHistory();
+    const scale = mode === "fit"
+      ? calculateFitScale(this.image.width, this.image.height, this.canvasState.outputWidth, this.canvasState.outputHeight)
+      : calculateFillScale(this.image.width, this.image.height, this.canvasState.outputWidth, this.canvasState.outputHeight);
+    Object.assign(this.canvasState, { backgroundScale: scale, backgroundOffsetX: 0, backgroundOffsetY: 0 });
+    this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+  }
+
+  private updateBackgroundFromForm(target?: EventTarget | null, commit = false): void {
+    if (!this.image) return;
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      if (target.value.trim() === "" || !Number.isFinite(Number(target.value))) return;
+      const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
+      if (range instanceof HTMLInputElement) range.value = target.value;
+    }
+    this.canvasState.backgroundScale = this.numberInput("background_scale", 10, 400) / 100;
+    this.canvasState.backgroundOffsetX = this.numberInput("background_x", -200, 200);
+    this.canvasState.backgroundOffsetY = this.numberInput("background_y", -200, 200);
+    this.updateUi(); this.scheduleRender();
+    if (commit) this.commitHistory();
+  }
+
+  private commitBackgroundControlHistory(target: EventTarget | null): void {
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
+      if (range instanceof HTMLInputElement) {
+        const min = Number(range.min); const max = Number(range.max); const parsed = Number(target.value);
+        const value = target.value.trim() && Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : Number(range.value);
+        range.value = String(value); target.value = String(value); this.updateBackgroundFromForm(range);
+      }
+    }
+    this.commitHistory();
+  }
+
   private pointerDown(event: PointerEvent): void {
     if (!this.image) return;
     const target = event.target as HTMLElement;
@@ -466,7 +555,16 @@ export class MemeMakerController {
     const id = handle
       ? target.closest<HTMLElement>("[data-selected-box]")?.dataset.selectedBox ?? null
       : hitTestTextBoxes(this.textBoxes, this.measurements, point);
-    if (!id) { this.selectTextBox(null); return; }
+    if (!id) {
+      this.selectTextBox(null);
+      this.beginHistory();
+      this.backgroundInteraction = {
+        type: "dragging", startX: event.clientX, startY: event.clientY,
+        originalX: this.canvasState.backgroundOffsetX, originalY: this.canvasState.backgroundOffsetY,
+      };
+      this.overlay.classList.add("is-dragging-background");
+      this.overlay.setPointerCapture?.(event.pointerId); event.preventDefault(); return;
+    }
     this.selectTextBox(id);
     const box = this.selectedTextBox();
     if (!box) return;
@@ -479,7 +577,14 @@ export class MemeMakerController {
   }
 
   private pointerMove(event: PointerEvent): void {
-    if (!this.image || this.interaction.type === "idle") return;
+    if (!this.image) return;
+    if (this.backgroundInteraction.type === "dragging") {
+      const rect = this.canvas.getBoundingClientRect();
+      this.canvasState.backgroundOffsetX = this.backgroundInteraction.originalX + (event.clientX - this.backgroundInteraction.startX) / Math.max(1, rect.width) * 100;
+      this.canvasState.backgroundOffsetY = this.backgroundInteraction.originalY + (event.clientY - this.backgroundInteraction.startY) / Math.max(1, rect.height) * 100;
+      this.updateUi(); this.scheduleRender(); event.preventDefault(); return;
+    }
+    if (this.interaction.type === "idle") return;
     const updated = updateInteraction(this.interaction, this.eventPoint(event), this.image.width, this.image.height);
     const index = updated ? this.textBoxes.findIndex(box => box.id === updated.id) : -1;
     if (updated && index >= 0) {
@@ -493,6 +598,11 @@ export class MemeMakerController {
   }
 
   private pointerUp(event: PointerEvent): void {
+    if (this.backgroundInteraction.type === "dragging") {
+      this.backgroundInteraction = { type: "idle" };
+      this.overlay.classList.remove("is-dragging-background");
+      this.commitHistory(); this.overlay.releasePointerCapture?.(event.pointerId); event.preventDefault(); return;
+    }
     if (this.interaction.type === "idle") return;
     this.interaction = IDLE_INTERACTION;
     this.snapGuideX = false; this.snapGuideY = false; this.commitHistory(); this.updateOverlay();
@@ -538,8 +648,8 @@ export class MemeMakerController {
   private renderNow(): boolean {
     if (!this.image) return false;
     try {
-      this.measurements = renderMemeCanvas(this.canvas, this.image.source, this.textBoxes, this.image.width, this.image.height);
-      this.required("[data-resolution]").textContent = `${this.image.width} × ${this.image.height} PNG`;
+      this.measurements = renderMemeCanvas(this.canvas, this.image.source, this.textBoxes, this.image.width, this.image.height, this.canvasState);
+      this.required("[data-resolution]").textContent = `${this.canvasState.outputWidth} × ${this.canvasState.outputHeight} PNG`;
       this.updateOverlay();
       return true;
     } catch {
@@ -563,10 +673,10 @@ export class MemeMakerController {
     const selection = document.createElement("div");
     selection.className = "meme-text-box-selection";
     selection.dataset.selectedBox = this.selectedTextBoxId;
-    selection.style.left = `${bounds.left / this.image.width * 100}%`;
-    selection.style.top = `${bounds.top / this.image.height * 100}%`;
-    selection.style.width = `${bounds.width / this.image.width * 100}%`;
-    selection.style.height = `${bounds.height / this.image.height * 100}%`;
+    selection.style.left = `${bounds.left / this.canvasState.outputWidth * 100}%`;
+    selection.style.top = `${bounds.top / this.canvasState.outputHeight * 100}%`;
+    selection.style.width = `${bounds.width / this.canvasState.outputWidth * 100}%`;
+    selection.style.height = `${bounds.height / this.canvasState.outputHeight * 100}%`;
     for (const side of ["left", "right"] as const) {
       const handle = document.createElement("button");
       handle.type = "button";
@@ -603,6 +713,22 @@ export class MemeMakerController {
       this.setOutput("box_y", `${this.displayPercent(box.yPercent)}%`);
       this.setOutput("box_width", `${this.displayPercent(box.widthPercent)}%`);
       this.setOutput("box_stroke", `${Math.round(box.strokeWidth)}px`);
+    }
+    const framing = this.required<HTMLFieldSetElement>("[data-background-framing]");
+    framing.disabled = !this.image;
+    const scalePercent = this.canvasState.backgroundScale * 100;
+    this.setInput("background_scale", this.displayNumber(scalePercent));
+    this.setInput("background_scale_number", this.displayNumber(scalePercent));
+    this.setInput("background_x", this.displayNumber(this.canvasState.backgroundOffsetX));
+    this.setInput("background_x_number", this.displayNumber(this.canvasState.backgroundOffsetX));
+    this.setInput("background_y", this.displayNumber(this.canvasState.backgroundOffsetY));
+    this.setInput("background_y_number", this.displayNumber(this.canvasState.backgroundOffsetY));
+    this.setOutput("background_scale", `${this.displayNumber(scalePercent)}%`);
+    this.setOutput("background_x", `${this.displayNumber(this.canvasState.backgroundOffsetX)}%`);
+    this.setOutput("background_y", `${this.displayNumber(this.canvasState.backgroundOffsetY)}%`);
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-aspect-preset]")) {
+      button.classList.toggle("is-active", button.dataset.aspectPreset === this.canvasState.aspectPreset);
+      button.setAttribute("aria-pressed", String(button.dataset.aspectPreset === this.canvasState.aspectPreset));
     }
     const ready = Boolean(this.image) && !this.busy;
     this.exportButton.disabled = !ready;
@@ -642,13 +768,17 @@ export class MemeMakerController {
   }
 
   private captureHistory(): MemeMakerHistoryState {
-    return { textBoxes: this.textBoxes.map(box => ({ ...box })), selectedTextBoxId: this.selectedTextBoxId, title: this.inputValue("title") };
+    return {
+      textBoxes: this.textBoxes.map(box => ({ ...box })), selectedTextBoxId: this.selectedTextBoxId,
+      title: this.inputValue("title"), canvasState: { ...this.canvasState },
+    };
   }
 
   private restoreHistory(state: MemeMakerHistoryState): void {
     this.textBoxes = state.textBoxes.map(box => ({ ...box }));
     this.selectedTextBoxId = state.selectedTextBoxId && this.textBoxes.some(box => box.id === state.selectedTextBoxId) ? state.selectedTextBoxId : null;
     this.setInput("title", state.title);
+    this.canvasState = { ...state.canvasState };
     this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.updateUi(); this.scheduleRender();
   }
@@ -721,7 +851,8 @@ export class MemeMakerController {
 
   private reset(): void {
     this.loadGeneration += 1; this.releaseImage(); this.form.reset();
-    this.textBoxes = []; this.selectedTextBoxId = null; this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.background = null;
+    this.textBoxes = []; this.selectedTextBoxId = null; this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.backgroundInteraction = { type: "idle" }; this.background = null;
+    this.canvasState = { aspectPreset: "original", outputWidth: 0, outputHeight: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0 };
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.templateSelect.innerHTML = '<option value="">正在加载模板…</option>';
     this.canvas.width = 0; this.canvas.height = 0; this.updatePreview(false); this.setNotice(""); this.busy = false; this.updateUi();
@@ -746,6 +877,7 @@ export class MemeMakerController {
   private numberInput(name: string, min: number, max: number): number { return Math.min(max, Math.max(min, Number(this.inputValue(name)))); }
   private colorInput(name: string, fallback: MemeColor): MemeColor { return this.inputValue(name) === "white" ? "white" : this.inputValue(name) === "black" ? "black" : fallback; }
   private displayPercent(value: number): string { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
+  private displayNumber(value: number): string { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
   private setInput(name: string, value: string | number): void {
     const field = this.form.elements.namedItem(name);
     if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) field.value = String(value);

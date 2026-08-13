@@ -1,3 +1,5 @@
+import { calculateBackgroundDrawRect, type MemeCanvasState } from "./meme-background";
+
 export type TextBoxAlign = "left" | "center" | "right";
 export type MemeColor = "white" | "black";
 export type MemeFontPreset = "classic" | "chinese-bold" | "sans";
@@ -164,15 +166,24 @@ export function renderMemeCanvas(
   canvas: HTMLCanvasElement,
   image: CanvasImageSource,
   textBoxes: MemeTextBox[],
-  width: number,
-  height: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  canvasState?: MemeCanvasState,
 ): Map<string, TextBoxMeasurement> {
+  const state = canvasState ?? {
+    aspectPreset: "original" as const, outputWidth: sourceWidth, outputHeight: sourceHeight,
+    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
+  };
+  const { outputWidth: width, outputHeight: height } = state;
   if (width <= 0 || height <= 0) throw new Error("模板图片尺寸无效。");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("当前浏览器无法创建 Canvas 画布。");
   context.clearRect(0, 0, width, height);
-  context.drawImage(image, 0, 0, width, height);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  const rect = calculateBackgroundDrawRect(sourceWidth, sourceHeight, state);
+  context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
   return new Map(textBoxes.map(box => [box.id, drawTextBox(context, box, width, height)]));
 }

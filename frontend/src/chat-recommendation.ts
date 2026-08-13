@@ -14,6 +14,7 @@ export interface ChatRecommendationApi {
 export interface ChatRecommendationActions {
   openDetail(meme: MemeResponse): void;
   openViewer(meme: MemeResponse): void;
+  copyMeme?(meme: MemeResponse, button: HTMLButtonElement): Promise<boolean>;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -105,7 +106,10 @@ export class ChatRecommendationController {
       if (!result) return;
       const meme = this.response?.items.find(item => item.meme.id === Number(result.dataset.sceneMeme))?.meme;
       if (!meme) return;
-      if (target.closest("[data-scene-detail]")) {
+      const copy = target.closest<HTMLButtonElement>("[data-scene-copy]");
+      if (copy && this.actions.copyMeme) {
+        void this.actions.copyMeme(meme, copy);
+      } else if (target.closest("[data-scene-detail]")) {
         this.close();
         this.actions.openDetail(meme);
       } else if (target.closest("[data-scene-viewer]")) {
@@ -184,6 +188,7 @@ export class ChatRecommendationController {
             <div class="card-tags">${meme.tags.slice(0, 5).map(tag => `<span class="tag">${escapeHtml(tag.name)}</span>`).join("") || '<span class="muted">无标签</span>'}</div>
           </div>
           <div class="scene-result-actions">
+            ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-scene-copy>复制</button>' : ""}
             <button class="button button-ghost" type="button" data-scene-detail>查看详情</button>
             <a class="button button-secondary" href="/api/memes/${meme.id}/download">下载</a>
           </div>

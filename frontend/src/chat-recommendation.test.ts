@@ -46,13 +46,14 @@ function setup(recommend = vi.fn().mockResolvedValue(response())) {
   document.body.innerHTML = '<button id="open">场景召唤</button>';
   const openDetail = vi.fn();
   const openViewer = vi.fn();
+  const copyMeme = vi.fn().mockResolvedValue(true);
   new ChatRecommendationController(
     document.querySelector<HTMLButtonElement>("#open")!,
     { recommend },
-    { openDetail, openViewer },
+    { openDetail, openViewer, copyMeme },
   );
   document.querySelector<HTMLButtonElement>("#open")!.click();
-  return { recommend, openDetail, openViewer };
+  return { recommend, openDetail, openViewer, copyMeme };
 }
 
 describe("chat scene recommendations", () => {
@@ -118,6 +119,19 @@ describe("chat scene recommendations", () => {
     await vi.waitFor(() => expect(dialog.querySelector("[data-scene-viewer]")).not.toBeNull());
     dialog.querySelector<HTMLButtonElement>("[data-scene-viewer]")!.click();
     expect(openViewer).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("copies from a result without changing or closing the query", async () => {
+    const { copyMeme } = setup();
+    const dialog = document.querySelector<HTMLDialogElement>("[data-scene-recommendation-dialog]")!;
+    const context = dialog.querySelector<HTMLTextAreaElement>('[name="context"]')!;
+    context.value = "保留这段聊天";
+    dialog.querySelector<HTMLButtonElement>("[data-scene-submit]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelector("[data-scene-copy]")).not.toBeNull());
+    dialog.querySelector<HTMLButtonElement>("[data-scene-copy]")!.click();
+    expect(copyMeme).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), expect.any(HTMLButtonElement));
+    expect(context.value).toBe("保留这段聊天");
+    expect(dialog.open).toBe(true);
   });
 
   it("prevents an older query from overwriting a newer result and clears on close", async () => {

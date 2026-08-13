@@ -508,7 +508,14 @@ data/thumbnails/*
 - Merge 自动迁移 Source Collection membership 并去重、保留合理位置。
 - 已补齐后端、前端及 Merge 集成回归测试。
 
-当前状态：v0.6.4 Meme 牌组 / 收藏夹已完成
+### v0.6.5：快速取用链 / 复制与出库效率优化（已完成）
+
+- 新增共享 `meme-actions.ts`，集中处理图片 MIME、读取、PNG 转换、剪贴板写入和可理解错误。
+- 主资料库卡片、详情、Viewer、Scene Summon 与 Collection 均提供就地复制；下载继续复用原有后端 API。
+- 单图静态 Meme 可直接复制；复合 Meme 在 Viewer 中按当前图片复制；GIF 明确提示使用下载，不复制首帧。
+- 快捷操作具备独立 busy 状态、成功/失败反馈、键盘与窄屏可达性，并与打开详情/移除牌组隔离。
+
+当前状态：v0.6.5 快速取用链已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

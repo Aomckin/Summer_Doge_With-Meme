@@ -1,5 +1,6 @@
 import type { AppState, MemeCardSize, MemeResponse } from "./types";
 import { buildPaginationTokens, clampPage } from "./pagination";
+import { memeCopySource } from "./meme-actions";
 
 export interface EditDraft {
   title: string;
@@ -58,6 +59,7 @@ export interface AppElements {
   imageViewerImage: HTMLImageElement;
   imageViewerTitle: HTMLElement;
   imageViewerLink: HTMLAnchorElement;
+  imageViewerCopy: HTMLButtonElement;
   imageViewerDownload: HTMLAnchorElement;
   imageViewerError: HTMLElement;
   imageViewerPrevious: HTMLButtonElement;
@@ -391,6 +393,7 @@ export function mountShell(root: HTMLElement): AppElements {
               target="_blank"
               rel="noopener noreferrer"
             >打开原图</a>
+            <button class="button button-secondary" type="button" data-viewer-copy>复制当前图</button>
             <a class="button button-primary" data-viewer-download>下载当前图</a>
             <button
               class="icon-button"
@@ -462,6 +465,7 @@ export function mountShell(root: HTMLElement): AppElements {
     imageViewerImage: required(document, "[data-viewer-image]"),
     imageViewerTitle: required(document, "[data-viewer-title]"),
     imageViewerLink: required(document, "[data-viewer-link]"),
+    imageViewerCopy: required(document, "[data-viewer-copy]"),
     imageViewerDownload: required(document, "[data-viewer-download]"),
     imageViewerError: required(document, "[data-viewer-error]"),
     imageViewerPrevious: required(document, "[data-viewer-previous]"),
@@ -665,36 +669,30 @@ export function memeCardMarkup(
   selected: boolean,
   cardSize: MemeCardSize,
   score?: number,
+  showQuickActions = true,
 ): string {
   const thumbnail = meme.thumbnail_url ?? meme.image_url;
   const image = cardSize === "extra-large" ? meme.image_url : thumbnail;
+  const copySource = memeCopySource(meme);
+  const isGif = copySource?.mime_type.toLowerCase().startsWith("image/gif") ?? false;
   return `
-    <button
+    <article
       class="meme-card${selected ? " is-selected" : ""}"
-      type="button"
       data-meme-id="${meme.id}"
-      aria-label="查看 ${escapeHtml(meme.title)}"
     >
-      <span class="card-image">
-        <img
-          data-card-image
-          data-thumbnail-src="${escapeHtml(thumbnail)}"
-          data-original-src="${escapeHtml(meme.image_url)}"
-          src="${escapeHtml(image)}"
-          alt="${escapeHtml(meme.title)}"
-          width="${meme.width}"
-          height="${meme.height}"
-          loading="lazy"
-        >
-        <span class="image-fallback" aria-hidden="true">图片不可用</span>
-        ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
-      </span>
-      <span class="card-overlay">
-        <strong>${escapeHtml(meme.title)}</strong>
-        ${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}
-        <span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span>
-      </span>
-    </button>
+      <button class="meme-card-main" type="button" data-open-meme aria-label="查看 ${escapeHtml(meme.title)}">
+        <span class="card-image">
+          <img data-card-image data-thumbnail-src="${escapeHtml(thumbnail)}" data-original-src="${escapeHtml(meme.image_url)}" src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" width="${meme.width}" height="${meme.height}" loading="lazy">
+          <span class="image-fallback" aria-hidden="true">图片不可用</span>
+          ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
+        </span>
+        <span class="card-overlay"><strong>${escapeHtml(meme.title)}</strong>${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}<span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span></span>
+      </button>
+      ${showQuickActions ? `<span class="meme-card-quick-actions" aria-label="快捷操作">
+        ${copySource ? `<button type="button" data-copy-meme="${meme.id}" ${isGif ? 'disabled title="不支持直接复制 GIF，请使用下载"' : ""}>${isGif ? "GIF" : "复制"}</button>` : ""}
+        <a href="/api/memes/${meme.id}/download" data-quick-download="${meme.id}">下载</a>
+      </span>` : ""}
+    </article>
   `;
 }
 
@@ -1184,6 +1182,8 @@ export function renderDetail(
           <div data-caption-lab-host></div>
           ${detailError(state.actionError)}
           <div class="detail-actions">
+            ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-copy-detail>复制图片</button>' : '<button class="button button-secondary" type="button" data-open-viewer data-image-index="0">选择图片复制</button>'}
+            <a class="button button-secondary" href="${escapeHtml(meme.image_url)}" target="_blank" rel="noopener noreferrer">打开原图</a>
             <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
             <button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button>
             <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
@@ -1238,6 +1238,8 @@ export function closeImageViewer(elements: AppElements): void {
   elements.imageViewerImage.removeAttribute("height");
   elements.imageViewerImage.alt = "";
   elements.imageViewerLink.removeAttribute("href");
+  elements.imageViewerCopy.disabled = false;
+  elements.imageViewerCopy.textContent = "复制当前图";
   elements.imageViewerDownload.removeAttribute("href");
   elements.imageViewerTitle.textContent = "";
   elements.imageViewerPrevious.disabled = true;

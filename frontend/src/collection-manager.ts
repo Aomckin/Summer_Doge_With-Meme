@@ -22,6 +22,7 @@ export interface CollectionApi {
 export interface CollectionActions {
   openDetail(meme: MemeResponse): void;
   openViewer(meme: MemeResponse): void;
+  copyMeme?(meme: MemeResponse, button: HTMLButtonElement): Promise<boolean>;
 }
 
 function message(error: unknown): string {
@@ -158,7 +159,7 @@ export class CollectionManagerController {
         <header class="settings-header"><div><p class="eyebrow">DECK CONTENTS</p><h2>${escapeHtml(detail.name)}</h2><p>${escapeHtml(detail.description || "暂无描述")}</p></div><button class="icon-button" type="button" data-close-collections>×</button></header>
         <div class="collection-detail-toolbar"><button class="button button-ghost" type="button" data-back-collections>← 返回牌组</button><strong>${detail.meme_count} 个 Meme</strong></div>
         ${error}
-        <div class="collection-grid">${detail.items.length ? detail.items.map(item => `<div class="collection-card">${memeCardMarkup(item.meme, false, "medium")}<div class="collection-card-actions"><button class="button button-secondary" type="button" data-collection-viewer="${item.meme.id}">原图</button><a class="button button-secondary" href="/api/memes/${item.meme.id}/download">下载</a><button class="button button-danger" type="button" data-remove-collection-meme="${item.meme.id}">从牌组移除</button></div></div>`).join("") : '<div class="collection-empty"><h3>这个牌组还是空的。</h3><p>从 Meme 详情页选择“加入牌组”即可添加。</p></div>'}</div>
+        <div class="collection-grid">${detail.items.length ? detail.items.map(item => `<div class="collection-card">${memeCardMarkup(item.meme, false, "medium", undefined, false)}<div class="collection-card-actions">${item.meme.image_count === 1 ? `<button class="button button-secondary" type="button" data-collection-copy="${item.meme.id}">复制</button>` : ""}<button class="button button-secondary" type="button" data-collection-viewer="${item.meme.id}">原图</button><a class="button button-secondary" href="/api/memes/${item.meme.id}/download">下载</a><button class="button button-danger" type="button" data-remove-collection-meme="${item.meme.id}">从牌组移除</button></div></div>`).join("") : '<div class="collection-empty"><h3>这个牌组还是空的。</h3><p>从 Meme 详情页选择“加入牌组”即可添加。</p></div>'}</div>
       </div>`;
       return;
     }
@@ -192,6 +193,7 @@ export class CollectionManagerController {
     else if (target.closest("[data-open-collection]")) void this.openDetail(Number(target.closest<HTMLElement>("[data-open-collection]")?.dataset.openCollection));
     else if (target.closest("[data-delete-collection]")) void this.deleteCollection(Number(target.closest<HTMLElement>("[data-delete-collection]")?.dataset.deleteCollection));
     else if (target.closest("[data-remove-collection-meme]")) void this.removeMeme(Number(target.closest<HTMLElement>("[data-remove-collection-meme]")?.dataset.removeCollectionMeme));
+    else if (target.closest("[data-collection-copy]")) { const button = target.closest<HTMLButtonElement>("[data-collection-copy]"); const meme = this.detail?.items.find(item => item.meme.id === Number(button?.dataset.collectionCopy))?.meme; if (meme && button && this.actions.copyMeme) void this.actions.copyMeme(meme, button); }
     else if (target.closest("[data-collection-viewer]")) { const meme = this.detail?.items.find(item => item.meme.id === Number(target.closest<HTMLElement>("[data-collection-viewer]")?.dataset.collectionViewer))?.meme; if (meme) this.actions.openViewer(meme); }
     else if (target.closest("[data-meme-id]")) { const meme = this.detail?.items.find(item => item.meme.id === Number(target.closest<HTMLElement>("[data-meme-id]")?.dataset.memeId))?.meme; if (meme) { this.actions.openDetail(meme); this.dialog.close(); } }
   }

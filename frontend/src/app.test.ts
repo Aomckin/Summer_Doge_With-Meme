@@ -1960,6 +1960,27 @@ describe("MemeVaultApp", () => {
     expect(viewer?.hasAttribute("src")).toBe(false);
   });
 
+  it("copies the image currently selected in the viewer", async () => {
+    const meme = makeCompositeMeme();
+    const write = vi.fn().mockResolvedValue(undefined);
+    class TestClipboardItem { constructor(readonly data: Record<string, Blob>) {} }
+    vi.stubGlobal("ClipboardItem", TestClipboardItem);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(["png"], { type: "image/png" })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new MemeVaultApp(root(), makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }));
+    await app.start();
+    document.querySelector<HTMLElement>('[data-meme-id="1"]')?.click();
+    document.querySelector<HTMLButtonElement>('[data-image-index="1"]')?.click();
+    document.querySelector<HTMLButtonElement>("[data-viewer-next]")?.click();
+    document.querySelector<HTMLButtonElement>("[data-viewer-copy]")?.click();
+    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+    expect(fetchMock).toHaveBeenCalledWith(meme.images[2].image_url);
+  });
+
   it("appends, deletes and reorders images with busy and error feedback", async () => {
     const meme = makeCompositeMeme();
     const appended = {

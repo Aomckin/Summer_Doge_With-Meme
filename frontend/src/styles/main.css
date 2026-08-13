@@ -686,6 +686,60 @@ h2 {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+.meme-card-main {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+}
+
+.meme-card-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.meme-card-quick-actions {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 3;
+  display: flex;
+  gap: 5px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.meme-card:hover .meme-card-quick-actions,
+.meme-card:focus-within .meme-card-quick-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.meme-card-quick-actions button,
+.meme-card-quick-actions a {
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 7px;
+  color: #fff;
+  background: rgb(7 9 13 / 86%);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+}
+
+.meme-card-quick-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .card-image {
   position: relative;
   display: block;
@@ -864,7 +918,7 @@ h2 {
 }
 
 .meme-card:hover .card-overlay,
-.meme-card:focus-visible .card-overlay {
+.meme-card:focus-within .card-overlay {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1301,6 +1355,17 @@ h2 {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 22px;
+}
+
+.detail-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.detail-actions .button {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding-inline: 13px;
 }
 
 label {
@@ -3096,5 +3161,32 @@ label small {
 
   .collection-row > div {
     justify-content: flex-end;
+  }
+}
+
+.meme-action-feedback {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 11px 14px;
+  border: 1px solid rgb(230 255 74 / 45%);
+  border-radius: 10px;
+  color: #eef5c8;
+  background: rgb(15 19 21 / 96%);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 40%);
+  font-size: 13px;
+}
+
+.meme-action-feedback[data-kind="error"] {
+  border-color: rgb(255 95 116 / 45%);
+  color: #ffd9df;
+}
+
+@media (hover: none), (max-width: 720px) {
+  .meme-card-quick-actions {
+    opacity: 1;
+    transform: none;
   }
 }

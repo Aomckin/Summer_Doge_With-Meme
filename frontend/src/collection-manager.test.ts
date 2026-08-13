@@ -30,7 +30,7 @@ function setup(overrides: Partial<CollectionApi> = {}) {
     replaceMemberships: vi.fn().mockResolvedValue({ collection_ids: [1] }),
     ...overrides,
   };
-  const actions = { openDetail: vi.fn(), openViewer: vi.fn() };
+  const actions = { openDetail: vi.fn(), openViewer: vi.fn(), copyMeme: vi.fn().mockResolvedValue(true) };
   const controller = new CollectionManagerController(document.querySelector("#open")!, api, actions);
   return { api, actions, controller };
 }
@@ -71,6 +71,9 @@ describe("CollectionManagerController", () => {
     await vi.waitFor(() => expect(document.querySelector('[data-meme-id="7"]')).not.toBeNull());
     document.querySelector<HTMLButtonElement>("[data-collection-viewer]")!.click();
     expect(actions.openViewer).toHaveBeenCalledWith(meme);
+    document.querySelector<HTMLButtonElement>("[data-collection-copy]")!.click();
+    expect(actions.copyMeme).toHaveBeenCalledWith(meme, expect.any(HTMLButtonElement));
+    expect(api.removeMeme).not.toHaveBeenCalled();
     document.querySelector<HTMLButtonElement>("[data-remove-collection-meme]")!.click();
     await vi.waitFor(() => expect(api.removeMeme).toHaveBeenCalledWith(1, 7));
   });

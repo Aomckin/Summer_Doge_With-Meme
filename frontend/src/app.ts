@@ -123,6 +123,7 @@ import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
+import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -402,6 +403,7 @@ export class MemeVaultApp {
       },
       {
         openDetail: meme => this.selectMeme(meme),
+        copyMeme: (meme, button) => copySourceWithFeedback(memeCopySource(meme), button),
         openViewer: meme => {
           this.viewerMeme = meme;
           this.viewerIndex = 0;
@@ -416,6 +418,7 @@ export class MemeVaultApp {
       },
       {
         openDetail: meme => this.selectMeme(meme),
+        copyMeme: (meme, button) => copySourceWithFeedback(memeCopySource(meme), button),
         openViewer: meme => {
           this.viewerMeme = meme;
           this.viewerIndex = 0;
@@ -621,11 +624,18 @@ export class MemeVaultApp {
     });
 
     this.elements.memeGrid.addEventListener("click", (event) => {
-      const target = (event.target as Element).closest<HTMLButtonElement>(
-        "[data-meme-id]",
-      );
-      const id = Number(target?.dataset.memeId);
+      const element = event.target as Element;
+      const copy = element.closest<HTMLButtonElement>("[data-copy-meme]");
+      const download = element.closest<HTMLAnchorElement>("[data-quick-download]");
+      if (download) return;
+      const card = element.closest<HTMLElement>("[data-meme-id]");
+      const id = Number(copy?.dataset.copyMeme ?? card?.dataset.memeId);
       const meme = this.state.memes.find((item) => item.id === id);
+      if (copy && meme) {
+        event.stopPropagation();
+        void copySourceWithFeedback(memeCopySource(meme), copy);
+        return;
+      }
       if (meme) {
         this.selectMeme(meme);
       }
@@ -786,6 +796,10 @@ export class MemeVaultApp {
           this.viewerIndex = Number(target.closest<HTMLElement>("[data-image-index]")?.dataset.imageIndex ?? 0);
           openImageViewer(this.elements, meme, this.viewerIndex);
         }
+      } else if (target.closest("[data-copy-detail]")) {
+        const meme = this.state.selectedMeme;
+        const button = target.closest<HTMLButtonElement>("[data-copy-detail]");
+        if (meme && button) void copySourceWithFeedback(memeCopySource(meme), button);
       } else if (target.closest("[data-edit-meme]")) {
         this.beginEdit();
       } else if (target.closest("[data-manage-meme-collections]")) {
@@ -981,6 +995,14 @@ export class MemeVaultApp {
     };
     this.elements.imageViewerPrevious.addEventListener("click", () => moveViewer(-1));
     this.elements.imageViewerNext.addEventListener("click", () => moveViewer(1));
+    this.elements.imageViewerCopy.addEventListener("click", () => {
+      if (this.viewerMeme) {
+        void copySourceWithFeedback(
+          memeImageAt(this.viewerMeme, this.viewerIndex),
+          this.elements.imageViewerCopy,
+        );
+      }
+    });
     document.addEventListener("keydown", (event) => {
       if (this.elements.imageViewerDialog.open && event.key === "ArrowLeft") moveViewer(-1);
       if (this.elements.imageViewerDialog.open && event.key === "ArrowRight") moveViewer(1);

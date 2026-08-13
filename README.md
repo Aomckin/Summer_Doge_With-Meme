@@ -1,8 +1,14 @@
-# Meme Vault v0.6.5
+# Meme Vault v0.7.1
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.6.5，补齐从找到 Meme 到直接取用的快速复制链：资料卡、详情、Viewer、场景推荐和牌组均复用统一下载及剪贴板能力。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.1，Meme 制作器支持在 Template Reference Image 或本地静态图片上排版多个自由文本框、实时预览、导出原分辨率 PNG，并复用现有上传流程重新入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+
+## Meme 制作器
+
+顶部“Meme 制作器”入口可读取现有模板参考图，或选择仅在当前会话使用的本地 PNG、JPEG、WebP 底图。加载后会创建一个默认文本框；可继续添加、选择、删除或复制文本框，并为每个文本框独立设置文字、字号、X/Y、文本区域宽度、黑/白文字、黑/白描边、左/中/右对齐与三个系统字体预设。画布支持拖动、左右 handle 调宽及方向键微调（0.5%，Shift 为 2%）；最多 20 个文本框，并可上移或下移一层。
+
+预览和导出共享同一套 Canvas 测量、换行、颜色与渲染逻辑；选中框和 resize handle 位于独立 DOM overlay，不会进入输出。保存时把 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持 GIF Maker、图片图层、旋转、裁剪、滤镜、Undo/Redo、任意颜色/字体上传或非 PNG 输出。
 
 ## Meme 牌组
 

@@ -439,15 +439,27 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 
 验收：Semantic Similarity 只用于找值得人工检查的 Pair，不描述为重复概率且不自动操作；Merge 中途失败完整回滚，物理文件不动；合并后所有涉及 Source/Target 的旧候选立即移除，需重建 Target Embedding 后再巡检。
 
-### v0.7：Meme 制作器
+### v0.7：Meme 制作器（已完成）
 
-- [ ] 选择 Meme 模板
-- [ ] 添加顶部和底部文字
-- [ ] 调整字号、位置和文字描边
-- [ ] 实时预览并导出图片
-- [ ] 将制作结果重新加入 Meme 库
+- [x] 选择带静态 Reference Image 的现有 Meme 模板，无参考图与 GIF 明确禁用
+- [x] Phase 2 升级为 0..20 个自由文本框，支持添加、选择、删除和同步摘要
+- [x] 每个文本框独立调整文字、字号、X/Y、宽度、黑色描边和左/中/右对齐
+- [x] 画布直接拖动文本框，并通过左右 handle 调整文本区域宽度
+- [x] 以原图真实尺寸 Canvas 实时预览并导出 PNG
+- [x] 将 PNG 作为普通 File 复用现有 Upload API，自动继承模板并记录 `source=meme-maker`
 
-第一阶段仅实现模板式编辑，不构建复杂图像编辑器。
+Phase 2 当时只实现模板上的自由文本排版，不构建复杂图像编辑器；v0.7.1 已进一步补充本地静态底图、黑白文字/描边和单层前后移动，但仍不支持 GIF Maker、图片图层、旋转、滤镜、Undo/Redo 或草稿持久化。
+
+### v0.7.1：制作器实用性增强（已完成）
+
+- [x] 每个文本框独立选择黑/白文字与黑/白描边；`strokeWidth=0` 表示无描边。
+- [x] 复制当前文本框并生成新 ID、偏移 3% 后选中；继续遵守 20 个上限。
+- [x] 使用数组顺序作为图层顺序，支持上移一层、下移一层和边界禁用。
+- [x] 方向键按 0.5% 微调位置，Shift + 方向键按 2% 移动；表单和 contenteditable 焦点不触发。
+- [x] 支持本地 PNG/JPEG/WEBP 临时底图、自然尺寸 Canvas、Object URL 释放和 Local 保存 `template_id=null`。
+- [x] P1 提供经典 Meme、中文粗体、常规无衬线系统字体预设和不影响文字/位置/宽度的样式重置。
+
+仍不提供图片图层、旋转、Undo/Redo、GIF Maker、任意颜色选择、字体上传或复杂图层面板。
 
 ### v1.0：可公开访问版本
 
@@ -515,7 +527,20 @@ data/thumbnails/*
 - 单图静态 Meme 可直接复制；复合 Meme 在 Viewer 中按当前图片复制；GIF 明确提示使用下载，不复制首帧。
 - 快捷操作具备独立 busy 状态、成功/失败反馈、键盘与窄屏可达性，并与打开详情/移除牌组隔离。
 
-当前状态：v0.6.5 快速取用链已完成
+### v0.7.1：实用性增强 Meme 制作器（已完成）
+
+- 新增浏览器原生 Canvas 制作器，静态 Template Reference Image 是唯一底图来源。
+- 单一 `textBoxes[]` 模型支持最多 20 个文本框；每个框独立控制 X/Y、宽度、字号、描边和对齐。
+- 共享测量逻辑支持手动换行、中英文自动换行、bounds 与画布边界 clamp；数组末尾作为最上层。
+- 独立交互 overlay 支持点击选中、拖动和左右 handle resize，编辑器装饰不进入导出 PNG。
+- Preview、PNG Export 与 Save 共用 `meme-renderer.ts`；Canvas 内部始终保持参考图原始分辨率。
+- Save 把 PNG Blob 转成 File 并复用现有 `uploadMeme`，自动传入当前 Template、`source=meme-maker` 和空 tags。
+- 无新增后端 API、模型、数据库表、第三方依赖或 AI/Embedding 调用。
+- 文本框支持黑白文字/描边、复制、单层前后移动、键盘微调、系统字体预设与样式重置。
+- 底图支持 Template 或本地 PNG/JPEG/WEBP；切换时保留文本框，本地 Object URL 在切换/关闭时释放。
+- Template 保存继承模板；Local 保存显式使用 `template_id=null`，两者继续走普通 Upload。
+
+当前状态：v0.7.1 制作器实用性增强已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -524,5 +549,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：v0.7——Meme 制作器（本阶段未开始）
+下一步：等待人工验收；不自动扩展自由图层或任意图片编辑
 ```

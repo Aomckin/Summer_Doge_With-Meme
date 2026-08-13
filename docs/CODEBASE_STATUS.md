@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.6.5 实现状态（2026-08-13）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.7.1 实现状态（2026-08-13）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -19,6 +19,7 @@
 - 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
 - Template 系统：网页 CRUD、Meme 手动归类、单张参考图、管理界面双侧缩略图预览、原子创建、独立图像向量模型和 Top-10 视觉候选。
+- Meme 制作器：支持 Template Reference Image 或会话内本地 PNG/JPEG/WEBP 作为原始分辨率底图，并绘制最多 20 个自由文本框；支持黑白文字/描边、系统字体预设、添加/选择/删除/复制、X/Y、宽度、字号、对齐、拖动、左右 resize、单层前后移动、键盘微调、PNG 导出和普通上传入库；无后端渲染或 AI 调用。
 - AI 元数据整理：网页单项、Provider 批量 Job 与 Luna 离线候选统一写入 `MemeEnrichmentSuggestion`；Luna 导入直接进入人工审核池，不再经过 dry-run/CLI apply；建议创建和拒绝不修改 Meme，网页审核可按字段安全采用并写审计。
 - 持久化 EnrichmentJob：支持全部、当前筛选、缺描述/标签/模板、文件名标题、从未分析和过期建议范围；1/2/4/8 并发、取消、失败重试、启动中断恢复和 Token 统计。
 - 网页内 API 设置：维护 AI 提供商、图片分析模型和独立的模板视觉检索模型；密钥加密落盘。
@@ -29,7 +30,7 @@
 
 ## 明确尚未实现
 
-- 尚未实现自动聊天记录解析、聊天平台接入、Meme 制作器、用户系统、分享权限或云端对象存储。
+- 尚未实现自动聊天记录解析、聊天平台接入、自由图层/任意图片 Meme 编辑、GIF 制作、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
 - 巡检不提供自动判断、全库后台 Job、聚类、像素差异、Merge Undo 或 Ignore 管理器；语义相似度不等于重复概率。
@@ -58,6 +59,9 @@ app/
 frontend/
   src/app.ts       页面状态与交互编排
   src/meme-actions.ts 图片复制能力检测、读取、转换、剪贴板写入与轻反馈
+  src/meme-maker.ts 模板加载、编辑状态、Preview 调度、PNG 导出与上传编排
+  src/meme-maker-interaction.ts 坐标换算、顶层命中、pointer 拖动与左右 resize 状态机
+  src/meme-renderer.ts 文本框换行、测量、bounds、绘制和共享 Canvas 渲染
   src/pagination.ts 共享页码限制与紧凑页码 token 逻辑
   src/batch-upload.ts 批量上传对话框、文件队列与串行流程
   src/caption-lab.ts 文案编辑、已保存列表、AI 候选与脏状态
@@ -387,6 +391,12 @@ v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补�
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
-## 下一阶段
+## v0.7.1 Meme 制作器边界
 
-下一阶段为 v0.7 Meme 制作器。
+- 底图可来自现有 Template Reference Image 或本地 PNG/JPEG/WEBP；GIF 不支持，本地图只存在当前会话。
+- 文本框可选黑/白文字与黑/白描边，可调整文字、X/Y、宽度、字号、系统字体预设和左/中/右对齐；最多 20 个，数组顺序即绘制顺序。
+- 支持复制、单层前后移动、0.5% 方向键微调与 Shift 2% 快速移动；输入控件焦点不触发移动。
+- 选中框与左右 resize handle 使用独立 DOM overlay，导出 PNG 只包含内容 Canvas。
+- Canvas 内部尺寸等于参考图原始尺寸，CSS 只缩放预览；Export 固定为 PNG。
+- 保存复用 `POST /api/memes`：Template 模式继承模板，Local 模式传 `template_id=null`；不自动生成 Embedding 或调用 Enrichment。
+- 不提供图片图层、旋转、任意颜色/字体上传、滤镜、Undo/Redo、GIF Maker 或草稿持久化。

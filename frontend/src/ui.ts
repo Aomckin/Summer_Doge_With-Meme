@@ -16,6 +16,7 @@ export interface AppElements {
   semanticSearchButton: HTMLButtonElement;
   randomButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
+  openMemeMakerButton: HTMLButtonElement;
   openDownloadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
@@ -145,6 +146,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <button id="open-vault-inspector" class="button button-secondary" type="button">宝库巡检</button>
           <button id="open-collections" class="button button-secondary" type="button">牌组</button>
           <button id="random-button" class="button button-secondary" type="button">随机一个</button>
+          <button id="open-meme-maker" class="button button-primary" type="button">Meme 制作器</button>
           <button id="open-upload" class="button button-primary" type="button">图片上传</button>
           <button id="open-download" class="button button-secondary" type="button">批量下载</button>
         </div>
@@ -419,6 +421,7 @@ export function mountShell(root: HTMLElement): AppElements {
     semanticSearchButton: required(root, "#semantic-search-button"),
     randomButton: required(root, "#random-button"),
     openUploadButton: required(root, "#open-upload"),
+    openMemeMakerButton: required(root, "#open-meme-maker"),
     openDownloadButton: required(root, "#open-download"),
     openSettingsButton: required(root, "#open-settings"),
     openTemplatesButton: required(root, "#open-templates"),

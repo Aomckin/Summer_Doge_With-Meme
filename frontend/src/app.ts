@@ -123,6 +123,7 @@ import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
+import { MemeMakerController } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
@@ -500,6 +501,18 @@ export class MemeVaultApp {
     );
     this.settings = new AISettingsController(this.elements, this.api);
     this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
+    new MemeMakerController(
+      this.elements.openMemeMakerButton,
+      { listTemplates: () => this.api.listTemplates(), uploadMeme: input => this.api.uploadMeme(input) },
+      {
+        onSaved: async () => {
+          await Promise.all([
+            this.reloadMemes(), this.refreshTags(), this.refreshTemplates(),
+            this.semanticIndexManager.refresh(),
+          ]);
+        },
+      },
+    );
     this.batchUpload = new BatchUploadController({
       uploadMeme: (input) => this.api.uploadMeme(input),
       createImportJob: (input) => this.api.createImportJob(input),

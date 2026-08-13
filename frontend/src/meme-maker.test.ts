@@ -1,0 +1,345 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "./api";
+import { MemeMakerController, type MemeMakerApi } from "./meme-maker";
+import type { MemeResponse, TemplateResponse } from "./types";
+
+const staticTemplate: TemplateResponse = {
+  id: 1, name: "Doge", description: null,
+  reference_image_url: "/media/template-images/doge.png",
+  reference_thumbnail_url: null, reference_mime_type: "image/png",
+  reference_width: 800, reference_height: 600,
+  created_at: "2026-01-01", updated_at: "2026-01-01",
+};
+
+const unavailable: TemplateResponse[] = [
+  { ...staticTemplate, id: 2, name: "No image", reference_image_url: null, reference_mime_type: null },
+  { ...staticTemplate, id: 3, name: "Animated", reference_mime_type: "image/gif" },
+];
+
+function meme(id = 8): MemeResponse {
+  return {
+    id, title: "made", description: null, source: "meme-maker",
+    original_filename: "doge-meme.png", stored_filename: "stored.png",
+    image_url: "/media/images/stored.png", thumbnail_url: null,
+    mime_type: "image/png", file_size: 10, width: 800, height: 600,
+    file_hash: "hash", created_at: "2026-01-01", updated_at: "2026-01-01",
+    tags: [], template: staticTemplate, images: [], image_count: 1,
+  };
+}
+
+function setup(overrides: Partial<MemeMakerApi> = {}) {
+  document.body.innerHTML = '<button data-trigger type="button">open</button>';
+  const context = {
+    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
+    measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
+    font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
+  } as unknown as CanvasRenderingContext2D;
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => callback(new Blob(["png"], { type: "image/png" })));
+  const api: MemeMakerApi = {
+    listTemplates: vi.fn().mockResolvedValue([staticTemplate, ...unavailable]),
+    uploadMeme: vi.fn().mockResolvedValue(meme()),
+    ...overrides,
+  };
+  const loaded = {
+    source: {} as CanvasImageSource, width: 800, height: 600, dispose: vi.fn(),
+  };
+  const loadImage = vi.fn().mockResolvedValue(loaded);
+  const controller = new MemeMakerController(
+    document.querySelector("[data-trigger]")!, api,
+    { loadImage, scheduleFrame: callback => { queueMicrotask(() => callback(0)); return 1; }, cancelFrame: vi.fn() },
+  );
+  document.querySelector<HTMLButtonElement>("[data-trigger]")!.click();
+  const dialog = document.querySelector<HTMLDialogElement>("[data-meme-maker-dialog]")!;
+  return { controller, api, loadImage, loaded, dialog, context };
+}
+
+async function choose(dialog: HTMLDialogElement, id = "1") {
+  await vi.waitFor(() => expect(dialog.querySelectorAll('select[name="template_id"] option').length).toBe(4));
+  const select = dialog.querySelector<HTMLSelectElement>('[name="template_id"]')!;
+  select.value = id;
+  select.dispatchEvent(new Event("change"));
+  await vi.waitFor(() => expect(dialog.querySelector("canvas")?.hidden).toBe(false));
+}
+
+function type(dialog: HTMLDialogElement, name: string, value: string) {
+  const input = dialog.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`)!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function localFile(dialog: HTMLDialogElement, file: File) {
+  const input = dialog.querySelector<HTMLInputElement>('[name="local_image"]')!;
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function backgroundType(dialog: HTMLDialogElement, value: "template" | "local") {
+  const input = dialog.querySelector<HTMLInputElement>(`[name="background_type"][value="${value}"]`)!;
+  input.checked = true;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
+  HTMLDialogElement.prototype.close = function close() { this.open = false; };
+  vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:test"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+});
+
+describe("Meme Maker controller", () => {
+  it("opens, loads templates, disables missing/GIF options and loads a static template", async () => {
+    const { dialog, loadImage, context } = setup();
+    expect(dialog.open).toBe(true);
+    await choose(dialog);
+    const options = [...dialog.querySelectorAll<HTMLOptionElement>('select[name="template_id"] option')];
+    expect(options[2].disabled).toBe(true);
+    expect(options[3].disabled).toBe(true);
+    expect(options[3].textContent).toContain("GIF 模板暂不支持制作");
+    expect(loadImage).toHaveBeenCalledWith(staticTemplate.reference_image_url);
+    expect(context.drawImage).toHaveBeenCalled();
+    expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG");
+  });
+
+  it("updates selected text box properties and schedules preview without API calls", async () => {
+    const { dialog, api, context } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Top");
+    type(dialog, "box_font_size", "90");
+    type(dialog, "box_x", "30");
+    type(dialog, "box_y", "75");
+    type(dialog, "box_width", "45");
+    type(dialog, "box_stroke", "6");
+    type(dialog, "box_align", "right");
+    await vi.waitFor(() => expect(dialog.querySelector('[data-output="box_font_size"]')?.textContent).toBe("90px"));
+    expect(dialog.querySelector('[data-output="box_y"]')?.textContent).toBe("75%");
+    expect(dialog.querySelector('[data-text-box-id]')?.textContent).toContain("Top");
+    expect(context.fillText).toHaveBeenCalled();
+    expect(api.uploadMeme).not.toHaveBeenCalled();
+  });
+
+  it("adds, selects and deletes text boxes without keeping top/bottom state", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(3);
+    const first = dialog.querySelectorAll<HTMLButtonElement>("[data-text-box-id]")[0];
+    first.click();
+    type(dialog, "box_text", "First selected");
+    expect(dialog.querySelectorAll<HTMLButtonElement>("[data-text-box-id]")[0].textContent).toContain("First selected");
+    dialog.querySelector<HTMLButtonElement>("[data-delete-text-box]")!.click();
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(2);
+    expect(dialog.querySelector('[name="top_text"]')).toBeNull();
+  });
+
+  it("selects by canvas, drags a text box, resizes both handles and clears selection on blank space", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Move me");
+    await vi.waitFor(() => expect(dialog.querySelector("[data-selected-box]")).not.toBeNull());
+    const canvas = dialog.querySelector<HTMLCanvasElement>("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    const fire = (type: string, x: number, y: number, target: Element = overlay) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+    fire("pointerdown", 400, 90, dialog.querySelector("[data-selected-box]")!);
+    fire("pointermove", 480, 150);
+    fire("pointerup", 480, 150);
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("60");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_y"]')?.value).toBe("25");
+    fire("pointerdown", 200, 150, dialog.querySelector('[data-resize-handle="left"]')!);
+    fire("pointermove", 280, 150); fire("pointerup", 280, 150);
+    expect(Number(dialog.querySelector<HTMLInputElement>('[name="box_width"]')?.value)).toBeLessThan(70);
+    fire("pointerdown", 700, 150, dialog.querySelector('[data-resize-handle="right"]')!);
+    fire("pointermove", 760, 150); fire("pointerup", 760, 150);
+    expect(dialog.querySelector("[data-selected-box]")).not.toBeNull();
+    fire("pointerdown", 10, 590);
+    expect(dialog.querySelector("[data-selected-box]")).toBeNull();
+  });
+
+  it("lays out three boxes with different positions, widths, sizes and alignments", async () => {
+    const { dialog, context } = setup();
+    await choose(dialog);
+    const configurations = [
+      ["左上", "25", "20", "30", "32", "left"],
+      ["中间", "50", "50", "60", "48", "center"],
+      ["右下", "80", "82", "35", "28", "right"],
+    ];
+    for (let index = 0; index < configurations.length; index += 1) {
+      if (index) dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
+      const [textValue, x, y, width, font, align] = configurations[index];
+      type(dialog, "box_text", textValue);
+      type(dialog, "box_x", x);
+      type(dialog, "box_y", y);
+      type(dialog, "box_width", width);
+      type(dialog, "box_font_size", font);
+      type(dialog, "box_align", align);
+    }
+    await vi.waitFor(() => expect(context.fillText).toHaveBeenCalledWith("左上", expect.any(Number), expect.any(Number)));
+    expect(context.fillText).toHaveBeenCalledWith("中间", expect.any(Number), expect.any(Number));
+    expect(context.fillText).toHaveBeenCalledWith("右下", expect.any(Number), expect.any(Number));
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(3);
+  });
+
+  it("clones style with a new id and offset, then respects the 20-box limit", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Clone me");
+    type(dialog, "box_fill_color", "black");
+    type(dialog, "box_stroke_color", "white");
+    type(dialog, "box_width", "40");
+    const originalId = dialog.querySelector<HTMLElement>("[data-text-box-id]")!.dataset.textBoxId;
+    dialog.querySelector<HTMLButtonElement>("[data-clone-text-box]")!.click();
+    const boxes = dialog.querySelectorAll<HTMLElement>("[data-text-box-id]");
+    expect(boxes).toHaveLength(2);
+    expect(boxes[1].dataset.textBoxId).not.toBe(originalId);
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Clone me");
+    expect(dialog.querySelector<HTMLSelectElement>('[name="box_fill_color"]')?.value).toBe("black");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("53");
+    for (let index = 2; index < 20; index += 1) dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(20);
+    expect(dialog.querySelector<HTMLButtonElement>("[data-clone-text-box]")?.disabled).toBe(true);
+  });
+
+  it("moves the selected box one layer at a time and disables boundary actions", async () => {
+    const { dialog, context } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "A");
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click(); type(dialog, "box_text", "B");
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click(); type(dialog, "box_text", "C");
+    dialog.querySelectorAll<HTMLButtonElement>("[data-text-box-id]")[1].click();
+    dialog.querySelector<HTMLButtonElement>("[data-layer-up]")!.click();
+    await vi.waitFor(() => expect(vi.mocked(context.fillText).mock.calls.slice(-3).map(call => call[0])).toEqual(["A", "C", "B"]));
+    expect(dialog.querySelector<HTMLButtonElement>("[data-layer-up]")?.disabled).toBe(true);
+    dialog.querySelector<HTMLButtonElement>("[data-layer-down]")!.click();
+    expect(dialog.querySelector<HTMLButtonElement>("[data-layer-up]")?.disabled).toBe(false);
+  });
+
+  it("nudges with arrows, moves faster with Shift, clamps, and ignores form focus or no selection", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    const key = (target: Element, value: string, shiftKey = false) => target.dispatchEvent(new KeyboardEvent("keydown", { key: value, shiftKey, bubbles: true, cancelable: true }));
+    key(dialog, "ArrowRight"); key(dialog, "ArrowDown", true);
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("50.5");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_y"]')?.value).toBe("17");
+    const textarea = dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')!;
+    key(textarea, "ArrowLeft");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("50.5");
+    type(dialog, "box_x", "35");
+    for (let index = 0; index < 100; index += 1) key(dialog, "ArrowLeft", true);
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("35");
+    dialog.querySelector<HTMLElement>("[data-maker-overlay]")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 600 }));
+    const before = dialog.querySelector<HTMLInputElement>('[name="box_y"]')?.value;
+    key(dialog, "ArrowUp");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_y"]')?.value).toBe(before);
+  });
+
+  it.each([
+    ["image/png", "local.png"], ["image/jpeg", "local.jpg"], ["image/webp", "local.webp"],
+  ])("loads a local %s background at natural size and preserves text boxes", async (mime, name) => {
+    const { dialog, loadImage } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Keep me");
+    backgroundType(dialog, "local");
+    localFile(dialog, new File(["image"], name, { type: mime }));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG"));
+    expect(loadImage).toHaveBeenLastCalledWith("blob:test");
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Keep me");
+  });
+
+  it("rejects GIF and non-image local backgrounds", async () => {
+    const { dialog, loadImage } = setup();
+    backgroundType(dialog, "local");
+    localFile(dialog, new File(["gif"], "bad.gif", { type: "image/gif" }));
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("GIF 底图暂不支持");
+    localFile(dialog, new File(["txt"], "bad.txt", { type: "text/plain" }));
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("PNG、JPEG 或 WEBP");
+    expect(loadImage).not.toHaveBeenCalled();
+  });
+
+  it("switches local/template backgrounds, preserves boxes and revokes local URLs", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Persistent");
+    backgroundType(dialog, "local");
+    localFile(dialog, new File(["image"], "local.png", { type: "image/png" }));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG"));
+    backgroundType(dialog, "template");
+    await vi.waitFor(() => expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("模板已加载"));
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Persistent");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:test");
+  });
+
+  it("saves local backgrounds without a template and keeps source metadata", async () => {
+    const { dialog, api } = setup();
+    backgroundType(dialog, "local");
+    localFile(dialog, new File(["image"], "my photo.jpg", { type: "image/jpeg" }));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG"));
+    type(dialog, "box_text", "Local"); type(dialog, "title", "Local Meme");
+    dialog.querySelector<HTMLButtonElement>("[data-save-maker]")!.click();
+    await vi.waitFor(() => expect(api.uploadMeme).toHaveBeenCalledWith(expect.objectContaining({ template_id: null, source: "meme-maker" })));
+  });
+
+  it("ignores a stale template image load after a fast switch", async () => {
+    let resolveFirst!: (value: ReturnType<typeof loaded>) => void;
+    const loaded = (width: number) => ({ source: {} as CanvasImageSource, width, height: 600, dispose: vi.fn() });
+    const first = new Promise<ReturnType<typeof loaded>>(resolve => { resolveFirst = resolve; });
+    const second = loaded(900);
+    const { dialog, loadImage } = setup({ listTemplates: vi.fn().mockResolvedValue([staticTemplate, { ...staticTemplate, id: 4, name: "Second" }]) });
+    loadImage.mockReset().mockReturnValueOnce(first).mockResolvedValueOnce(second);
+    await vi.waitFor(() => expect(dialog.querySelectorAll('select[name="template_id"] option').length).toBe(3));
+    const select = dialog.querySelector<HTMLSelectElement>('[name="template_id"]')!;
+    select.value = "1"; select.dispatchEvent(new Event("change"));
+    select.value = "4"; select.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("900 × 600 PNG"));
+    const stale = loaded(700); resolveFirst(stale);
+    await Promise.resolve();
+    expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("900 × 600 PNG");
+    expect(stale.dispose).toHaveBeenCalled();
+  });
+
+  it("exports image/png with a safe PNG filename and rejects empty captions", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-export-maker]")!.click();
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("至少输入一段文字");
+    type(dialog, "box_text", "Top");
+    dialog.querySelector<HTMLButtonElement>("[data-export-maker]")!.click();
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+    expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenCalledWith(expect.any(Function), "image/png");
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+  });
+
+  it("reports export failure", async () => {
+    const { dialog } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Top");
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(callback => callback(null));
+    dialog.querySelector<HTMLButtonElement>("[data-export-maker]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("图片导出失败"));
+  });
+
+  it("saves through existing upload with maker metadata and preserves state on duplicate", async () => {
+    const onSaved = vi.fn();
+    const { dialog, api } = setup();
+    await choose(dialog);
+    type(dialog, "box_text", "Top");
+    type(dialog, "title", "My Meme");
+    dialog.querySelector<HTMLButtonElement>("[data-save-maker]")!.click();
+    await vi.waitFor(() => expect(api.uploadMeme).toHaveBeenCalled());
+    expect(api.uploadMeme).toHaveBeenCalledWith(expect.objectContaining({
+      title: "My Meme", template_id: 1, source: "meme-maker", tags: [],
+      file: expect.objectContaining({ type: "image/png" }),
+    }));
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("Meme #8");
+
+    vi.mocked(api.uploadMeme).mockRejectedValueOnce(new ApiError(409, "该图片已存在"));
+    dialog.querySelector<HTMLButtonElement>("[data-save-maker]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelector("[data-maker-notice]")?.textContent).toBe("该图片已存在"));
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Top");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});

@@ -448,7 +448,7 @@ Meme 与 Tag 为多对多关系。关联字段为 `meme_id`、`tag_id`、`source
 - [x] 以原图真实尺寸 Canvas 实时预览并导出 PNG
 - [x] 将 PNG 作为普通 File 复用现有 Upload API，自动继承模板并记录 `source=meme-maker`
 
-Phase 2 当时只实现模板上的自由文本排版，不构建复杂图像编辑器；v0.7.1 已进一步补充本地静态底图、黑白文字/描边和单层前后移动，但仍不支持 GIF Maker、图片图层、旋转、滤镜、Undo/Redo 或草稿持久化。
+Phase 2 当时只实现模板上的自由文本排版，不构建复杂图像编辑器；v0.7.1 已进一步补充本地静态底图、黑白文字/描边和单层前后移动，但当时仍不支持 GIF Maker、图片图层、旋转、滤镜、Undo/Redo 或草稿持久化。
 
 ### v0.7.1：制作器实用性增强（已完成）
 
@@ -459,7 +459,17 @@ Phase 2 当时只实现模板上的自由文本排版，不构建复杂图像编
 - [x] 支持本地 PNG/JPEG/WEBP 临时底图、自然尺寸 Canvas、Object URL 释放和 Local 保存 `template_id=null`。
 - [x] P1 提供经典 Meme、中文粗体、常规无衬线系统字体预设和不影响文字/位置/宽度的样式重置。
 
-仍不提供图片图层、旋转、Undo/Redo、GIF Maker、任意颜色选择、字体上传或复杂图层面板。
+v0.7.1 当时仍不提供图片图层、旋转、Undo/Redo、GIF Maker、任意颜色选择、字体上传或复杂图层面板；Undo/Redo 已在 v0.7.2 补齐。
+
+### 当前 v0.7.2 实现摘要
+
+- [x] 新增最多 50 步会话内 Undo/Redo，只保存深拷贝的文本框、选择和标题状态。
+- [x] 拖动、Resize 与 Slider 连续操作合并为一步历史；无状态变化不产生空历史。
+- [x] 支持 Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z、Ctrl+D、Delete、Escape、Arrow 与 Shift+Arrow，并统一输入焦点保护。
+- [x] 文本框拖动接近 X/Y 中心 1.25% 时吸附到 50%，overlay 显示临时中心辅助线。
+- [x] Font Size、X、Y、Width、Stroke Width 提供 Slider + Numeric Input 双向精调、decimal step 与统一 clamp。
+
+History 不保存底图对象、Canvas、Blob、DOM 或渲染结果，关闭 Maker 后清空；不提供持久化 History、分支树、对象吸附、网格或自定义参考线。
 
 ### v1.0：可公开访问版本
 
@@ -527,7 +537,7 @@ data/thumbnails/*
 - 单图静态 Meme 可直接复制；复合 Meme 在 Viewer 中按当前图片复制；GIF 明确提示使用下载，不复制首帧。
 - 快捷操作具备独立 busy 状态、成功/失败反馈、键盘与窄屏可达性，并与打开详情/移除牌组隔离。
 
-### v0.7.1：实用性增强 Meme 制作器（已完成）
+### v0.7.2：编辑历史与排版辅助（已完成）
 
 - 新增浏览器原生 Canvas 制作器，静态 Template Reference Image 是唯一底图来源。
 - 单一 `textBoxes[]` 模型支持最多 20 个文本框；每个框独立控制 X/Y、宽度、字号、描边和对齐。
@@ -539,8 +549,11 @@ data/thumbnails/*
 - 文本框支持黑白文字/描边、复制、单层前后移动、键盘微调、系统字体预设与样式重置。
 - 底图支持 Template 或本地 PNG/JPEG/WEBP；切换时保留文本框，本地 Object URL 在切换/关闭时释放。
 - Template 保存继承模板；Local 保存显式使用 `template_id=null`，两者继续走普通 Upload。
+- 50 步 Undo/Redo 恢复 TextBox、Selection 和 Title；背景资源不进入历史，关闭即清空。
+- 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
+- Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.7.1 制作器实用性增强已完成
+当前状态：v0.7.2 编辑历史与排版辅助已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

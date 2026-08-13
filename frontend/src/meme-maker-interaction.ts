@@ -7,6 +7,7 @@ export type InteractionState =
   | { type: "dragging" | "resizing-left" | "resizing-right"; textBoxId: string; start: CanvasPoint; original: MemeTextBox };
 
 export const IDLE_INTERACTION: InteractionState = { type: "idle" };
+export const CENTER_SNAP_THRESHOLD_PERCENT = 1.25;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -58,10 +59,12 @@ export function updateInteraction(
   const original = state.original;
   if (state.type === "dragging") {
     const halfWidth = original.widthPercent / 2;
+    const xPercent = clamp(original.xPercent + deltaXPercent, halfWidth, 100 - halfWidth);
+    const yPercent = clamp(original.yPercent + deltaYPercent, 0, 100);
     return {
       ...original,
-      xPercent: clamp(original.xPercent + deltaXPercent, halfWidth, 100 - halfWidth),
-      yPercent: clamp(original.yPercent + deltaYPercent, 0, 100),
+      xPercent: Math.abs(xPercent - 50) <= CENTER_SNAP_THRESHOLD_PERCENT ? 50 : xPercent,
+      yPercent: Math.abs(yPercent - 50) <= CENTER_SNAP_THRESHOLD_PERCENT ? 50 : yPercent,
     };
   }
 

@@ -40,4 +40,11 @@ describe("Meme Maker interaction", () => {
   it("returns null after interaction returns to idle", () => {
     expect(updateInteraction(IDLE_INTERACTION, { x: 1, y: 1 }, 100, 100)).toBeNull();
   });
+
+  it("snaps dragging to canvas centers only inside the threshold", () => {
+    const original = box("one", { xPercent: 45, yPercent: 45 });
+    const state = beginInteraction("dragging", original, { x: 0, y: 0 });
+    expect(updateInteraction(state, { x: 32, y: 24 }, 800, 600)).toEqual(expect.objectContaining({ xPercent: 50, yPercent: 50 }));
+    expect(updateInteraction(state, { x: 16, y: 12 }, 800, 600)).toEqual(expect.objectContaining({ xPercent: 47, yPercent: 47 }));
+  });
 });

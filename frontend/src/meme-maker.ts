@@ -14,6 +14,7 @@ import {
   type InteractionState,
 } from "./meme-maker-interaction";
 import type { MemeResponse, TemplateResponse, UploadMemeInput } from "./types";
+import { MemeMakerHistory, type MemeMakerHistoryState } from "./meme-maker-history";
 
 interface LoadedTemplateImage {
   source: CanvasImageSource;
@@ -116,6 +117,10 @@ export class MemeMakerController {
   private renderFrame: number | null = null;
   private busy = false;
   private defaultFontSize = 56;
+  private readonly history = new MemeMakerHistory();
+  private pendingHistory: MemeMakerHistoryState | null = null;
+  private snapGuideX = false;
+  private snapGuideY = false;
   private readonly loadImage: (url: string) => Promise<LoadedTemplateImage>;
   private readonly scheduleFrame: (callback: FrameRequestCallback) => number;
   private readonly cancelFrame: (id: number) => void;
@@ -136,7 +141,11 @@ export class MemeMakerController {
       <form class="modal-card meme-maker-card" data-maker-form method="dialog">
         <header class="modal-heading meme-maker-heading">
           <div><p class="eyebrow">MEME FORGE</p><h2 id="meme-maker-title">Meme 制作器</h2></div>
-          <button class="icon-button" type="button" data-close-maker aria-label="关闭 Meme 制作器">×</button>
+          <div class="meme-maker-history-actions">
+            <button class="button button-secondary" type="button" data-undo title="撤销 Ctrl+Z">撤销</button>
+            <button class="button button-secondary" type="button" data-redo title="重做 Ctrl+Y">重做</button>
+            <button class="icon-button" type="button" data-close-maker aria-label="关闭 Meme 制作器">×</button>
+          </div>
         </header>
         <div class="meme-maker-layout">
           <div class="meme-maker-controls">
@@ -209,7 +218,8 @@ export class MemeMakerController {
   }
 
   private rangeMarkup(name: string, label: string, min: number, max: number, unit: string): string {
-    return `<label><span>${label} <output data-output="${name}">0${unit}</output></span><input name="${name}" type="range" min="${min}" max="${max}" step="${name === "box_x" || name === "box_y" ? ".5" : "1"}"></label>`;
+    const step = name === "box_x" || name === "box_y" || name === "box_width" ? ".1" : "1";
+    return `<label class="maker-range-control"><span>${label} <output data-output="${name}">0${unit}</output></span><div><input name="${name}" type="range" min="${min}" max="${max}" step="${step}"><input name="${name}_number" type="number" min="${min}" max="${max}" step="${step}" aria-label="${label}精确值"></div></label>`;
   }
 
   open(): void { this.reset(); this.dialog.showModal(); void this.loadTemplates(); }
@@ -220,6 +230,7 @@ export class MemeMakerController {
     if (this.renderFrame !== null) this.cancelFrame(this.renderFrame);
     this.renderFrame = null;
     this.interaction = IDLE_INTERACTION;
+    this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     if (this.dialog.open) this.dialog.close();
   }
 
@@ -242,17 +253,26 @@ export class MemeMakerController {
     this.dialog.querySelector("[data-layer-up]")?.addEventListener("click", () => this.moveSelectedLayer(1));
     this.dialog.querySelector("[data-layer-down]")?.addEventListener("click", () => this.moveSelectedLayer(-1));
     this.dialog.querySelector("[data-reset-text-style]")?.addEventListener("click", () => this.resetSelectedStyle());
+    this.dialog.querySelector("[data-undo]")?.addEventListener("click", () => this.undo());
+    this.dialog.querySelector("[data-redo]")?.addEventListener("click", () => this.redo());
     this.list.addEventListener("click", event => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-text-box-id]");
       if (button?.dataset.textBoxId) this.selectTextBox(button.dataset.textBoxId);
     });
-    this.properties.addEventListener("input", () => this.updateSelectedFromForm());
-    this.properties.addEventListener("change", () => this.updateSelectedFromForm());
+    this.properties.addEventListener("focusin", event => this.beginControlHistory(event.target));
+    this.properties.addEventListener("input", event => this.updateSelectedFromForm(event.target));
+    this.properties.addEventListener("change", event => { this.updateSelectedFromForm(event.target, true); });
+    this.properties.addEventListener("focusout", event => this.commitControlHistory(event.target));
+    const title = this.form.elements.namedItem("title");
+    if (title instanceof HTMLInputElement) {
+      title.addEventListener("focus", () => this.beginHistory());
+      title.addEventListener("blur", () => this.commitHistory());
+    }
     this.overlay.addEventListener("pointerdown", event => this.pointerDown(event));
     this.overlay.addEventListener("pointermove", event => this.pointerMove(event));
     this.overlay.addEventListener("pointerup", event => this.pointerUp(event));
     this.overlay.addEventListener("pointercancel", event => this.pointerUp(event));
-    this.dialog.addEventListener("keydown", event => this.keyboardNudge(event));
+    this.dialog.addEventListener("keydown", event => this.handleShortcut(event));
     this.exportButton.addEventListener("click", () => void this.exportPng());
     this.saveButton.addEventListener("click", () => void this.save());
   }
@@ -354,17 +374,19 @@ export class MemeMakerController {
   private addTextBox(): void {
     if (!this.image) { this.setNotice("请先选择一个可制作的模板。", true); return; }
     if (this.textBoxes.length >= MAX_TEXT_BOXES) { this.setNotice(`最多添加 ${MAX_TEXT_BOXES} 个文本框。`, true); return; }
+    const before = this.captureHistory();
     const box = createTextBox(this.defaultFontSize);
     this.textBoxes.push(box);
     this.selectedTextBoxId = box.id;
     this.updateUi();
-    this.scheduleRender();
+    this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private cloneSelectedTextBox(): void {
     const source = this.selectedTextBox();
     if (!source) return;
     if (this.textBoxes.length >= MAX_TEXT_BOXES) { this.setNotice(`最多添加 ${MAX_TEXT_BOXES} 个文本框。`, true); return; }
+    const before = this.captureHistory();
     const clone = createTextBox(source.fontSize);
     Object.assign(clone, source, {
       id: clone.id,
@@ -373,31 +395,34 @@ export class MemeMakerController {
     });
     this.textBoxes.push(clone);
     this.selectedTextBoxId = clone.id;
-    this.updateUi(); this.scheduleRender();
+    this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private moveSelectedLayer(direction: -1 | 1): void {
     const index = this.textBoxes.findIndex(box => box.id === this.selectedTextBoxId);
     const next = index + direction;
     if (index < 0 || next < 0 || next >= this.textBoxes.length) return;
+    const before = this.captureHistory();
     [this.textBoxes[index], this.textBoxes[next]] = [this.textBoxes[next], this.textBoxes[index]];
-    this.updateUi(); this.scheduleRender();
+    this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private resetSelectedStyle(): void {
     const box = this.selectedTextBox();
     if (!box) return;
+    const before = this.captureHistory();
     Object.assign(box, { fontSize: this.defaultFontSize, fillColor: "white", strokeColor: "black", strokeWidth: 3, align: "center", fontPreset: "classic" });
-    this.updateUi(); this.scheduleRender();
+    this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private deleteSelectedTextBox(): void {
     const index = this.textBoxes.findIndex(box => box.id === this.selectedTextBoxId);
     if (index < 0) return;
+    const before = this.captureHistory();
     this.textBoxes.splice(index, 1);
     this.selectedTextBoxId = this.textBoxes[Math.min(index, this.textBoxes.length - 1)]?.id ?? null;
     this.updateUi();
-    this.scheduleRender();
+    this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private selectTextBox(id: string | null): void {
@@ -406,9 +431,15 @@ export class MemeMakerController {
     this.updateOverlay();
   }
 
-  private updateSelectedFromForm(): void {
+  private updateSelectedFromForm(target?: EventTarget | null, commit = false): void {
     const box = this.selectedTextBox();
     if (!box) return;
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      if (target.value.trim() === "" || !Number.isFinite(Number(target.value))) return;
+      const rangeName = target.name.replace(/_number$/u, "");
+      const range = this.form.elements.namedItem(rangeName);
+      if (range instanceof HTMLInputElement && target.value !== "") range.value = target.value;
+    }
     box.text = this.inputValue("box_text");
     box.fontSize = this.numberInput("box_font_size", 12, 300);
     box.yPercent = this.numberInput("box_y", 0, 100);
@@ -424,6 +455,7 @@ export class MemeMakerController {
     box.fontPreset = fontPreset === "chinese-bold" || fontPreset === "sans" ? fontPreset : "classic";
     this.updateUi();
     this.scheduleRender();
+    if (commit) this.commitHistory();
   }
 
   private pointerDown(event: PointerEvent): void {
@@ -438,6 +470,7 @@ export class MemeMakerController {
     this.selectTextBox(id);
     const box = this.selectedTextBox();
     if (!box) return;
+    this.beginHistory();
     const type = handle?.dataset.resizeHandle === "left" ? "resizing-left"
       : handle?.dataset.resizeHandle === "right" ? "resizing-right" : "dragging";
     this.interaction = beginInteraction(type, box, point);
@@ -451,6 +484,8 @@ export class MemeMakerController {
     const index = updated ? this.textBoxes.findIndex(box => box.id === updated.id) : -1;
     if (updated && index >= 0) {
       this.textBoxes[index] = updated;
+      this.snapGuideX = this.interaction.type === "dragging" && updated.xPercent === 50;
+      this.snapGuideY = this.interaction.type === "dragging" && updated.yPercent === 50;
       this.updateUi();
       this.scheduleRender();
     }
@@ -460,22 +495,34 @@ export class MemeMakerController {
   private pointerUp(event: PointerEvent): void {
     if (this.interaction.type === "idle") return;
     this.interaction = IDLE_INTERACTION;
+    this.snapGuideX = false; this.snapGuideY = false; this.commitHistory(); this.updateOverlay();
     this.overlay.releasePointerCapture?.(event.pointerId);
     event.preventDefault();
   }
 
-  private keyboardNudge(event: KeyboardEvent): void {
+  private handleShortcut(event: KeyboardEvent): void {
     const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+    const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
+    if (editing) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") {
+      event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); return;
+    }
+    if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); this.redo(); return; }
+    if (modifier && event.key.toLowerCase() === "d") { event.preventDefault(); this.cloneSelectedTextBox(); return; }
+    if (event.key === "Delete") { event.preventDefault(); this.deleteSelectedTextBox(); return; }
+    if (event.key === "Escape" && this.selectedTextBoxId) { event.preventDefault(); event.stopPropagation(); this.selectTextBox(null); return; }
     const box = this.selectedTextBox();
     if (!box || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    if (event.repeat) { event.preventDefault(); return; }
+    const before = this.captureHistory();
     const step = event.shiftKey ? 2 : 0.5;
     const halfWidth = box.widthPercent / 2;
     if (event.key === "ArrowLeft") box.xPercent = Math.max(halfWidth, box.xPercent - step);
     if (event.key === "ArrowRight") box.xPercent = Math.min(100 - halfWidth, box.xPercent + step);
     if (event.key === "ArrowUp") box.yPercent = Math.max(0, box.yPercent - step);
     if (event.key === "ArrowDown") box.yPercent = Math.min(100, box.yPercent + step);
-    event.preventDefault(); this.updateUi(); this.scheduleRender();
+    event.preventDefault(); this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
   private eventPoint(event: PointerEvent) {
@@ -504,6 +551,12 @@ export class MemeMakerController {
 
   private updateOverlay(): void {
     this.overlay.replaceChildren();
+    if (this.snapGuideX) {
+      const guide = document.createElement("div"); guide.className = "meme-snap-guide is-vertical"; guide.dataset.snapGuideX = ""; this.overlay.append(guide);
+    }
+    if (this.snapGuideY) {
+      const guide = document.createElement("div"); guide.className = "meme-snap-guide is-horizontal"; guide.dataset.snapGuideY = ""; this.overlay.append(guide);
+    }
     if (!this.image || !this.selectedTextBoxId) return;
     const bounds = this.measurements.get(this.selectedTextBoxId)?.bounds;
     if (!bounds) return;
@@ -536,6 +589,11 @@ export class MemeMakerController {
       this.setInput("box_y", this.displayPercent(box.yPercent));
       this.setInput("box_width", this.displayPercent(box.widthPercent));
       this.setInput("box_stroke", box.strokeWidth);
+      this.setInput("box_font_size_number", box.fontSize);
+      this.setInput("box_x_number", this.displayPercent(box.xPercent));
+      this.setInput("box_y_number", this.displayPercent(box.yPercent));
+      this.setInput("box_width_number", this.displayPercent(box.widthPercent));
+      this.setInput("box_stroke_number", box.strokeWidth);
       this.setInput("box_fill_color", box.fillColor);
       this.setInput("box_stroke_color", box.strokeColor);
       this.setInput("box_align", box.align);
@@ -561,6 +619,7 @@ export class MemeMakerController {
     if (clone) clone.disabled = !box || this.textBoxes.length >= MAX_TEXT_BOXES;
     if (up) up.disabled = index < 0 || index === this.textBoxes.length - 1;
     if (down) down.disabled = index <= 0;
+    this.updateHistoryActions();
   }
 
   private renderList(): void {
@@ -580,6 +639,49 @@ export class MemeMakerController {
       const empty = document.createElement("p"); empty.textContent = "还没有文本框"; this.list.append(empty);
     }
     this.required("[data-box-count]").textContent = `${this.textBoxes.length} / ${MAX_TEXT_BOXES}`;
+  }
+
+  private captureHistory(): MemeMakerHistoryState {
+    return { textBoxes: this.textBoxes.map(box => ({ ...box })), selectedTextBoxId: this.selectedTextBoxId, title: this.inputValue("title") };
+  }
+
+  private restoreHistory(state: MemeMakerHistoryState): void {
+    this.textBoxes = state.textBoxes.map(box => ({ ...box }));
+    this.selectedTextBoxId = state.selectedTextBoxId && this.textBoxes.some(box => box.id === state.selectedTextBoxId) ? state.selectedTextBoxId : null;
+    this.setInput("title", state.title);
+    this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
+    this.updateUi(); this.scheduleRender();
+  }
+
+  private beginHistory(): void { if (!this.pendingHistory) this.pendingHistory = this.captureHistory(); }
+
+  private commitHistory(): void {
+    if (!this.pendingHistory) return;
+    this.history.record(this.pendingHistory, this.captureHistory());
+    this.pendingHistory = null; this.updateHistoryActions();
+  }
+
+  private beginControlHistory(target: EventTarget | null): void {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) this.beginHistory();
+  }
+
+  private commitControlHistory(target: EventTarget | null): void {
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
+      if (range instanceof HTMLInputElement) {
+        const min = Number(range.min); const max = Number(range.max); const parsed = Number(target.value);
+        const value = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : Number(range.value);
+        range.value = String(value); target.value = String(value); this.updateSelectedFromForm(range);
+      }
+    }
+    this.commitHistory();
+  }
+
+  private undo(): void { const state = this.history.undo(this.captureHistory()); if (state) this.restoreHistory(state); this.updateHistoryActions(); }
+  private redo(): void { const state = this.history.redo(this.captureHistory()); if (state) this.restoreHistory(state); this.updateHistoryActions(); }
+  private updateHistoryActions(): void {
+    const undo = this.dialog.querySelector<HTMLButtonElement>("[data-undo]"); const redo = this.dialog.querySelector<HTMLButtonElement>("[data-redo]");
+    if (undo) undo.disabled = !this.history.canUndo; if (redo) redo.disabled = !this.history.canRedo;
   }
 
   private async exportPng(): Promise<void> {
@@ -620,6 +722,7 @@ export class MemeMakerController {
   private reset(): void {
     this.loadGeneration += 1; this.releaseImage(); this.form.reset();
     this.textBoxes = []; this.selectedTextBoxId = null; this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.background = null;
+    this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.templateSelect.innerHTML = '<option value="">正在加载模板…</option>';
     this.canvas.width = 0; this.canvas.height = 0; this.updatePreview(false); this.setNotice(""); this.busy = false; this.updateUi();
   }

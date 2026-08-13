@@ -81,6 +81,10 @@ function backgroundType(dialog: HTMLDialogElement, value: "template" | "local") 
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function key(dialog: HTMLDialogElement, value: string, options: KeyboardEventInit = {}) {
+  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...options }));
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
@@ -281,6 +285,82 @@ describe("Meme Maker controller", () => {
     type(dialog, "box_text", "Local"); type(dialog, "title", "Local Meme");
     dialog.querySelector<HTMLButtonElement>("[data-save-maker]")!.click();
     await vi.waitFor(() => expect(api.uploadMeme).toHaveBeenCalledWith(expect.objectContaining({ template_id: null, source: "meme-maker" })));
+  });
+
+  it("undoes and redoes a style edit, then invalidates redo after a new edit", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    const font = dialog.querySelector<HTMLInputElement>('[name="box_font_size"]')!;
+    font.focus(); type(dialog, "box_font_size", "90"); font.dispatchEvent(new Event("change", { bubbles: true })); font.blur();
+    expect(dialog.querySelector<HTMLButtonElement>("[data-undo]")?.disabled).toBe(false);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(font.value).toBe("72");
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click();
+    expect(font.value).toBe("90");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
+    expect(dialog.querySelector<HTMLButtonElement>("[data-redo]")?.disabled).toBe(true);
+  });
+
+  it("groups multiple drag moves and resize moves into one history step", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Move");
+    const canvas = dialog.querySelector<HTMLCanvasElement>("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    const fire = (name: string, x: number, y: number, target: Element = overlay) => target.dispatchEvent(new MouseEvent(name, { bubbles: true, clientX: x, clientY: y }));
+    fire("pointerdown", 400, 90, dialog.querySelector("[data-selected-box]")!);
+    fire("pointermove", 430, 120); fire("pointermove", 470, 150); fire("pointerup", 470, 150);
+    const movedX = dialog.querySelector<HTMLInputElement>('[name="box_x"]')!.value;
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("50");
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click(); expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe(movedX);
+    const oldWidth = dialog.querySelector<HTMLInputElement>('[name="box_width"]')!.value;
+    fire("pointerdown", 680, 150, dialog.querySelector('[data-resize-handle="right"]')!);
+    fire("pointermove", 700, 150); fire("pointermove", 720, 150); fire("pointerup", 720, 150);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_width"]')?.value).toBe(oldWidth);
+  });
+
+  it("supports history shortcuts, clone, delete, escape and focus guards", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Shortcut");
+    key(dialog, "d", { ctrlKey: true }); expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(2);
+    key(dialog, "Delete"); expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    key(dialog, "z", { ctrlKey: true }); expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(2);
+    key(dialog, "y", { ctrlKey: true }); expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    key(dialog, "z", { ctrlKey: true }); key(dialog, "z", { ctrlKey: true, shiftKey: true });
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    key(dialog, "Escape"); expect(dialog.querySelector("[data-selected-box]")).toBeNull();
+    const textarea = dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')!;
+    textarea.focus(); textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "d", ctrlKey: true, bubbles: true }));
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+  });
+
+  it("shows center snap guides during drag and removes them on pointerup", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Snap"); type(dialog, "box_x", "45"); type(dialog, "box_y", "45");
+    await Promise.resolve();
+    const canvas = dialog.querySelector<HTMLCanvasElement>("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    dialog.querySelector("[data-selected-box]")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 360, clientY: 270 }));
+    overlay.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 392, clientY: 294 }));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-snap-guide-x]")).not.toBeNull());
+    expect(dialog.querySelector("[data-snap-guide-y]")).not.toBeNull();
+    overlay.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 392, clientY: 294 }));
+    expect(dialog.querySelector("[data-snap-guide-x]")).toBeNull(); expect(dialog.querySelector("[data-snap-guide-y]")).toBeNull();
+  });
+
+  it("synchronizes sliders and numeric inputs, supports decimals, clamps and undoes numeric edits", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    type(dialog, "box_x", "42.5"); expect(dialog.querySelector<HTMLInputElement>('[name="box_x_number"]')?.value).toBe("42.5");
+    const xNumber = dialog.querySelector<HTMLInputElement>('[name="box_x_number"]')!;
+    xNumber.focus(); type(dialog, "box_x_number", "50.1"); xNumber.dispatchEvent(new Event("change", { bubbles: true })); xNumber.blur();
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("50.1");
+    const widthNumber = dialog.querySelector<HTMLInputElement>('[name="box_width_number"]')!;
+    widthNumber.focus(); type(dialog, "box_width_number", "99999"); widthNumber.blur(); expect(widthNumber.value).toBe("100");
+    const fontNumber = dialog.querySelector<HTMLInputElement>('[name="box_font_size_number"]')!;
+    fontNumber.focus(); type(dialog, "box_font_size_number", "-999"); fontNumber.blur(); expect(fontNumber.value).toBe("12");
+    xNumber.focus(); xNumber.value = ""; xNumber.dispatchEvent(new Event("input", { bubbles: true })); xNumber.blur(); expect(xNumber.value).not.toBe("");
+    key(dialog, "z", { ctrlKey: true }); expect(fontNumber.value).not.toBe("12");
   });
 
   it("ignores a stale template image load after a fast switch", async () => {

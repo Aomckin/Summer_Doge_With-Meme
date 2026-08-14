@@ -1,12 +1,16 @@
-# Meme Vault v0.7.4
+# Meme Vault v0.8
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.4，Meme Forge 第一阶段已封版：在底图取景与自由文本框基础上，新增任意文字/描边颜色、文本背景框、文字阴影、行高、字距、字重、会话内样式复制粘贴，以及常用/自定义输出尺寸、比例锁定和画布背景色。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.8，Meme Forge 定位为轻量快捷 Meme 制作器：支持单底图、多图片层、多文字层、基础裁切拼装、样式与取景、PNG 导出和快速入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## Meme 制作器
 
 顶部“Meme 制作器”入口可读取现有模板参考图，或选择仅在当前会话使用的本地 PNG、JPEG、WebP 底图。加载后会创建一个默认文本框；可继续添加、选择、删除或复制文本框，并为每个文本框独立设置文字、字号、X/Y、文本区域宽度、黑/白文字、黑/白描边、左/中/右对齐与三个系统字体预设。画布支持拖动、左右 handle 调宽及方向键微调（0.5%，Shift 为 2%）；最多 20 个文本框，并可上移或下移一层。
+
+图片层可通过多文件选择、拖放到 Canvas、剪贴板粘贴或“从底图创建图片层”加入，支持 PNG/JPEG/WEBP，最多 30 层；GIF 明确拒绝。每层把矩形 `frameX/Y/Width/Height` 与图片内容 `contentX/Y/Scale` 分开保存：Frame 只是 Mask，Resize 或裁切模式下移动 Frame 不会重排图片内容；拖动内容和缩放只改变 Content。只有显式 Fit、Fill、重置裁切才重新计算 Content Transform。另支持复制、删除、图片层内部排序、透明度、替换来源、中心吸附和方向键微调；文字固定绘制在全部图片层上方。
+
+“显示底图”可在不清除模板、本地底图或取景参数的情况下隐藏背景，便于把同一底图裁成多个区域重新拼装。图片来源与图片层分离，同一来源可供多个层采用不同裁切；来源注册表保留到当前 Maker 会话结束，因此删除图片层后仍可 Undo 恢复。
 
 每个文本框可使用任意 Hex 文字色和描边色、normal/bold/heavy 字重、0.8–2.0 行高倍率及 -4–20px 字距。文本背景框支持颜色、独立透明度、Padding 和圆角；文字阴影支持颜色、模糊和 X/Y 偏移。背景框先根据多行文字实际内容 bounds 外扩 Padding 再绘制，阴影使用 Canvas 原生文字阴影。经典白字黑边仍是默认样式。
 
@@ -16,9 +20,11 @@ Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前
 
 输出还提供 1080×1080、1080×1350、1920×1080、1200×675、800×800 常用尺寸，并允许在 64–4096px 内自定义宽高。锁定比例时修改一边会按当前比例推算另一边，解锁后宽高独立；尺寸变化会执行 Fill + Center。画布背景色用于 Fit 或手动移开底图后的未覆盖区域。
 
-预览、导出与保存共享同一个背景矩形、文本测量与 Canvas Renderer；选中框、resize handle 和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终输出 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持旋转、图片图层、Sticker、滤镜、GIF 编辑、网络字体、自由裁剪框或非 PNG 输出。
+预览、导出与保存共享同一个 Canvas Renderer，固定顺序为画布背景色、可见底图、图片层数组、文字层数组；选中框、Resize handle、裁切状态和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终 PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，图片层来源不改变模板归属。
 
-编辑历史保存最多 50 个轻量状态步骤，只包含文本框、当前选择、标题、输出比例/尺寸与底图缩放偏移，不保存 Canvas、Blob、底图 Bitmap 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D` 复制、`Delete` 删除、`Escape` 取消选择。输入框聚焦时这些快捷键不会被 Maker 劫持。文本框/背景拖动和 resize 的多次 pointermove、Slider 的连续 input 都合并为单个历史步骤；历史在关闭制作器后清空。
+编辑历史保存最多 50 个轻量状态步骤，包含图片层、文本框、互斥选择、标题、输出/底图状态与底图可见性，只保存图片 `sourceId`，不保存 File、Blob、Bitmap、Canvas 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D`、`Delete`、`Escape` 和方向键根据当前图片/文字选择执行。Frame Move、Frame Resize、Content Pan、Content Zoom 与其它 Slider 连续变化分别合并为一步；历史与来源注册表在关闭制作器后清空并释放。
+
+当前明确不支持旋转、倾斜、蒙版、抠图、滤镜、Blend Mode、Shape/Sticker、图片与文字任意交叉排序、多选/Group、GIF/视频、AI 图片编辑或可重新打开的工程草稿；保存到 Vault 的仍是一张普通最终 PNG。
 
 拖动文本框接近画布 X/Y 中心 1.25% 范围时会吸附到 50%，并在独立 overlay 中显示竖直或水平辅助线，松手立即隐藏且不进入 PNG。字号、X、Y、宽度和描边同时提供 Slider 与 Numeric Input；X/Y/宽度支持 0.1 精度，非法值在 change/blur 时恢复或 clamp。
 

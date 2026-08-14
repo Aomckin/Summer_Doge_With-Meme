@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginInteraction, clientToCanvasPoint, hitTestTextBoxes, IDLE_INTERACTION, updateInteraction } from "./meme-maker-interaction";
+import { beginImageInteraction, beginInteraction, clientToCanvasPoint, hitTestTextBoxes, IDLE_INTERACTION, updateImageInteraction, updateInteraction } from "./meme-maker-interaction";
 import type { MemeTextBox, TextBoxMeasurement } from "./meme-renderer";
 
 const box = (id: string, overrides: Partial<MemeTextBox> = {}): MemeTextBox => ({
@@ -8,6 +8,34 @@ const box = (id: string, overrides: Partial<MemeTextBox> = {}): MemeTextBox => (
   fontWeight: "heavy", lineHeight: 1.15, letterSpacing: 0, backgroundEnabled: false, backgroundColor: "#000000",
   backgroundOpacity: .7, backgroundPadding: 12, backgroundRadius: 8, shadowEnabled: false, shadowColor: "#000000",
   shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2, ...overrides,
+});
+
+describe("image layer interaction", () => {
+  const layer = { id: "image", sourceId: "source", frameX: 50, frameY: 50, frameWidth: 40, frameHeight: 30, contentX: 55, contentY: 45, contentScale: .6, opacity: 1 };
+
+  it("moves frame and content together with center snap in object mode", () => {
+    expect(updateImageInteraction(beginImageInteraction("moving", layer, { x: 0, y: 0 }), { x: 9, y: 10 }, 100, 100)).toEqual(expect.objectContaining({ frameX: 59, frameY: 60, contentX: 64, contentY: 55 }));
+    expect(updateImageInteraction(beginImageInteraction("moving", { ...layer, frameX: 48 }, { x: 0, y: 0 }), { x: 1, y: 0 }, 100, 100)).toEqual(expect.objectContaining({ frameX: 50, contentX: 57 }));
+  });
+
+  it("pans only content in crop mode", () => {
+    const panned = updateImageInteraction(beginImageInteraction("cropping", layer, { x: 0, y: 0 }), { x: 25, y: -10 }, 100, 100);
+    expect(panned).toEqual(expect.objectContaining({ contentX: 80, contentY: 35 }));
+    expect(panned).toEqual(expect.objectContaining({ frameX: 50, frameY: 50, frameWidth: 40, frameHeight: 30, contentScale: .6 }));
+  });
+
+  it("moves only the frame through the crop-mode frame handle", () => {
+    const moved = updateImageInteraction(beginImageInteraction("moving-frame", layer, { x: 0, y: 0 }), { x: 10, y: -5 }, 100, 100);
+    expect(moved).toEqual(expect.objectContaining({ frameX: 60, frameY: 45, contentX: 55, contentY: 45, contentScale: .6 }));
+  });
+
+  it("freely resizes only the frame from corners with a minimum size", () => {
+    const resized = updateImageInteraction(beginImageInteraction("resizing", layer, { x: 0, y: 0 }, "se"), { x: 10, y: 20 }, 100, 100);
+    expect(resized).toEqual(expect.objectContaining({ frameX: 55, frameY: 60, frameWidth: 50, frameHeight: 50, contentX: 55, contentY: 45, contentScale: .6 }));
+    const minimum = updateImageInteraction(beginImageInteraction("resizing", layer, { x: 0, y: 0 }, "nw"), { x: 100, y: 100 }, 100, 100);
+    expect(minimum?.frameWidth).toBe(5);
+    expect(minimum?.frameHeight).toBe(5);
+  });
 });
 const measurement = (left: number, top: number, right: number, bottom: number): TextBoxMeasurement => ({
   lines: ["x"], lineHeight: 20, anchorX: 0, centerY: 0,

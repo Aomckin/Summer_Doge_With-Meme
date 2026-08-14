@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { drawTextBox, measureTextBox, renderMemeCanvas, wrapTextBoxText, type MemeTextBox } from "./meme-renderer";
+import { drawImageLayer, drawTextBox, measureTextBox, renderMemeCanvas, wrapTextBoxText, type MemeTextBox } from "./meme-renderer";
+import type { MemeImageLayer, MemeImageSource } from "./meme-image-layer";
 
 function context() {
   return {
     save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
-    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
+    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(), rect: vi.fn(), clip: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: [...text].length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
     globalAlpha: 1, shadowColor: "", shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0,
@@ -29,6 +30,34 @@ describe("TextBox renderer", () => {
     expect(ctx.fillText).toHaveBeenNthCalledWith(2, "World", 400, 300);
     expect([...measurements.keys()]).toEqual(["one", "two"]);
     expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);
+  });
+
+  it("clips image layers, renders them in array order below text, and restores alpha", () => {
+    const ctx = context();
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => ctx) } as unknown as HTMLCanvasElement;
+    const source = { id: "source", type: "local", image: { image: true } as unknown as CanvasImageSource, naturalWidth: 400, naturalHeight: 200, filename: "one.png" } satisfies MemeImageSource;
+    const layers: MemeImageLayer[] = [
+      { id: "a", sourceId: source.id, frameX: 50, frameY: 50, frameWidth: 50, frameHeight: 50, contentX: 50, contentY: 50, contentScale: .5, opacity: .5 },
+      { id: "b", sourceId: source.id, frameX: 25, frameY: 25, frameWidth: 20, frameHeight: 20, contentX: 25, contentY: 25, contentScale: .2, opacity: 1 },
+    ];
+    renderMemeCanvas(canvas, {} as CanvasImageSource, [box({ text: "Top" })], 800, 600, undefined, layers, new Map([[source.id, source]]));
+    expect(ctx.clip).toHaveBeenCalledTimes(2);
+    expect(ctx.drawImage).toHaveBeenCalledTimes(3);
+    const drawOrder = vi.mocked(ctx.drawImage).mock.invocationCallOrder;
+    const textOrder = vi.mocked(ctx.fillText).mock.invocationCallOrder;
+    expect(Math.max(...drawOrder)).toBeLessThan(Math.min(...textOrder));
+    expect(ctx.restore).toHaveBeenCalledTimes(3);
+  });
+
+  it("can hide the background without hiding image layers", () => {
+    const ctx = context();
+    const source = { id: "source", type: "local", image: {} as CanvasImageSource, naturalWidth: 100, naturalHeight: 100, filename: "one.png" } satisfies MemeImageSource;
+    const layer = { id: "a", sourceId: source.id, frameX: 50, frameY: 50, frameWidth: 50, frameHeight: 50, contentX: 50, contentY: 50, contentScale: .5, opacity: 1 } satisfies MemeImageLayer;
+    drawImageLayer(ctx, layer, source, 100, 100);
+    expect(ctx.drawImage).toHaveBeenCalledTimes(1);
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => ctx) } as unknown as HTMLCanvasElement;
+    renderMemeCanvas(canvas, {} as CanvasImageSource, [], 100, 100, undefined, [layer], new Map([[source.id, source]]), false);
+    expect(ctx.drawImage).toHaveBeenCalledTimes(2);
   });
 
   it("uses the same transformed background rectangle as the output canvas", () => {

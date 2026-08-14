@@ -32,7 +32,7 @@ function setup(overrides: Partial<MemeMakerApi> = {}) {
   document.body.innerHTML = '<button data-trigger type="button">open</button>';
   const context = {
     save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
-    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
+    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(), rect: vi.fn(), clip: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
     globalAlpha: 1, shadowColor: "", shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0,
@@ -71,9 +71,23 @@ function type(dialog: HTMLDialogElement, name: string, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function changeControl(dialog: HTMLDialogElement, name: string, value: string) {
+  const input = dialog.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+  input.focus(); input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  input.blur();
+}
+
 function localFile(dialog: HTMLDialogElement, file: File) {
   const input = dialog.querySelector<HTMLInputElement>('[name="local_image"]')!;
   Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function imageFiles(dialog: HTMLDialogElement, files: File[]) {
+  const input = dialog.querySelector<HTMLInputElement>('[name="image_layers"]')!;
+  Object.defineProperty(input, "files", { configurable: true, value: files });
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
@@ -107,6 +121,115 @@ describe("Meme Maker controller", () => {
     expect(loadImage).toHaveBeenCalledWith(staticTemplate.reference_image_url);
     expect(context.drawImage).toHaveBeenCalled();
     expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("800 × 600 PNG");
+  });
+
+  it("imports multiple static image layers, rejects GIF independently, and disposes session sources on close", async () => {
+    const { dialog, loaded } = setup(); await choose(dialog);
+    imageFiles(dialog, [new File(["png"], "one.png", { type: "image/png" }), new File(["gif"], "bad.gif", { type: "image/gif" }), new File(["jpg"], "two.jpg", { type: "image/jpeg" })]);
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2));
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("GIF 图片层暂不支持");
+    expect(dialog.querySelector("[data-selected-image-layer]")).not.toBeNull();
+    dialog.querySelector<HTMLButtonElement>("[data-close-maker]")!.click();
+    expect(loaded.dispose).toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("caps one batch at 30 image layers with unique layer identities", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    imageFiles(dialog, Array.from({ length: 31 }, (_, index) => new File(["png"], `${index}.png`, { type: "image/png" })));
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(30));
+    const ids = [...dialog.querySelectorAll<HTMLElement>("[data-image-layer-id]")].map(item => item.dataset.imageLayerId);
+    expect(new Set(ids).size).toBe(30);
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_layers"]')?.disabled).toBe(true);
+    expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("上限");
+  });
+
+  it("creates a background layer, edits crop and opacity, clones/reorders/deletes, and restores through history", async () => {
+    const { dialog, context } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    type(dialog, "image_width", "55"); type(dialog, "image_height", "35"); type(dialog, "image_crop_scale", "180"); type(dialog, "image_crop_x", "12"); type(dialog, "image_opacity", "45");
+    await vi.waitFor(() => expect(context.clip).toHaveBeenCalled());
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
+    dialog.querySelector<HTMLButtonElement>("[data-image-fit]")!.click();
+    expect(Number(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value)).toBeLessThanOrEqual(100);
+    dialog.querySelector<HTMLButtonElement>("[data-clone-image-layer]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2);
+    dialog.querySelector<HTMLButtonElement>("[data-image-layer-down]")!.click();
+    dialog.querySelectorAll<HTMLButtonElement>("[data-delete-image-layer]")[0].click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2);
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click(); expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2);
+    const visible = dialog.querySelector<HTMLInputElement>('[name="background_visible"]')!; visible.checked = false; visible.dispatchEvent(new Event("change", { bubbles: true }));
+    vi.mocked(context.drawImage).mockClear(); type(dialog, "box_text", "Always above"); await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalledTimes(2));
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); expect(visible.checked).toBe(true);
+  });
+
+  it("keeps frame and content independent and records frame move, resize, pan and zoom as separate history steps", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    const cropMode = dialog.querySelector<HTMLInputElement>('[name="image_crop_mode"]')!;
+    cropMode.checked = true; cropMode.dispatchEvent(new Event("change", { bubbles: true }));
+
+    changeControl(dialog, "image_x", "60");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
+    changeControl(dialog, "image_width", "55");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
+    changeControl(dialog, "image_crop_x", "70");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("60");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
+    changeControl(dialog, "image_crop_scale", "80");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("60");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
+
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("70");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("40");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("50");
+  });
+
+  it("uses the identical independent frame and content transform for preview and export", async () => {
+    const { dialog, context } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    const cropMode = dialog.querySelector<HTMLInputElement>('[name="image_crop_mode"]')!;
+    cropMode.checked = true; cropMode.dispatchEvent(new Event("change", { bubbles: true }));
+    changeControl(dialog, "image_x", "65"); changeControl(dialog, "image_y", "40");
+    changeControl(dialog, "image_width", "35"); changeControl(dialog, "image_height", "60");
+    changeControl(dialog, "image_crop_x", "30"); changeControl(dialog, "image_crop_y", "70"); changeControl(dialog, "image_crop_scale", "85");
+    await vi.waitFor(() => expect(context.clip).toHaveBeenCalled());
+    const previewDraw = vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1);
+    const previewClip = vi.mocked(context.rect).mock.calls.at(-1);
+    vi.mocked(context.drawImage).mockClear(); vi.mocked(context.rect).mockClear();
+    dialog.querySelector<HTMLButtonElement>("[data-export-maker]")!.click();
+    await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalled());
+    expect(vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1)).toEqual(previewDraw);
+    expect(vi.mocked(context.rect).mock.calls.at(-1)).toEqual(previewClip);
+  });
+
+  it("accepts clipboard and canvas-drop images while leaving text-only paste alone", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [new File(["png"], "clip.png", { type: "image/png" })] } });
+    dialog.dispatchEvent(paste);
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    const textPaste = new Event("paste", { bubbles: true, cancelable: true }); Object.defineProperty(textPaste, "clipboardData", { value: { files: [] } });
+    dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')!.dispatchEvent(textPaste); expect(textPaste.defaultPrevented).toBe(false);
+    const overlay = dialog.querySelector<HTMLElement>("[data-maker-overlay]")!;
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { dataTransfer: { value: { files: [new File(["webp"], "drop.webp", { type: "image/webp" })] } }, clientX: { value: 400 }, clientY: { value: 300 } });
+    overlay.dispatchEvent(drop);
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2));
+    expect(drop.defaultPrevented).toBe(true);
   });
 
   it("updates selected text box properties and schedules preview without API calls", async () => {

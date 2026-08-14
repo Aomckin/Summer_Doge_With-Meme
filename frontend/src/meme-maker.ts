@@ -6,10 +6,15 @@ import {
 } from "./meme-renderer";
 import {
   beginInteraction,
+  beginImageInteraction,
   clientToCanvasPoint,
   hitTestTextBoxes,
+  IDLE_IMAGE_INTERACTION,
   IDLE_INTERACTION,
+  updateImageInteraction,
   updateInteraction,
+  type ImageInteractionState,
+  type ImageResizeHandle,
   type InteractionState,
 } from "./meme-maker-interaction";
 import type { MemeResponse, TemplateResponse, UploadMemeInput } from "./types";
@@ -21,6 +26,14 @@ import {
   type MemeAspectPreset,
   type MemeCanvasState,
 } from "./meme-background";
+import {
+  applyImageLayerMode,
+  calculateImageLayerFrame,
+  createDefaultImageLayer,
+  hitTestImageLayers,
+  type MemeImageLayer,
+  type MemeImageSource,
+} from "./meme-image-layer";
 
 interface LoadedTemplateImage {
   source: CanvasImageSource;
@@ -47,6 +60,8 @@ export interface MemeMakerOptions {
 
 const staticMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_TEXT_BOXES = 20;
+const MAX_IMAGE_LAYERS = 30;
+const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024;
 type BackgroundInteraction =
   | { type: "idle" }
   | { type: "dragging"; startX: number; startY: number; originalX: number; originalY: number };
@@ -90,6 +105,8 @@ function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 let nextTextBoxId = 0;
+let nextImageLayerId = 0;
+let nextImageSourceId = 0;
 function createTextBox(fontSize: number, yPercent = 50): MemeTextBox {
   nextTextBoxId += 1;
   return {
@@ -127,7 +144,9 @@ export class MemeMakerController {
   private readonly form: HTMLFormElement;
   private readonly templateSelect: HTMLSelectElement;
   private readonly list: HTMLElement;
+  private readonly imageLayerList: HTMLElement;
   private readonly properties: HTMLFieldSetElement;
+  private readonly imageLayerProperties: HTMLFieldSetElement;
   private readonly notice: HTMLElement;
   private readonly exportButton: HTMLButtonElement;
   private readonly saveButton: HTMLButtonElement;
@@ -135,9 +154,15 @@ export class MemeMakerController {
   private image: LoadedTemplateImage | null = null;
   private background: MakerBackground | null = null;
   private textBoxes: MemeTextBox[] = [];
+  private imageLayers: MemeImageLayer[] = [];
+  private readonly imageSources = new Map<string, MemeImageSource>();
   private selectedTextBoxId: string | null = null;
+  private selectedImageLayerId: string | null = null;
+  private cropModeImageLayerId: string | null = null;
+  private backgroundVisible = true;
   private measurements = new Map<string, TextBoxMeasurement>();
   private interaction: InteractionState = IDLE_INTERACTION;
+  private imageInteraction: ImageInteractionState = IDLE_IMAGE_INTERACTION;
   private backgroundInteraction: BackgroundInteraction = { type: "idle" };
   private canvasState: MemeCanvasState = {
     aspectPreset: "original", outputWidth: 0, outputHeight: 0,
@@ -186,6 +211,7 @@ export class MemeMakerController {
               <label data-local-source hidden><span>本地图片</span><input name="local_image" type="file" accept="image/png,image/jpeg,image/webp"></label>
             </fieldset>
             <fieldset class="background-framing" data-background-framing disabled><legend>底图取景</legend>
+              <label class="maker-check"><input name="background_visible" type="checkbox" checked> 显示底图</label>
               <div class="maker-ratio-control" role="group" aria-label="输出比例">
                 <span>输出比例</span>
                 <div>${(["original", "1:1", "4:3", "3:4", "16:9"] as const).map(preset => `<button class="button button-secondary" type="button" data-aspect-preset="${preset}">${preset === "original" ? "原图" : preset}</button>`).join("")}</div>
@@ -203,7 +229,37 @@ export class MemeMakerController {
                 <button class="button button-secondary" type="button" data-background-fit>适应画布</button>
                 <button class="button button-secondary" type="button" data-background-fill>填满画布</button>
                 <button class="button button-ghost" type="button" data-background-reset>重置底图</button>
+                <button class="button button-secondary" type="button" data-background-to-layer>从底图创建图片层</button>
               </div>
+            </fieldset>
+            <section class="image-layer-manager" aria-labelledby="image-layer-list-title">
+              <div class="text-box-manager-heading"><strong id="image-layer-list-title">图片层</strong><span data-image-layer-count>0 / ${MAX_IMAGE_LAYERS}</span></div>
+              <div class="text-box-list image-layer-list" data-image-layer-list role="listbox" aria-label="图片层列表"></div>
+              <div class="text-box-actions">
+                <label class="button button-secondary maker-file-button">+ 添加图片<input name="image_layers" type="file" multiple accept="image/png,image/jpeg,image/webp" hidden></label>
+                <button class="button button-ghost" type="button" data-delete-image-layer>删除当前图片层</button>
+              </div>
+            </section>
+            <fieldset class="image-layer-properties" data-image-layer-properties disabled>
+              <legend>当前图片层属性</legend>
+              <details class="maker-style-group" open><summary>几何</summary>
+                ${this.rangeMarkup("image_x", "Frame X", 0, 100, "%", ".1")}
+                ${this.rangeMarkup("image_y", "Frame Y", 0, 100, "%", ".1")}
+                ${this.rangeMarkup("image_width", "Frame 宽度", 5, 100, "%", ".1")}
+                ${this.rangeMarkup("image_height", "Frame 高度", 5, 100, "%", ".1")}
+              </details>
+              <details class="maker-style-group" open><summary>裁切</summary>
+                ${this.rangeMarkup("image_crop_scale", "Content 缩放", 10, 500, "%", ".1")}
+                ${this.rangeMarkup("image_crop_x", "Content X", -500, 500, "%", ".1")}
+                ${this.rangeMarkup("image_crop_y", "Content Y", -500, 500, "%", ".1")}
+                <label class="maker-check"><input name="image_crop_mode" type="checkbox"> 调整裁切（拖动图片内容）</label>
+                <div class="background-framing-actions"><button class="button button-secondary" type="button" data-image-fit>适应框</button><button class="button button-secondary" type="button" data-image-fill>填满框</button><button class="button button-ghost" type="button" data-image-reset-crop>重置裁切</button></div>
+              </details>
+              <details class="maker-style-group"><summary>操作</summary>
+                ${this.rangeMarkup("image_opacity", "透明度", 0, 100, "%", "1")}
+                <label><span>替换图片</span><input name="replace_image_layer" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <div class="text-box-property-actions"><button class="button button-secondary" type="button" data-clone-image-layer>复制图片层</button><button class="button button-secondary" type="button" data-image-layer-down>下移一层</button><button class="button button-secondary" type="button" data-image-layer-up>上移一层</button><button class="button button-ghost" type="button" data-delete-image-layer>删除图片层</button></div>
+              </details>
             </fieldset>
             <section class="text-box-manager" aria-labelledby="text-box-list-title">
               <div class="text-box-manager-heading"><strong id="text-box-list-title">文本框</strong><span data-box-count>0 / ${MAX_TEXT_BOXES}</span></div>
@@ -261,7 +317,7 @@ export class MemeMakerController {
               <p data-preview-placeholder>请选择一个静态参考图模板</p>
             </div>
             <small data-resolution>导出将保留模板参考图的原始分辨率</small>
-            <small>拖动文本框调整位置；拖动画布空白区域移动底图；左右控制点调整文本宽度。</small>
+            <small>文字优先选中；图片层可移动、自由 Resize，开启“调整裁切”后拖动图片内容。也可拖入或粘贴静态图片。</small>
           </section>
         </div>
         <div class="meme-maker-output">
@@ -279,7 +335,9 @@ export class MemeMakerController {
     this.overlay = this.required("[data-maker-overlay]");
     this.templateSelect = this.required('[name="template_id"]');
     this.list = this.required("[data-text-box-list]");
+    this.imageLayerList = this.required("[data-image-layer-list]");
     this.properties = this.required("[data-text-box-properties]");
+    this.imageLayerProperties = this.required("[data-image-layer-properties]");
     this.notice = this.required("[data-maker-notice]");
     this.exportButton = this.required("[data-export-maker]");
     this.saveButton = this.required("[data-save-maker]");
@@ -300,7 +358,9 @@ export class MemeMakerController {
     if (this.renderFrame !== null) this.cancelFrame(this.renderFrame);
     this.renderFrame = null;
     this.interaction = IDLE_INTERACTION;
+    this.imageInteraction = IDLE_IMAGE_INTERACTION;
     this.backgroundInteraction = { type: "idle" };
+    this.disposeImageSources();
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     if (this.dialog.open) this.dialog.close();
   }
@@ -340,6 +400,11 @@ export class MemeMakerController {
     this.dialog.querySelector("[data-background-fit]")?.addEventListener("click", () => this.applyBackgroundMode("fit"));
     this.dialog.querySelector("[data-background-fill]")?.addEventListener("click", () => this.applyBackgroundMode("fill"));
     this.dialog.querySelector("[data-background-reset]")?.addEventListener("click", () => this.applyBackgroundMode("fill"));
+    this.dialog.querySelector("[data-background-to-layer]")?.addEventListener("click", () => void this.addBackgroundAsImageLayer());
+    this.dialog.querySelector<HTMLInputElement>('[name="background_visible"]')?.addEventListener("change", event => {
+      const before = this.captureHistory(); this.backgroundVisible = (event.currentTarget as HTMLInputElement).checked;
+      this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+    });
     const framing = this.required<HTMLFieldSetElement>("[data-background-framing]");
     framing.addEventListener("focusin", event => this.beginControlHistory(event.target));
     framing.addEventListener("input", event => this.updateBackgroundFromForm(event.target));
@@ -350,6 +415,30 @@ export class MemeMakerController {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-text-box-id]");
       if (button?.dataset.textBoxId) this.selectTextBox(button.dataset.textBoxId);
     });
+    this.imageLayerList.addEventListener("click", event => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-image-layer-id]");
+      if (button?.dataset.imageLayerId) this.selectImageLayer(button.dataset.imageLayerId);
+    });
+    this.dialog.querySelector<HTMLInputElement>('[name="image_layers"]')?.addEventListener("change", event => {
+      const input = event.currentTarget as HTMLInputElement;
+      if (input.files?.length) void this.addImageFiles([...input.files]);
+      input.value = "";
+    });
+    this.dialog.querySelector<HTMLInputElement>('[name="replace_image_layer"]')?.addEventListener("change", event => {
+      const input = event.currentTarget as HTMLInputElement;
+      const file = input.files?.[0]; if (file) void this.replaceSelectedImageSource(file); input.value = "";
+    });
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-delete-image-layer]")) button.addEventListener("click", () => this.deleteSelectedImageLayer());
+    this.dialog.querySelector("[data-clone-image-layer]")?.addEventListener("click", () => this.cloneSelectedImageLayer());
+    this.dialog.querySelector("[data-image-layer-up]")?.addEventListener("click", () => this.moveSelectedImageLayer(1));
+    this.dialog.querySelector("[data-image-layer-down]")?.addEventListener("click", () => this.moveSelectedImageLayer(-1));
+    this.dialog.querySelector("[data-image-fit]")?.addEventListener("click", () => this.applySelectedImageMode("fit"));
+    this.dialog.querySelector("[data-image-fill]")?.addEventListener("click", () => this.applySelectedImageMode("fill"));
+    this.dialog.querySelector("[data-image-reset-crop]")?.addEventListener("click", () => this.applySelectedImageMode("fill"));
+    this.imageLayerProperties.addEventListener("focusin", event => this.beginControlHistory(event.target));
+    this.imageLayerProperties.addEventListener("input", event => this.updateSelectedImageFromForm(event.target));
+    this.imageLayerProperties.addEventListener("change", event => this.updateSelectedImageFromForm(event.target, true));
+    this.imageLayerProperties.addEventListener("focusout", event => this.commitImageControlHistory(event.target));
     this.properties.addEventListener("focusin", event => this.beginControlHistory(event.target));
     this.properties.addEventListener("input", event => this.updateSelectedFromForm(event.target));
     this.properties.addEventListener("change", event => { this.updateSelectedFromForm(event.target, true); });
@@ -363,6 +452,19 @@ export class MemeMakerController {
     this.overlay.addEventListener("pointermove", event => this.pointerMove(event));
     this.overlay.addEventListener("pointerup", event => this.pointerUp(event));
     this.overlay.addEventListener("pointercancel", event => this.pointerUp(event));
+    this.overlay.addEventListener("dragover", event => { if ([...event.dataTransfer?.items ?? []].some(item => item.kind === "file")) event.preventDefault(); });
+    this.overlay.addEventListener("drop", event => {
+      const files = [...event.dataTransfer?.files ?? []];
+      if (!files.length) return;
+      event.preventDefault();
+      const point = this.eventPoint(event as unknown as PointerEvent);
+      void this.addImageFiles(files, { xPercent: point.x / Math.max(1, this.canvas.width) * 100, yPercent: point.y / Math.max(1, this.canvas.height) * 100 });
+    });
+    this.dialog.addEventListener("paste", event => {
+      const files = [...event.clipboardData?.files ?? []].filter(file => file.type.startsWith("image/"));
+      if (!files.length) return;
+      event.preventDefault(); void this.addImageFiles(files);
+    });
     this.dialog.addEventListener("keydown", event => this.handleShortcut(event));
     this.exportButton.addEventListener("click", () => void this.exportPng());
     this.saveButton.addEventListener("click", () => void this.save());
@@ -466,6 +568,161 @@ export class MemeMakerController {
     }
   }
 
+  private async loadImageSource(file: File, type: MemeImageSource["type"] = "local"): Promise<MemeImageSource> {
+    if (file.type === "image/gif") throw new Error("GIF 图片层暂不支持，请使用静态图片。");
+    if (!staticMimeTypes.has(file.type)) throw new Error(`${file.name || "文件"} 不是支持的 PNG、JPEG 或 WEBP 图片。`);
+    if (file.size > MAX_IMAGE_FILE_BYTES) throw new Error(`${file.name} 过大，请使用小于 50 MiB 的图片。`);
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const loaded = await this.loadImage(objectUrl);
+      if (!loaded.width || !loaded.height) { loaded.dispose(); throw new Error(`${file.name} 的图片尺寸无效。`); }
+      nextImageSourceId += 1;
+      return {
+        id: `image-source-${nextImageSourceId}`, type, image: loaded.source,
+        naturalWidth: loaded.width, naturalHeight: loaded.height, filename: file.name || "粘贴图片",
+        dispose: () => { loaded.dispose(); URL.revokeObjectURL(objectUrl); },
+      };
+    } catch (error) {
+      URL.revokeObjectURL(objectUrl);
+      throw error;
+    }
+  }
+
+  private async loadBackgroundImageSource(): Promise<MemeImageSource> {
+    if (!this.background || !this.image) throw new Error("请先加载底图。");
+    let loaded: LoadedTemplateImage;
+    let filename: string;
+    let outerObjectUrl: string | null = null;
+    if (this.background.type === "local") {
+      outerObjectUrl = URL.createObjectURL(this.background.file);
+      try { loaded = await this.loadImage(outerObjectUrl); }
+      catch (error) { URL.revokeObjectURL(outerObjectUrl); throw error; }
+      filename = `[底图副本] ${this.background.file.name}`;
+    } else {
+      const template = this.selectedTemplate();
+      if (!template?.reference_image_url) throw new Error("当前模板参考图不可用。");
+      loaded = await this.loadImage(template.reference_image_url);
+      filename = `[底图副本] ${this.background.name}`;
+    }
+    nextImageSourceId += 1;
+    return {
+      id: `image-source-${nextImageSourceId}`, type: "background", image: loaded.source,
+      naturalWidth: loaded.width, naturalHeight: loaded.height, filename,
+      dispose: () => { loaded.dispose(); if (outerObjectUrl) URL.revokeObjectURL(outerObjectUrl); },
+    };
+  }
+
+  private appendImageLayer(source: MemeImageSource, offset = 0, center?: { xPercent: number; yPercent: number }): MemeImageLayer {
+    this.imageSources.set(source.id, source);
+    nextImageLayerId += 1;
+    const layer = createDefaultImageLayer(`image-layer-${nextImageLayerId}`, source, this.canvas.width || this.canvasState.outputWidth, this.canvas.height || this.canvasState.outputHeight, offset);
+    if (center) {
+      const frameX = Math.min(100 - layer.frameWidth / 2, Math.max(layer.frameWidth / 2, center.xPercent + offset));
+      const frameY = Math.min(100 - layer.frameHeight / 2, Math.max(layer.frameHeight / 2, center.yPercent + offset));
+      layer.contentX += frameX - layer.frameX; layer.contentY += frameY - layer.frameY;
+      layer.frameX = frameX; layer.frameY = frameY;
+    }
+    this.imageLayers.push(layer);
+    return layer;
+  }
+
+  private async addImageFiles(files: File[], center?: { xPercent: number; yPercent: number }): Promise<void> {
+    if (!this.image) { this.setNotice("请先加载底图，再添加图片层。", true); return; }
+    const available = MAX_IMAGE_LAYERS - this.imageLayers.length;
+    if (available <= 0) { this.setNotice(`最多只能添加 ${MAX_IMAGE_LAYERS} 个图片层。`, true); return; }
+    const before = this.captureHistory();
+    const generation = this.loadGeneration;
+    const errors: string[] = [];
+    let added = 0;
+    for (const file of files.slice(0, available)) {
+      try {
+        const source = await this.loadImageSource(file);
+        if (generation !== this.loadGeneration || !this.dialog.open) { source.dispose?.(); break; }
+        const layer = this.appendImageLayer(source, added * 2.5, center);
+        this.selectedImageLayerId = layer.id; this.selectedTextBoxId = null; added += 1;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : `${file.name} 无法解码。`);
+      }
+    }
+    if (files.length > available) errors.push(`已达到 ${MAX_IMAGE_LAYERS} 个图片层上限。`);
+    if (added) {
+      this.history.record(before, this.captureHistory()); this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+    }
+    this.setNotice(errors.length ? `${added ? `已添加 ${added} 张。` : ""}${errors.join(" ")}` : `已添加 ${added} 张图片。`, errors.length > 0);
+  }
+
+  private async addBackgroundAsImageLayer(): Promise<void> {
+    if (!this.image || !this.background) { this.setNotice("请先加载底图。", true); return; }
+    if (this.imageLayers.length >= MAX_IMAGE_LAYERS) { this.setNotice(`最多只能添加 ${MAX_IMAGE_LAYERS} 个图片层。`, true); return; }
+    const before = this.captureHistory();
+    const generation = this.loadGeneration;
+    try {
+      const source = await this.loadBackgroundImageSource();
+      if (generation !== this.loadGeneration || !this.dialog.open) { source.dispose?.(); return; }
+      const layer = this.appendImageLayer(source, this.imageLayers.length ? 2.5 : 0);
+      this.selectedImageLayerId = layer.id; this.selectedTextBoxId = null;
+      this.history.record(before, this.captureHistory()); this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+      this.setNotice("已从底图创建独立图片层。", false);
+    } catch { this.setNotice("底图副本加载失败，请重试。", true); }
+  }
+
+  private async replaceSelectedImageSource(file: File): Promise<void> {
+    const layer = this.selectedImageLayer(); if (!layer) return;
+    const before = this.captureHistory();
+    const generation = this.loadGeneration;
+    try {
+      const source = await this.loadImageSource(file);
+      if (generation !== this.loadGeneration || !this.dialog.open || !this.imageLayers.includes(layer)) { source.dispose?.(); return; }
+      this.imageSources.set(source.id, source);
+      layer.sourceId = source.id;
+      this.history.record(before, this.captureHistory()); this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+      this.setNotice("图片层来源已替换，Frame 保持不变。", false);
+    } catch (error) { this.setNotice(error instanceof Error ? error.message : "替换图片失败。", true); }
+  }
+
+  private selectImageLayer(id: string | null): void {
+    this.selectedImageLayerId = id && this.imageLayers.some(layer => layer.id === id) ? id : null;
+    if (this.selectedImageLayerId) this.selectedTextBoxId = null;
+    if (this.cropModeImageLayerId && this.cropModeImageLayerId !== this.selectedImageLayerId) this.cropModeImageLayerId = null;
+    this.updateUi(); this.updateOverlay();
+  }
+
+  private cloneSelectedImageLayer(): void {
+    const selected = this.selectedImageLayer();
+    if (!selected || this.imageLayers.length >= MAX_IMAGE_LAYERS) return;
+    const before = this.captureHistory(); nextImageLayerId += 1;
+    const frameX = Math.min(100 - selected.frameWidth / 2, selected.frameX + 3);
+    const frameY = Math.min(100 - selected.frameHeight / 2, selected.frameY + 3);
+    const clone = {
+      ...selected, id: `image-layer-${nextImageLayerId}`, frameX, frameY,
+      contentX: selected.contentX + frameX - selected.frameX,
+      contentY: selected.contentY + frameY - selected.frameY,
+    };
+    this.imageLayers.push(clone); this.selectedImageLayerId = clone.id;
+    this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+  }
+
+  private deleteSelectedImageLayer(): void {
+    const index = this.imageLayers.findIndex(layer => layer.id === this.selectedImageLayerId); if (index < 0) return;
+    const before = this.captureHistory(); this.imageLayers.splice(index, 1); this.selectedImageLayerId = null; this.cropModeImageLayerId = null;
+    this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+  }
+
+  private moveSelectedImageLayer(direction: -1 | 1): void {
+    const index = this.imageLayers.findIndex(layer => layer.id === this.selectedImageLayerId); const target = index + direction;
+    if (index < 0 || target < 0 || target >= this.imageLayers.length) return;
+    const before = this.captureHistory(); [this.imageLayers[index], this.imageLayers[target]] = [this.imageLayers[target], this.imageLayers[index]];
+    this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+  }
+
+  private applySelectedImageMode(mode: "fit" | "fill"): void {
+    const layer = this.selectedImageLayer(); const source = layer ? this.imageSources.get(layer.sourceId) : null;
+    if (!layer || !source) return;
+    const before = this.captureHistory(); const index = this.imageLayers.indexOf(layer);
+    this.imageLayers[index] = applyImageLayerMode(layer, source, this.canvasState.outputWidth, this.canvasState.outputHeight, mode);
+    this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+  }
+
   private addTextBox(): void {
     if (!this.image) { this.setNotice("请先选择一个可制作的模板。", true); return; }
     if (this.textBoxes.length >= MAX_TEXT_BOXES) { this.setNotice(`最多添加 ${MAX_TEXT_BOXES} 个文本框。`, true); return; }
@@ -536,8 +793,45 @@ export class MemeMakerController {
 
   private selectTextBox(id: string | null): void {
     this.selectedTextBoxId = id && this.textBoxes.some(box => box.id === id) ? id : null;
+    if (this.selectedTextBoxId) { this.selectedImageLayerId = null; this.cropModeImageLayerId = null; }
     this.updateUi();
     this.updateOverlay();
+  }
+
+  private updateSelectedImageFromForm(target?: EventTarget | null, commit = false): void {
+    const layer = this.selectedImageLayer(); if (!layer) return;
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      if (!target.value.trim() || !Number.isFinite(Number(target.value))) return;
+      const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
+      if (range instanceof HTMLInputElement) range.value = target.value;
+    }
+    const originalFrameX = layer.frameX; const originalFrameY = layer.frameY;
+    layer.frameWidth = this.numberInput("image_width", 5, 100);
+    layer.frameHeight = this.numberInput("image_height", 5, 100);
+    layer.frameX = Math.min(100 - layer.frameWidth / 2, Math.max(layer.frameWidth / 2, this.numberInput("image_x", 0, 100)));
+    layer.frameY = Math.min(100 - layer.frameHeight / 2, Math.max(layer.frameHeight / 2, this.numberInput("image_y", 0, 100)));
+    const fieldName = target instanceof HTMLInputElement ? target.name.replace(/_number$/u, "") : "";
+    layer.contentX = this.numberInput("image_crop_x", -500, 500);
+    layer.contentY = this.numberInput("image_crop_y", -500, 500);
+    if (this.cropModeImageLayerId !== layer.id) {
+      if (fieldName === "image_x") layer.contentX += layer.frameX - originalFrameX;
+      if (fieldName === "image_y") layer.contentY += layer.frameY - originalFrameY;
+    }
+    layer.contentScale = this.numberInput("image_crop_scale", 10, 500) / 100;
+    layer.opacity = this.numberInput("image_opacity", 0, 100) / 100;
+    this.cropModeImageLayerId = this.checkedInput("image_crop_mode") ? layer.id : null;
+    this.updateUi(); this.scheduleRender(); if (commit) this.commitHistory();
+  }
+
+  private commitImageControlHistory(target: EventTarget | null): void {
+    if (target instanceof HTMLInputElement && target.type === "number") {
+      const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
+      if (range instanceof HTMLInputElement) {
+        const parsed = Number(target.value); const value = target.value.trim() && Number.isFinite(parsed) ? Math.min(Number(range.max), Math.max(Number(range.min), parsed)) : Number(range.value);
+        range.value = String(value); target.value = String(value); this.updateSelectedImageFromForm(range);
+      }
+    }
+    this.commitHistory();
   }
 
   private updateSelectedFromForm(target?: EventTarget | null, commit = false): void {
@@ -664,29 +958,35 @@ export class MemeMakerController {
     if (!this.image) return;
     const target = event.target as HTMLElement;
     const handle = target.closest<HTMLElement>("[data-resize-handle]");
+    const imageHandle = target.closest<HTMLElement>("[data-image-resize-handle]");
+    const imageFrameMove = target.closest<HTMLElement>("[data-image-frame-move]");
     const point = this.eventPoint(event);
-    const id = handle
+    const id = imageHandle || imageFrameMove ? null : handle
       ? target.closest<HTMLElement>("[data-selected-box]")?.dataset.selectedBox ?? null
       : hitTestTextBoxes(this.textBoxes, this.measurements, point);
-    if (!id) {
-      this.selectTextBox(null);
+    if (id) {
+      this.selectTextBox(id); const box = this.selectedTextBox(); if (!box) return;
       this.beginHistory();
-      this.backgroundInteraction = {
-        type: "dragging", startX: event.clientX, startY: event.clientY,
-        originalX: this.canvasState.backgroundOffsetX, originalY: this.canvasState.backgroundOffsetY,
-      };
-      this.overlay.classList.add("is-dragging-background");
+      const type = handle?.dataset.resizeHandle === "left" ? "resizing-left" : handle?.dataset.resizeHandle === "right" ? "resizing-right" : "dragging";
+      this.interaction = beginInteraction(type, box, point);
       this.overlay.setPointerCapture?.(event.pointerId); event.preventDefault(); return;
     }
-    this.selectTextBox(id);
-    const box = this.selectedTextBox();
-    if (!box) return;
+    const imageId = imageHandle?.closest<HTMLElement>("[data-selected-image-layer]")?.dataset.selectedImageLayer
+      ?? imageFrameMove?.closest<HTMLElement>("[data-selected-image-layer]")?.dataset.selectedImageLayer
+      ?? hitTestImageLayers(this.imageLayers, point.x, point.y, this.canvas.width, this.canvas.height);
+    if (imageId) {
+      this.selectImageLayer(imageId); const layer = this.selectedImageLayer(); if (!layer) return;
+      this.beginHistory();
+      this.imageInteraction = imageHandle
+        ? beginImageInteraction("resizing", layer, point, imageHandle.dataset.imageResizeHandle as ImageResizeHandle)
+        : imageFrameMove ? beginImageInteraction("moving-frame", layer, point)
+        : beginImageInteraction(this.cropModeImageLayerId === layer.id ? "cropping" : "moving", layer, point);
+      this.overlay.setPointerCapture?.(event.pointerId); event.preventDefault(); return;
+    }
+    this.selectTextBox(null); this.selectImageLayer(null);
     this.beginHistory();
-    const type = handle?.dataset.resizeHandle === "left" ? "resizing-left"
-      : handle?.dataset.resizeHandle === "right" ? "resizing-right" : "dragging";
-    this.interaction = beginInteraction(type, box, point);
-    this.overlay.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
+    this.backgroundInteraction = { type: "dragging", startX: event.clientX, startY: event.clientY, originalX: this.canvasState.backgroundOffsetX, originalY: this.canvasState.backgroundOffsetY };
+    this.overlay.classList.add("is-dragging-background"); this.overlay.setPointerCapture?.(event.pointerId); event.preventDefault();
   }
 
   private pointerMove(event: PointerEvent): void {
@@ -696,6 +996,17 @@ export class MemeMakerController {
       this.canvasState.backgroundOffsetX = this.backgroundInteraction.originalX + (event.clientX - this.backgroundInteraction.startX) / Math.max(1, rect.width) * 100;
       this.canvasState.backgroundOffsetY = this.backgroundInteraction.originalY + (event.clientY - this.backgroundInteraction.startY) / Math.max(1, rect.height) * 100;
       this.updateUi(); this.scheduleRender(); event.preventDefault(); return;
+    }
+    if (this.imageInteraction.type !== "idle") {
+      const updated = updateImageInteraction(this.imageInteraction, this.eventPoint(event), this.canvas.width, this.canvas.height);
+      const index = updated ? this.imageLayers.findIndex(layer => layer.id === updated.id) : -1;
+      if (updated && index >= 0) {
+        this.imageLayers[index] = updated;
+        this.snapGuideX = (this.imageInteraction.type === "moving" || this.imageInteraction.type === "moving-frame") && updated.frameX === 50;
+        this.snapGuideY = (this.imageInteraction.type === "moving" || this.imageInteraction.type === "moving-frame") && updated.frameY === 50;
+        this.updateUi(); this.scheduleRender();
+      }
+      event.preventDefault(); return;
     }
     if (this.interaction.type === "idle") return;
     const updated = updateInteraction(this.interaction, this.eventPoint(event), this.image.width, this.image.height);
@@ -716,6 +1027,10 @@ export class MemeMakerController {
       this.overlay.classList.remove("is-dragging-background");
       this.commitHistory(); this.overlay.releasePointerCapture?.(event.pointerId); event.preventDefault(); return;
     }
+    if (this.imageInteraction.type !== "idle") {
+      this.imageInteraction = IDLE_IMAGE_INTERACTION; this.snapGuideX = false; this.snapGuideY = false;
+      this.commitHistory(); this.updateOverlay(); this.overlay.releasePointerCapture?.(event.pointerId); event.preventDefault(); return;
+    }
     if (this.interaction.type === "idle") return;
     this.interaction = IDLE_INTERACTION;
     this.snapGuideX = false; this.snapGuideY = false; this.commitHistory(); this.updateOverlay();
@@ -732,9 +1047,22 @@ export class MemeMakerController {
       event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); return;
     }
     if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); this.redo(); return; }
-    if (modifier && event.key.toLowerCase() === "d") { event.preventDefault(); this.cloneSelectedTextBox(); return; }
-    if (event.key === "Delete") { event.preventDefault(); this.deleteSelectedTextBox(); return; }
-    if (event.key === "Escape" && this.selectedTextBoxId) { event.preventDefault(); event.stopPropagation(); this.selectTextBox(null); return; }
+    if (modifier && event.key.toLowerCase() === "d") { event.preventDefault(); this.selectedImageLayerId ? this.cloneSelectedImageLayer() : this.cloneSelectedTextBox(); return; }
+    if (event.key === "Delete") { event.preventDefault(); this.selectedImageLayerId ? this.deleteSelectedImageLayer() : this.deleteSelectedTextBox(); return; }
+    if (event.key === "Escape" && this.cropModeImageLayerId) { event.preventDefault(); event.stopPropagation(); this.cropModeImageLayerId = null; this.updateUi(); this.updateOverlay(); return; }
+    if (event.key === "Escape" && (this.selectedTextBoxId || this.selectedImageLayerId)) { event.preventDefault(); event.stopPropagation(); this.selectTextBox(null); this.selectImageLayer(null); return; }
+    const imageLayer = this.selectedImageLayer();
+    if (imageLayer && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      if (event.repeat) { event.preventDefault(); return; }
+      const before = this.captureHistory(); const step = event.shiftKey ? 2 : 0.5;
+      const originalFrameX = imageLayer.frameX; const originalFrameY = imageLayer.frameY;
+      if (event.key === "ArrowLeft") imageLayer.frameX = Math.max(imageLayer.frameWidth / 2, imageLayer.frameX - step);
+      if (event.key === "ArrowRight") imageLayer.frameX = Math.min(100 - imageLayer.frameWidth / 2, imageLayer.frameX + step);
+      if (event.key === "ArrowUp") imageLayer.frameY = Math.max(imageLayer.frameHeight / 2, imageLayer.frameY - step);
+      if (event.key === "ArrowDown") imageLayer.frameY = Math.min(100 - imageLayer.frameHeight / 2, imageLayer.frameY + step);
+      imageLayer.contentX += imageLayer.frameX - originalFrameX; imageLayer.contentY += imageLayer.frameY - originalFrameY;
+      event.preventDefault(); this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions(); return;
+    }
     const box = this.selectedTextBox();
     if (!box || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     if (event.repeat) { event.preventDefault(); return; }
@@ -761,7 +1089,7 @@ export class MemeMakerController {
   private renderNow(): boolean {
     if (!this.image) return false;
     try {
-      this.measurements = renderMemeCanvas(this.canvas, this.image.source, this.textBoxes, this.image.width, this.image.height, this.canvasState);
+      this.measurements = renderMemeCanvas(this.canvas, this.image.source, this.textBoxes, this.image.width, this.image.height, this.canvasState, this.imageLayers, this.imageSources, this.backgroundVisible);
       this.required("[data-resolution]").textContent = `${this.canvasState.outputWidth} × ${this.canvasState.outputHeight} PNG`;
       this.updateOverlay();
       return true;
@@ -780,7 +1108,28 @@ export class MemeMakerController {
     if (this.snapGuideY) {
       const guide = document.createElement("div"); guide.className = "meme-snap-guide is-horizontal"; guide.dataset.snapGuideY = ""; this.overlay.append(guide);
     }
-    if (!this.image || !this.selectedTextBoxId) return;
+    if (!this.image) return;
+    const selectedImage = this.selectedImageLayer();
+    if (selectedImage) {
+      const frame = calculateImageLayerFrame(selectedImage, this.canvasState.outputWidth, this.canvasState.outputHeight);
+      const selection = document.createElement("div");
+      selection.className = `meme-image-layer-selection${this.cropModeImageLayerId === selectedImage.id ? " is-cropping" : ""}`;
+      selection.dataset.selectedImageLayer = selectedImage.id;
+      selection.style.left = `${frame.x / this.canvasState.outputWidth * 100}%`;
+      selection.style.top = `${frame.y / this.canvasState.outputHeight * 100}%`;
+      selection.style.width = `${selectedImage.frameWidth}%`; selection.style.height = `${selectedImage.frameHeight}%`;
+      for (const corner of ["nw", "ne", "sw", "se"] as const) {
+        const handle = document.createElement("button"); handle.type = "button";
+        handle.className = `meme-image-layer-handle is-${corner}`; handle.dataset.imageResizeHandle = corner;
+        handle.setAttribute("aria-label", `从 ${corner} 角调整图片层大小`); selection.append(handle);
+      }
+      if (this.cropModeImageLayerId === selectedImage.id) {
+        const frameMove = document.createElement("button"); frameMove.type = "button"; frameMove.className = "meme-image-frame-move";
+        frameMove.dataset.imageFrameMove = ""; frameMove.textContent = "拖动 Frame"; frameMove.setAttribute("aria-label", "移动裁切 Frame，不移动图片内容"); selection.append(frameMove);
+      }
+      this.overlay.append(selection); return;
+    }
+    if (!this.selectedTextBoxId) return;
     const bounds = this.measurements.get(this.selectedTextBoxId)?.bounds;
     if (!bounds) return;
     const selection = document.createElement("div");
@@ -804,6 +1153,7 @@ export class MemeMakerController {
   private updateUi(): void {
     this.renderList();
     const box = this.selectedTextBox();
+    const imageLayer = this.selectedImageLayer();
     this.properties.disabled = !box;
     if (box) {
       this.setInput("box_text", box.text);
@@ -840,6 +1190,18 @@ export class MemeMakerController {
       this.setOutput("box_width", `${this.displayPercent(box.widthPercent)}%`);
       this.setOutput("box_stroke", `${Math.round(box.strokeWidth)}px`);
     }
+    this.imageLayerProperties.disabled = !imageLayer;
+    if (imageLayer) {
+      this.syncRange("image_x", imageLayer.frameX, "%");
+      this.syncRange("image_y", imageLayer.frameY, "%");
+      this.syncRange("image_width", imageLayer.frameWidth, "%");
+      this.syncRange("image_height", imageLayer.frameHeight, "%");
+      this.syncRange("image_crop_scale", imageLayer.contentScale * 100, "%");
+      this.syncRange("image_crop_x", imageLayer.contentX, "%");
+      this.syncRange("image_crop_y", imageLayer.contentY, "%");
+      this.syncRange("image_opacity", imageLayer.opacity * 100, "%");
+      this.setChecked("image_crop_mode", this.cropModeImageLayerId === imageLayer.id);
+    }
     const framing = this.required<HTMLFieldSetElement>("[data-background-framing]");
     framing.disabled = !this.image;
     const scalePercent = this.canvasState.backgroundScale * 100;
@@ -856,6 +1218,7 @@ export class MemeMakerController {
     this.setInput("output_height", this.canvasState.outputHeight || 64);
     this.setChecked("lock_aspect", this.canvasState.lockAspectRatio);
     this.setInput("canvas_background_color", this.canvasState.canvasBackgroundColor);
+    this.setChecked("background_visible", this.backgroundVisible);
     for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-aspect-preset]")) {
       button.classList.toggle("is-active", button.dataset.aspectPreset === this.canvasState.aspectPreset);
       button.setAttribute("aria-pressed", String(button.dataset.aspectPreset === this.canvasState.aspectPreset));
@@ -877,10 +1240,18 @@ export class MemeMakerController {
     if (up) up.disabled = index < 0 || index === this.textBoxes.length - 1;
     if (down) down.disabled = index <= 0;
     if (paste) paste.disabled = !box || !this.styleClipboard;
+    const imageIndex = this.imageLayers.findIndex(item => item.id === this.selectedImageLayerId);
+    const imageAdd = this.dialog.querySelector<HTMLInputElement>('[name="image_layers"]'); if (imageAdd) imageAdd.disabled = !this.image || this.imageLayers.length >= MAX_IMAGE_LAYERS;
+    for (const removeImage of this.dialog.querySelectorAll<HTMLButtonElement>("[data-delete-image-layer]")) removeImage.disabled = !imageLayer;
+    const imageClone = this.dialog.querySelector<HTMLButtonElement>("[data-clone-image-layer]"); if (imageClone) imageClone.disabled = !imageLayer || this.imageLayers.length >= MAX_IMAGE_LAYERS;
+    const imageUp = this.dialog.querySelector<HTMLButtonElement>("[data-image-layer-up]"); if (imageUp) imageUp.disabled = imageIndex < 0 || imageIndex === this.imageLayers.length - 1;
+    const imageDown = this.dialog.querySelector<HTMLButtonElement>("[data-image-layer-down]"); if (imageDown) imageDown.disabled = imageIndex <= 0;
+    const fromBackground = this.dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]"); if (fromBackground) fromBackground.disabled = !this.image || this.imageLayers.length >= MAX_IMAGE_LAYERS;
     this.updateHistoryActions();
   }
 
   private renderList(): void {
+    this.renderImageLayerList();
     this.list.replaceChildren();
     this.textBoxes.forEach((box, index) => {
       const button = document.createElement("button");
@@ -899,18 +1270,35 @@ export class MemeMakerController {
     this.required("[data-box-count]").textContent = `${this.textBoxes.length} / ${MAX_TEXT_BOXES}`;
   }
 
+  private renderImageLayerList(): void {
+    this.imageLayerList.replaceChildren();
+    this.imageLayers.forEach((layer, index) => {
+      const source = this.imageSources.get(layer.sourceId);
+      const button = document.createElement("button"); button.type = "button"; button.dataset.imageLayerId = layer.id;
+      button.setAttribute("role", "option"); button.setAttribute("aria-selected", String(layer.id === this.selectedImageLayerId));
+      button.className = layer.id === this.selectedImageLayerId ? "is-selected" : "";
+      button.textContent = `${index + 1}. ${source?.filename ?? "图片来源不可用"}`; this.imageLayerList.append(button);
+    });
+    if (!this.imageLayers.length) { const empty = document.createElement("p"); empty.textContent = "还没有图片层"; this.imageLayerList.append(empty); }
+    this.required("[data-image-layer-count]").textContent = `${this.imageLayers.length} / ${MAX_IMAGE_LAYERS}`;
+  }
+
   private captureHistory(): MemeMakerHistoryState {
     return {
-      textBoxes: this.textBoxes.map(box => ({ ...box })), selectedTextBoxId: this.selectedTextBoxId,
-      title: this.inputValue("title"), canvasState: { ...this.canvasState },
+      textBoxes: this.textBoxes.map(box => ({ ...box })), imageLayers: this.imageLayers.map(layer => ({ ...layer })),
+      selectedTextBoxId: this.selectedTextBoxId, selectedImageLayerId: this.selectedImageLayerId,
+      title: this.inputValue("title"), canvasState: { ...this.canvasState }, backgroundVisible: this.backgroundVisible,
     };
   }
 
   private restoreHistory(state: MemeMakerHistoryState): void {
     this.textBoxes = state.textBoxes.map(box => ({ ...box }));
+    this.imageLayers = state.imageLayers.map(layer => ({ ...layer }));
     this.selectedTextBoxId = state.selectedTextBoxId && this.textBoxes.some(box => box.id === state.selectedTextBoxId) ? state.selectedTextBoxId : null;
+    this.selectedImageLayerId = state.selectedImageLayerId && this.imageLayers.some(layer => layer.id === state.selectedImageLayerId) ? state.selectedImageLayerId : null;
     this.setInput("title", state.title);
     this.canvasState = { ...state.canvasState };
+    this.backgroundVisible = state.backgroundVisible; this.cropModeImageLayerId = null;
     this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.updateUi(); this.scheduleRender();
   }
@@ -976,14 +1364,15 @@ export class MemeMakerController {
 
   private validateOutput(requireTitle: boolean): boolean {
     if (!this.image || !this.background) { this.setNotice("请先选择模板或本地底图。", true); return false; }
-    if (!this.textBoxes.some(box => box.text.trim())) { this.setNotice("至少输入一段文字后再导出或保存。", true); return false; }
+    if (!this.textBoxes.some(box => box.text.trim()) && !this.imageLayers.length) { this.setNotice("请至少输入一段文字或添加一个图片层后再导出或保存。", true); return false; }
     if (requireTitle && !this.inputValue("title").trim()) { this.setNotice("请输入 Meme 标题后再保存。", true); return false; }
     return true;
   }
 
   private reset(): void {
-    this.loadGeneration += 1; this.releaseImage(); this.form.reset();
-    this.textBoxes = []; this.selectedTextBoxId = null; this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.backgroundInteraction = { type: "idle" }; this.background = null;
+    this.loadGeneration += 1; this.releaseImage(); this.disposeImageSources(); this.form.reset();
+    this.textBoxes = []; this.imageLayers = []; this.selectedTextBoxId = null; this.selectedImageLayerId = null; this.cropModeImageLayerId = null; this.backgroundVisible = true;
+    this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.imageInteraction = IDLE_IMAGE_INTERACTION; this.backgroundInteraction = { type: "idle" }; this.background = null;
     this.canvasState = { aspectPreset: "original", outputWidth: 0, outputHeight: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff" };
     this.styleClipboard = null;
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
@@ -998,8 +1387,10 @@ export class MemeMakerController {
   }
 
   private selectedTextBox(): MemeTextBox | undefined { return this.textBoxes.find(box => box.id === this.selectedTextBoxId); }
+  private selectedImageLayer(): MemeImageLayer | undefined { return this.imageLayers.find(layer => layer.id === this.selectedImageLayerId); }
   private selectedTemplate(): TemplateResponse | undefined { const id = Number(this.templateSelect.value); return this.templates.find(template => template.id === id); }
   private releaseImage(): void { this.image?.dispose(); this.image = null; }
+  private disposeImageSources(): void { for (const source of this.imageSources.values()) source.dispose?.(); this.imageSources.clear(); }
   private setNotice(message: string, error = false): void { this.notice.textContent = message; this.notice.classList.toggle("is-error", error); }
   private errorMessage(error: unknown, fallback: string): string { return error instanceof ApiError ? error.message : fallback; }
 

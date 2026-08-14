@@ -492,6 +492,16 @@ History 不保存底图对象、Canvas、Blob、DOM 或渲染结果，关闭 Mak
 
 Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供旋转、图片图层、Sticker、滤镜、GIF 编辑、草稿文件或复杂图层系统。
 
+### v0.8：多图拼装与快捷图像层（已完成）
+
+- [x] 新增独立 `imageLayers[]` 与 Session Image Source Registry，不建立统一 `Layer[]`。
+- [x] 支持多文件选择、Canvas Drag & Drop、Clipboard Paste、从当前底图创建图片层及底图显示/隐藏。
+- [x] 支持图片层互斥选择、移动、四角自由 Resize、中心吸附、方向键微调、复制、删除和图片层内部排序。
+- [x] 集中实现独立 Frame Mask 与 Content Transform：Frame Move/Resize 不隐式 Fit/Fill，Content Pan/Zoom 不改变 Frame；显式 Fit、Fill、Reset 才重算 Content。
+- [x] History 保存图片层 `sourceId` 与可序列化 Frame/Content 状态；Frame Move、Frame Resize、Content Pan、Content Zoom、多文件导入各自合并为一步，Registry 保留到 Maker 关闭。
+- [x] Preview、Export、Save 固定按 Canvas Color → 可见 Background → ImageLayers → TextBoxes 渲染，最终 PNG 继续复用现有 Upload API。
+- [x] 无后端改动，无新增 npm/Python 依赖；仍不支持旋转、蒙版、滤镜、统一图层、GIF/视频或项目草稿。
+
 ### v1.0：可公开访问版本
 
 - [ ] 用户系统、权限控制与分享链接
@@ -574,7 +584,7 @@ data/thumbnails/*
 - 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
 - Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.7.4 Meme Forge 第一阶段封版已完成
+当前状态：v0.8 Meme Forge 多图拼装已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -583,5 +593,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：等待人工验收；不自动扩展自由图层或任意图片编辑
+下一步：真实使用验收；不自动扩展旋转、蒙版、滤镜或统一图层系统
 ```

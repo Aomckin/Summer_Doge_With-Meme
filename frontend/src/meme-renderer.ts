@@ -1,4 +1,10 @@
 import { calculateBackgroundDrawRect, type MemeCanvasState } from "./meme-background";
+import {
+  calculateImageContentRect,
+  calculateImageLayerFrame,
+  type MemeImageLayer,
+  type MemeImageSource,
+} from "./meme-image-layer";
 
 export type TextBoxAlign = "left" | "center" | "right";
 export type MemeFontPreset = "classic" | "chinese-bold" | "sans";
@@ -221,6 +227,24 @@ export function measureTextBoxes(
   return new Map(textBoxes.map(box => [box.id, measureTextBox(context, box, canvasWidth, canvasHeight)]));
 }
 
+export function drawImageLayer(
+  context: CanvasRenderingContext2D,
+  layer: MemeImageLayer,
+  source: MemeImageSource,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  const frame = calculateImageLayerFrame(layer, canvasWidth, canvasHeight);
+  const content = calculateImageContentRect(layer, source, canvasWidth, canvasHeight);
+  context.save();
+  context.beginPath();
+  context.rect(frame.x, frame.y, frame.width, frame.height);
+  context.clip();
+  context.globalAlpha = layer.opacity;
+  context.drawImage(source.image, content.x, content.y, content.width, content.height);
+  context.restore();
+}
+
 export function renderMemeCanvas(
   canvas: HTMLCanvasElement,
   image: CanvasImageSource,
@@ -228,6 +252,9 @@ export function renderMemeCanvas(
   sourceWidth: number,
   sourceHeight: number,
   canvasState?: MemeCanvasState,
+  imageLayers: MemeImageLayer[] = [],
+  imageSources: ReadonlyMap<string, MemeImageSource> = new Map(),
+  backgroundVisible = true,
 ): Map<string, TextBoxMeasurement> {
   const state = canvasState ?? {
     aspectPreset: "original" as const, outputWidth: sourceWidth, outputHeight: sourceHeight,
@@ -242,7 +269,13 @@ export function renderMemeCanvas(
   context.clearRect(0, 0, width, height);
   context.fillStyle = state.canvasBackgroundColor;
   context.fillRect(0, 0, width, height);
-  const rect = calculateBackgroundDrawRect(sourceWidth, sourceHeight, state);
-  context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+  if (backgroundVisible) {
+    const rect = calculateBackgroundDrawRect(sourceWidth, sourceHeight, state);
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+  }
+  for (const layer of imageLayers) {
+    const source = imageSources.get(layer.sourceId);
+    if (source) drawImageLayer(context, layer, source, width, height);
+  }
   return new Map(textBoxes.map(box => [box.id, drawTextBox(context, box, width, height)]));
 }

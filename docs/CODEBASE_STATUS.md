@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.7.4 第一阶段封版实现状态（2026-08-13）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.8 多图拼装实现状态（2026-08-14）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -19,7 +19,7 @@
 - 持久化 EmbeddingJob：任务创建时快照 Meme 与 source hash；一个协调线程管理最多 8 个只读/外部请求线程，所有 SQLite 结果由协调线程顺序写入。
 - 手动弱关联：完整 Meme 之间建立双向、直接且不传递的边；支持搜索、多选批量添加和单条移除。
 - Template 系统：网页 CRUD、Meme 手动归类、单张参考图、管理界面双侧缩略图预览、原子创建、独立图像向量模型和 Top-10 视觉候选。
-- Meme 制作器：支持 Template/Local 底图取景、最多 20 个自由文本框、任意文字/描边颜色、背景框、阴影、行高/字距/字重、会话内样式复制粘贴、比例与常用/自定义输出尺寸、比例锁定及画布背景色；全部编辑进入 50 步 Undo/Redo，PNG Preview/Export/Save 共用同一 Renderer；无后端渲染或 AI 调用。
+- Meme 制作器：在 Template/Local 底图、最多 20 个自由文本框和完整文字/输出能力之上，支持最多 30 个 PNG/JPEG/WEBP 图片层；可多选文件导入、拖放、剪贴板粘贴、从底图创建，独立移动/Resize/Crop/Fit/Fill/透明度/替换/排序，并进入 50 步 Undo/Redo。PNG Preview/Export/Save 共用同一 Renderer；无后端渲染或 AI 调用。
 - AI 元数据整理：网页单项、Provider 批量 Job 与 Luna 离线候选统一写入 `MemeEnrichmentSuggestion`；Luna 导入直接进入人工审核池，不再经过 dry-run/CLI apply；建议创建和拒绝不修改 Meme，网页审核可按字段安全采用并写审计。
 - 持久化 EnrichmentJob：支持全部、当前筛选、缺描述/标签/模板、文件名标题、从未分析和过期建议范围；1/2/4/8 并发、取消、失败重试、启动中断恢复和 Token 统计。
 - 网页内 API 设置：维护 AI 提供商、图片分析模型和独立的模板视觉检索模型；密钥加密落盘。
@@ -30,7 +30,7 @@
 
 ## 明确尚未实现
 
-- 尚未实现自动聊天记录解析、聊天平台接入、自由图层/任意图片 Meme 编辑、GIF 制作、用户系统、分享权限或云端对象存储。
+- 尚未实现自动聊天记录解析、聊天平台接入、统一自由图层、图片与文字交叉排序、旋转/蒙版/滤镜、GIF 制作、用户系统、分享权限或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
 - 巡检不提供自动判断、全库后台 Job、聚类、像素差异、Merge Undo 或 Ignore 管理器；语义相似度不等于重复概率。
@@ -61,6 +61,7 @@ frontend/
   src/meme-actions.ts 图片复制能力检测、读取、转换、剪贴板写入与轻反馈
   src/meme-maker.ts 模板加载、编辑状态、Preview 调度、PNG 导出与上传编排
   src/meme-maker-interaction.ts 坐标换算、顶层命中、pointer 拖动与左右 resize 状态机
+  src/meme-image-layer.ts 图片层数据模型、Frame/Crop 几何、Fit/Fill 与命中测试
   src/meme-renderer.ts 文本框换行、测量、bounds、绘制和共享 Canvas 渲染
   src/pagination.ts 共享页码限制与紧凑页码 token 逻辑
   src/batch-upload.ts 批量上传对话框、文件队列与串行流程
@@ -391,22 +392,28 @@ v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补�
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
-## v0.7.4 Meme Forge 第一阶段封版边界
+## v0.8 Meme Forge 多图拼装边界
 
 - 底图可来自现有 Template Reference Image 或本地 PNG/JPEG/WEBP；GIF 不支持，本地图只存在当前会话。
 - 文本框可选黑/白文字与黑/白描边，可调整文字、X/Y、宽度、字号、系统字体预设和左/中/右对齐；最多 20 个，数组顺序即绘制顺序。
 - 支持复制、单层前后移动、0.5% 方向键微调与 Shift 2% 快速移动；输入控件焦点不触发移动。
-- History 只保存深拷贝的 `textBoxes`、`selectedTextBoxId` 和标题，上限 50；背景、Canvas、Blob 和 DOM 不进入 History，关闭后清空。
+- 固定架构为 Canvas Background → `imageLayers[]` → `textBoxes[]`；图片可内部排序，文字始终位于图片上方，不建立通用 `Layer[]`。
+- `MemeImageLayer` 只保存 `sourceId`、百分比 `frameX/frameY/frameWidth/frameHeight`、画布绝对百分比 `contentX/contentY`、独立 `contentScale` 与 opacity；`MemeImageSource` Registry 保存解码图像和自然尺寸，同一来源可供多个独立裁切层复用。
+- 来源注册表保留到 Maker 关闭，删除层不销毁来源以支持 Undo；会话结束统一释放 Object URL 与已解码资源。
+- 本地图片输入支持多文件选择、Canvas Drop 和图片剪贴板；PNG/JPEG/WEBP 可用，GIF/非图片/解码失败/超过 50 MiB 文件逐项拒绝，合法文件继续导入。
+- 图片 Frame 是纯矩形 Mask：移动/Resize Frame 不重新居中或缩放 Content；Crop Mode 拖动只平移 Content，Zoom 只改变 `contentScale` 并保持内容中心。普通对象移动才把 Frame 与 Content 同量平移；只有显式 Fit、Fill、Reset Crop 会重算 Content Transform。
+- 当前底图可建立独立图片层并隐藏/显示；隐藏不清除底图来源或取景状态，Template/Local 保存归属规则不变。
+- History 保存深拷贝的图片层、文本框、互斥选择、标题、Canvas/Background State 与 `backgroundVisible`，上限 50；图片只保存 `sourceId`，File、Blob、Bitmap、Canvas 和 DOM 不进入快照。
 - Ctrl+Z/Y/Shift+Z、Ctrl+D、Delete、Escape 与 Arrow 系列只在非输入焦点生效；拖动、Resize 与 Slider 连续操作合并为一步。
 - Drag 在中心线 1.25% 阈值内吸附 X/Y=50%；辅助线位于 overlay 且 pointerup 后隐藏。字号、X/Y、宽度和描边提供双向 Slider/Numeric 精调。
 - 选中框与左右 resize handle 使用独立 DOM overlay，导出 PNG 只包含内容 Canvas。
 - Output Canvas 独立于底图自然尺寸；支持原图、1:1、4:3、3:4、16:9，固定比例不主动上采样，CSS 只缩放预览。
 - 背景支持 10%–400% Zoom、X/Y 百分比 Pan、空白画布拖动、Fit、Fill 与当前比例 Reset；画布未覆盖区域固定填白。
 - History 额外保存轻量 Output Canvas 与 Background Transform；背景文件、Object URL、Canvas、Blob 和 DOM 仍不进入快照。
-- Preview、Export 与 Save 使用完全一致的背景矩形和文本渲染逻辑；Export 固定为 PNG。
+- Preview、Export 与 Save 使用完全一致的背景、图片层和文本渲染逻辑；Overlay 装饰不进入 Export，输出固定为 PNG。
 - 保存复用 `POST /api/memes`：Template 模式继承模板，Local 模式传 `template_id=null`；不自动生成 Embedding 或调用 Enrichment。
-- 裁剪仅通过 Output Canvas + Background Scale/Offset 隐式完成；不提供自由 Crop Rectangle、图片图层、旋转、滤镜、持久化/分支式 History、GIF Maker 或草稿持久化。
+- 图片层裁切使用矩形 Frame + Canvas clip，不提供自由多边形/圆形 Crop、蒙版、旋转、滤镜、持久化/分支式 History、GIF Maker 或草稿持久化。
 - 文本视觉支持 Hex fill/stroke、背景框颜色/透明度/Padding/圆角、阴影颜色/模糊/偏移、三档字重、行高和字距；字体仍仅使用系统预设。
 - 样式剪贴板仅复制视觉与排版字段，不复制文字、ID、X/Y 或宽度，关闭 Maker 后释放。
 - 输出支持常用像素预设及 64–4096px 自定义宽高；比例锁定按修改前比例联动，解锁后独立，画布背景色先于底图绘制。
-- 第一阶段明确不支持旋转、图片图层、Sticker、滤镜、GIF 编辑、多选、项目草稿或复杂图层系统。
+- v0.8 明确不支持旋转、Sticker、Shape、滤镜、Blend Mode、图片/文字任意交叉排序、多选/Group、GIF 编辑、项目草稿或复杂图层系统。

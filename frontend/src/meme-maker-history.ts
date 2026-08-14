@@ -1,11 +1,15 @@
 import type { MemeTextBox } from "./meme-renderer";
 import type { MemeCanvasState } from "./meme-background";
+import type { MemeImageLayer } from "./meme-image-layer";
 
 export interface MemeMakerHistoryState {
   textBoxes: MemeTextBox[];
+  imageLayers: MemeImageLayer[];
   selectedTextBoxId: string | null;
+  selectedImageLayerId: string | null;
   title: string;
   canvasState: MemeCanvasState;
+  backgroundVisible: boolean;
 }
 
 export const MEME_MAKER_HISTORY_LIMIT = 50;
@@ -13,9 +17,12 @@ export const MEME_MAKER_HISTORY_LIMIT = 50;
 export function cloneHistoryState(state: MemeMakerHistoryState): MemeMakerHistoryState {
   return {
     textBoxes: state.textBoxes.map(box => ({ ...box })),
+    imageLayers: state.imageLayers.map(layer => ({ ...layer })),
     selectedTextBoxId: state.selectedTextBoxId,
+    selectedImageLayerId: state.selectedImageLayerId,
     title: state.title,
     canvasState: { ...state.canvasState },
+    backgroundVisible: state.backgroundVisible,
   };
 }
 

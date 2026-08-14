@@ -10,7 +10,7 @@ const box = (fontSize: number): MemeTextBox => ({
   shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2,
 });
 const state = (fontSize: number, title = "Title"): MemeMakerHistoryState => ({
-  textBoxes: [box(fontSize)], selectedTextBoxId: "box", title,
+  textBoxes: [box(fontSize)], imageLayers: [], selectedTextBoxId: "box", selectedImageLayerId: null, title, backgroundVisible: true,
   canvasState: { aspectPreset: "original", outputWidth: 800, outputHeight: 600, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff" },
 });
 

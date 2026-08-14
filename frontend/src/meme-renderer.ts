@@ -1,8 +1,8 @@
 import { calculateBackgroundDrawRect, type MemeCanvasState } from "./meme-background";
 
 export type TextBoxAlign = "left" | "center" | "right";
-export type MemeColor = "white" | "black";
 export type MemeFontPreset = "classic" | "chinese-bold" | "sans";
+export type MemeFontWeight = "normal" | "bold" | "heavy";
 
 export interface MemeTextBox {
   id: string;
@@ -11,11 +11,24 @@ export interface MemeTextBox {
   yPercent: number;
   widthPercent: number;
   fontSize: number;
-  fillColor: MemeColor;
+  fillColor: string;
   strokeWidth: number;
-  strokeColor: MemeColor;
+  strokeColor: string;
   align: TextBoxAlign;
   fontPreset: MemeFontPreset;
+  fontWeight: MemeFontWeight;
+  lineHeight: number;
+  letterSpacing: number;
+  backgroundEnabled: boolean;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  backgroundPadding: number;
+  backgroundRadius: number;
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
 }
 
 export interface TextBoxBounds {
@@ -33,6 +46,8 @@ export interface TextBoxMeasurement {
   bounds: TextBoxBounds;
   anchorX: number;
   centerY: number;
+  lineWidths: number[];
+  contentBounds: TextBoxBounds;
 }
 
 const FONT_PRESETS: Record<MemeFontPreset, { weight: number; family: string }> = {
@@ -41,10 +56,15 @@ const FONT_PRESETS: Record<MemeFontPreset, { weight: number; family: string }> =
   sans: { weight: 700, family: 'Arial, "Microsoft YaHei", "PingFang SC", sans-serif' },
 };
 
+function measuredWidth(context: CanvasRenderingContext2D, text: string, letterSpacing: number): number {
+  return context.measureText(text).width + Math.max(0, [...text].length - 1) * letterSpacing;
+}
+
 function splitToFit(
   context: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
+  letterSpacing: number,
 ): string[] {
   if (!text) return [""];
   const chunks = text.match(/\s+|[^\s]+/gu) ?? [text];
@@ -55,7 +75,7 @@ function splitToFit(
     let remainder = "";
     for (const character of chunk) {
       const candidate = remainder + character;
-      if (remainder && context.measureText(candidate).width > maxWidth) {
+      if (remainder && measuredWidth(context, candidate, letterSpacing) > maxWidth) {
         lines.push(remainder.trimEnd());
         remainder = character;
       } else {
@@ -67,9 +87,9 @@ function splitToFit(
 
   for (const chunk of chunks) {
     const candidate = line + chunk;
-    if (context.measureText(candidate).width <= maxWidth) {
+    if (measuredWidth(context, candidate, letterSpacing) <= maxWidth) {
       line = candidate;
-    } else if (!/^\s+$/u.test(chunk) && context.measureText(chunk).width > maxWidth) {
+    } else if (!/^\s+$/u.test(chunk) && measuredWidth(context, chunk, letterSpacing) > maxWidth) {
       if (line.trim()) lines.push(line.trimEnd());
       line = pushLongChunk(chunk);
     } else {
@@ -85,9 +105,10 @@ export function wrapTextBoxText(
   context: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
+  letterSpacing = 0,
 ): string[] {
   return text.replace(/\r\n?/gu, "\n").split("\n").flatMap(line =>
-    splitToFit(context, line, Math.max(1, maxWidth)),
+    splitToFit(context, line, Math.max(1, maxWidth), letterSpacing),
   );
 }
 
@@ -99,10 +120,12 @@ export function measureTextBox(
 ): TextBoxMeasurement {
   const fontSize = Math.max(1, box.fontSize);
   const width = canvasWidth * Math.min(100, Math.max(10, box.widthPercent)) / 100;
-  const lineHeight = fontSize * 1.15;
+  const lineHeight = fontSize * Math.min(2, Math.max(0.8, box.lineHeight));
   const font = FONT_PRESETS[box.fontPreset];
-  context.font = `${font.weight} ${fontSize}px ${font.family}`;
-  const lines = wrapTextBoxText(context, box.text, width);
+  const weight = box.fontWeight === "normal" ? 400 : box.fontWeight === "bold" ? 700 : 900;
+  context.font = `${weight || font.weight} ${fontSize}px ${font.family}`;
+  const lines = wrapTextBoxText(context, box.text, width, box.letterSpacing);
+  const lineWidths = lines.map(line => measuredWidth(context, line, box.letterSpacing));
   const height = Math.max(lineHeight, lines.length * lineHeight);
   const halfHeight = height / 2;
   const desiredCenterY = canvasHeight * box.yPercent / 100;
@@ -118,13 +141,40 @@ export function measureTextBox(
   );
   const left = centerX - halfWidth;
   const anchorX = box.align === "left" ? left : box.align === "right" ? left + width : centerX;
+  const contentWidth = Math.max(0, ...lineWidths);
+  const contentLeft = box.align === "left" ? anchorX : box.align === "right" ? anchorX - contentWidth : anchorX - contentWidth / 2;
   return {
     lines,
+    lineWidths,
     lineHeight,
     bounds: { left, top: centerY - halfHeight, right: left + width, bottom: centerY + halfHeight, width, height },
     anchorX,
     centerY,
+    contentBounds: { left: contentLeft, top: centerY - halfHeight, right: contentLeft + contentWidth, bottom: centerY + halfHeight, width: contentWidth, height },
   };
+}
+
+function roundedRect(context: CanvasRenderingContext2D, left: number, top: number, width: number, height: number, radius: number): void {
+  const r = Math.min(Math.max(0, radius), width / 2, height / 2);
+  context.beginPath(); context.moveTo(left + r, top); context.lineTo(left + width - r, top);
+  context.quadraticCurveTo(left + width, top, left + width, top + r); context.lineTo(left + width, top + height - r);
+  context.quadraticCurveTo(left + width, top + height, left + width - r, top + height); context.lineTo(left + r, top + height);
+  context.quadraticCurveTo(left, top + height, left, top + height - r); context.lineTo(left, top + r);
+  context.quadraticCurveTo(left, top, left + r, top); context.closePath();
+}
+
+function drawSpacedLine(context: CanvasRenderingContext2D, line: string, width: number, anchorX: number, y: number, box: MemeTextBox): void {
+  if (!box.letterSpacing) {
+    if (box.strokeWidth > 0) context.strokeText(line, anchorX, y);
+    context.fillText(line, anchorX, y); return;
+  }
+  let x = box.align === "left" ? anchorX : box.align === "right" ? anchorX - width : anchorX - width / 2;
+  context.textAlign = "left";
+  for (const character of line) {
+    if (box.strokeWidth > 0) context.strokeText(character, x, y);
+    context.fillText(character, x, y);
+    x += context.measureText(character).width + box.letterSpacing;
+  }
 }
 
 export function drawTextBox(
@@ -138,15 +188,24 @@ export function drawTextBox(
   context.textAlign = box.align;
   context.textBaseline = "middle";
   context.lineJoin = "round";
-  context.fillStyle = box.fillColor === "black" ? "#000000" : "#ffffff";
-  context.strokeStyle = box.strokeColor === "white" ? "#ffffff" : "#000000";
+  if (box.backgroundEnabled && box.backgroundOpacity > 0 && box.text.trim()) {
+    const padding = Math.max(0, box.backgroundPadding); const content = measurement.contentBounds;
+    context.save(); context.globalAlpha = Math.min(1, Math.max(0, box.backgroundOpacity)); context.fillStyle = box.backgroundColor;
+    roundedRect(context, content.left - padding, content.top - padding, content.width + padding * 2, content.height + padding * 2, box.backgroundRadius);
+    context.fill(); context.restore();
+  }
+  context.fillStyle = box.fillColor;
+  context.strokeStyle = box.strokeColor;
   context.lineWidth = Math.max(0, box.strokeWidth);
+  context.shadowColor = box.shadowEnabled ? box.shadowColor : "transparent";
+  context.shadowBlur = box.shadowEnabled ? Math.max(0, box.shadowBlur) : 0;
+  context.shadowOffsetX = box.shadowEnabled ? box.shadowOffsetX : 0;
+  context.shadowOffsetY = box.shadowEnabled ? box.shadowOffsetY : 0;
   const firstY = measurement.centerY - (measurement.lines.length - 1) * measurement.lineHeight / 2;
   if (box.text.trim()) {
     measurement.lines.forEach((line, index) => {
       const y = firstY + index * measurement.lineHeight;
-      if (box.strokeWidth > 0) context.strokeText(line, measurement.anchorX, y);
-      context.fillText(line, measurement.anchorX, y);
+      drawSpacedLine(context, line, measurement.lineWidths[index], measurement.anchorX, y, box);
     });
   }
   context.restore();
@@ -172,7 +231,7 @@ export function renderMemeCanvas(
 ): Map<string, TextBoxMeasurement> {
   const state = canvasState ?? {
     aspectPreset: "original" as const, outputWidth: sourceWidth, outputHeight: sourceHeight,
-    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
+    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff",
   };
   const { outputWidth: width, outputHeight: height } = state;
   if (width <= 0 || height <= 0) throw new Error("模板图片尺寸无效。");
@@ -181,7 +240,7 @@ export function renderMemeCanvas(
   const context = canvas.getContext("2d");
   if (!context) throw new Error("当前浏览器无法创建 Canvas 画布。");
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#ffffff";
+  context.fillStyle = state.canvasBackgroundColor;
   context.fillRect(0, 0, width, height);
   const rect = calculateBackgroundDrawRect(sourceWidth, sourceHeight, state);
   context.drawImage(image, rect.x, rect.y, rect.width, rect.height);

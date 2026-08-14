@@ -1,7 +1,6 @@
 import { ApiError } from "./api";
 import {
   renderMemeCanvas,
-  type MemeColor,
   type MemeTextBox,
   type TextBoxMeasurement,
 } from "./meme-renderer";
@@ -52,6 +51,9 @@ type BackgroundInteraction =
   | { type: "idle" }
   | { type: "dragging"; startX: number; startY: number; originalX: number; originalY: number };
 
+const STYLE_FIELDS = ["fontPreset", "fontWeight", "fontSize", "fillColor", "strokeWidth", "strokeColor", "align", "lineHeight", "letterSpacing", "backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundPadding", "backgroundRadius", "shadowEnabled", "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY"] as const;
+type MemeTextStyle = Pick<MemeTextBox, typeof STYLE_FIELDS[number]>;
+
 async function loadTemplateImage(url: string): Promise<LoadedTemplateImage> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -97,11 +99,24 @@ function createTextBox(fontSize: number, yPercent = 50): MemeTextBox {
     yPercent,
     widthPercent: yPercent === 15 ? 70 : 60,
     fontSize,
-    fillColor: "white",
+    fillColor: "#ffffff",
     strokeWidth: 3,
-    strokeColor: "black",
+    strokeColor: "#000000",
     align: "center",
     fontPreset: "classic",
+    fontWeight: "heavy",
+    lineHeight: 1.15,
+    letterSpacing: 0,
+    backgroundEnabled: false,
+    backgroundColor: "#000000",
+    backgroundOpacity: 0.7,
+    backgroundPadding: 12,
+    backgroundRadius: 8,
+    shadowEnabled: false,
+    shadowColor: "#000000",
+    shadowBlur: 4,
+    shadowOffsetX: 2,
+    shadowOffsetY: 2,
   };
 }
 
@@ -126,7 +141,7 @@ export class MemeMakerController {
   private backgroundInteraction: BackgroundInteraction = { type: "idle" };
   private canvasState: MemeCanvasState = {
     aspectPreset: "original", outputWidth: 0, outputHeight: 0,
-    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0,
+    backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff",
   };
   private loadGeneration = 0;
   private renderFrame: number | null = null;
@@ -136,6 +151,7 @@ export class MemeMakerController {
   private pendingHistory: MemeMakerHistoryState | null = null;
   private snapGuideX = false;
   private snapGuideY = false;
+  private styleClipboard: MemeTextStyle | null = null;
   private readonly loadImage: (url: string) => Promise<LoadedTemplateImage>;
   private readonly scheduleFrame: (callback: FrameRequestCallback) => number;
   private readonly cancelFrame: (id: number) => void;
@@ -174,6 +190,12 @@ export class MemeMakerController {
                 <span>输出比例</span>
                 <div>${(["original", "1:1", "4:3", "3:4", "16:9"] as const).map(preset => `<button class="button button-secondary" type="button" data-aspect-preset="${preset}">${preset === "original" ? "原图" : preset}</button>`).join("")}</div>
               </div>
+              <div class="maker-size-presets" role="group" aria-label="常用输出尺寸">
+                ${[[1080,1080],[1080,1350],[1920,1080],[1200,675],[800,800]].map(([w,h]) => `<button class="button button-secondary" type="button" data-output-size="${w}x${h}">${w}×${h}</button>`).join("")}
+              </div>
+              <div class="maker-output-size"><label><span>宽度</span><input name="output_width" type="number" min="64" max="4096" step="1"></label><label><span>高度</span><input name="output_height" type="number" min="64" max="4096" step="1"></label></div>
+              <label class="maker-check"><input name="lock_aspect" type="checkbox" checked> 锁定比例</label>
+              <label><span>画布背景色</span><input name="canvas_background_color" type="color" value="#ffffff"></label>
               ${this.rangeMarkup("background_scale", "缩放", 10, 400, "%", ".1")}
               ${this.rangeMarkup("background_x", "背景 X", -200, 200, "%", ".1")}
               ${this.rangeMarkup("background_y", "背景 Y", -200, 200, "%", ".1")}
@@ -199,14 +221,33 @@ export class MemeMakerController {
               ${this.rangeMarkup("box_y", "Y", 0, 100, "%")}
               ${this.rangeMarkup("box_width", "宽度", 10, 100, "%")}
               ${this.rangeMarkup("box_stroke", "描边", 0, 12, "px")}
-              <label><span>文字颜色</span><select name="box_fill_color"><option value="white">白</option><option value="black">黑</option></select></label>
-              <label><span>描边颜色</span><select name="box_stroke_color"><option value="black">黑</option><option value="white">白</option></select></label>
+              <label><span>文字颜色</span><input name="box_fill_color" type="color"></label>
+              <label><span>描边颜色</span><input name="box_stroke_color" type="color"></label>
               <label><span>对齐</span><select name="box_align"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
               <label><span>字体</span><select name="box_font_preset"><option value="classic">经典 Meme</option><option value="chinese-bold">中文粗体</option><option value="sans">常规无衬线</option></select></label>
+              <label><span>字重</span><select name="box_font_weight"><option value="normal">常规</option><option value="bold">粗体</option><option value="heavy">特粗</option></select></label>
+              ${this.rangeMarkup("box_line_height", "行间距", .8, 2, "×", ".05")}
+              ${this.rangeMarkup("box_letter_spacing", "字间距", -4, 20, "px", ".5")}
+              <details class="maker-style-group"><summary>文本背景框</summary>
+                <label class="maker-check"><input name="box_background_enabled" type="checkbox"> 启用背景框</label>
+                <label><span>背景颜色</span><input name="box_background_color" type="color"></label>
+                ${this.rangeMarkup("box_background_opacity", "透明度", 0, 100, "%", "1")}
+                ${this.rangeMarkup("box_background_padding", "Padding", 0, 64, "px", "1")}
+                ${this.rangeMarkup("box_background_radius", "圆角", 0, 32, "px", "1")}
+              </details>
+              <details class="maker-style-group"><summary>文字阴影</summary>
+                <label class="maker-check"><input name="box_shadow_enabled" type="checkbox"> 启用文字阴影</label>
+                <label><span>阴影颜色</span><input name="box_shadow_color" type="color"></label>
+                ${this.rangeMarkup("box_shadow_blur", "模糊", 0, 32, "px", "1")}
+                ${this.rangeMarkup("box_shadow_x", "偏移 X", -32, 32, "px", "1")}
+                ${this.rangeMarkup("box_shadow_y", "偏移 Y", -32, 32, "px", "1")}
+              </details>
               <div class="text-box-property-actions">
                 <button class="button button-secondary" type="button" data-clone-text-box>复制文本框</button>
                 <button class="button button-secondary" type="button" data-layer-down>下移一层</button>
                 <button class="button button-secondary" type="button" data-layer-up>上移一层</button>
+                <button class="button button-secondary" type="button" data-copy-text-style>复制样式</button>
+                <button class="button button-secondary" type="button" data-paste-text-style>粘贴样式</button>
                 <button class="button button-ghost" type="button" data-reset-text-style>重置样式</button>
               </div>
             </fieldset>
@@ -283,10 +324,18 @@ export class MemeMakerController {
     this.dialog.querySelector("[data-layer-up]")?.addEventListener("click", () => this.moveSelectedLayer(1));
     this.dialog.querySelector("[data-layer-down]")?.addEventListener("click", () => this.moveSelectedLayer(-1));
     this.dialog.querySelector("[data-reset-text-style]")?.addEventListener("click", () => this.resetSelectedStyle());
+    this.dialog.querySelector("[data-copy-text-style]")?.addEventListener("click", () => this.copySelectedStyle());
+    this.dialog.querySelector("[data-paste-text-style]")?.addEventListener("click", () => this.pasteSelectedStyle());
     this.dialog.querySelector("[data-undo]")?.addEventListener("click", () => this.undo());
     this.dialog.querySelector("[data-redo]")?.addEventListener("click", () => this.redo());
     for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-aspect-preset]")) {
       button.addEventListener("click", () => this.setAspectPreset(button.dataset.aspectPreset as MemeAspectPreset));
+    }
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-output-size]")) {
+      button.addEventListener("click", () => {
+        const [width, height] = (button.dataset.outputSize ?? "").split("x").map(Number);
+        if (width && height) this.setOutputSize(width, height);
+      });
     }
     this.dialog.querySelector("[data-background-fit]")?.addEventListener("click", () => this.applyBackgroundMode("fit"));
     this.dialog.querySelector("[data-background-fill]")?.addEventListener("click", () => this.applyBackgroundMode("fill"));
@@ -296,6 +345,7 @@ export class MemeMakerController {
     framing.addEventListener("input", event => this.updateBackgroundFromForm(event.target));
     framing.addEventListener("change", event => this.updateBackgroundFromForm(event.target, true));
     framing.addEventListener("focusout", event => this.commitBackgroundControlHistory(event.target));
+    framing.addEventListener("change", event => this.updateOutputSettings(event.target));
     this.list.addEventListener("click", event => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-text-box-id]");
       if (button?.dataset.textBoxId) this.selectTextBox(button.dataset.textBoxId);
@@ -350,7 +400,7 @@ export class MemeMakerController {
       if (generation !== this.loadGeneration || !this.dialog.open) { loaded.dispose(); return; }
       this.image = loaded;
       this.background = { type: "template", templateId: template.id, name: template.name };
-      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset);
+      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset, "fill", this.canvasState);
       this.history.clear(); this.pendingHistory = null;
       this.defaultFontSize = Math.min(300, Math.max(12, Math.round(loaded.width * 0.09)));
       if (!this.textBoxes.length) {
@@ -402,7 +452,7 @@ export class MemeMakerController {
         dispose: () => { loaded.dispose(); URL.revokeObjectURL(objectUrl); },
       };
       this.background = { type: "local", file, name: file.name.replace(/\.[^.]+$/u, "") || "meme" };
-      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset);
+      this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, this.canvasState.aspectPreset, "fill", this.canvasState);
       this.history.clear(); this.pendingHistory = null;
       this.defaultFontSize = Math.min(300, Math.max(12, Math.round(loaded.width * 0.09)));
       if (!this.textBoxes.length) {
@@ -456,8 +506,22 @@ export class MemeMakerController {
     const box = this.selectedTextBox();
     if (!box) return;
     const before = this.captureHistory();
-    Object.assign(box, { fontSize: this.defaultFontSize, fillColor: "white", strokeColor: "black", strokeWidth: 3, align: "center", fontPreset: "classic" });
+    const defaults = createTextBox(this.defaultFontSize);
+    for (const field of STYLE_FIELDS) (box as unknown as Record<string, unknown>)[field] = defaults[field];
     this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+  }
+
+  private copySelectedStyle(): void {
+    const box = this.selectedTextBox(); if (!box) return;
+    this.styleClipboard = Object.fromEntries(STYLE_FIELDS.map(field => [field, box[field]])) as MemeTextStyle;
+    this.updateUi(); this.setNotice("已复制当前文本框样式。", false);
+  }
+
+  private pasteSelectedStyle(): void {
+    const box = this.selectedTextBox(); if (!box || !this.styleClipboard) return;
+    const before = this.captureHistory(); Object.assign(box, this.styleClipboard);
+    this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+    this.setNotice("样式已粘贴。", false);
   }
 
   private deleteSelectedTextBox(): void {
@@ -492,12 +556,25 @@ export class MemeMakerController {
     const halfWidth = box.widthPercent / 2;
     box.xPercent = Math.min(100 - halfWidth, Math.max(halfWidth, this.numberInput("box_x", 0, 100)));
     box.strokeWidth = this.numberInput("box_stroke", 0, 12);
-    box.fillColor = this.colorInput("box_fill_color", "white");
-    box.strokeColor = this.colorInput("box_stroke_color", "black");
+    box.fillColor = this.hexInput("box_fill_color", "#ffffff");
+    box.strokeColor = this.hexInput("box_stroke_color", "#000000");
     const align = this.inputValue("box_align");
     box.align = align === "left" || align === "right" ? align : "center";
     const fontPreset = this.inputValue("box_font_preset");
     box.fontPreset = fontPreset === "chinese-bold" || fontPreset === "sans" ? fontPreset : "classic";
+    const fontWeight = this.inputValue("box_font_weight"); box.fontWeight = fontWeight === "normal" || fontWeight === "bold" ? fontWeight : "heavy";
+    box.lineHeight = this.numberInput("box_line_height", .8, 2);
+    box.letterSpacing = this.numberInput("box_letter_spacing", -4, 20);
+    box.backgroundEnabled = this.checkedInput("box_background_enabled");
+    box.backgroundColor = this.hexInput("box_background_color", "#000000");
+    box.backgroundOpacity = this.numberInput("box_background_opacity", 0, 100) / 100;
+    box.backgroundPadding = this.numberInput("box_background_padding", 0, 64);
+    box.backgroundRadius = this.numberInput("box_background_radius", 0, 32);
+    box.shadowEnabled = this.checkedInput("box_shadow_enabled");
+    box.shadowColor = this.hexInput("box_shadow_color", "#000000");
+    box.shadowBlur = this.numberInput("box_shadow_blur", 0, 32);
+    box.shadowOffsetX = this.numberInput("box_shadow_x", -32, 32);
+    box.shadowOffsetY = this.numberInput("box_shadow_y", -32, 32);
     this.updateUi();
     this.scheduleRender();
     if (commit) this.commitHistory();
@@ -506,7 +583,7 @@ export class MemeMakerController {
   private setAspectPreset(preset: MemeAspectPreset): void {
     if (!this.image || this.canvasState.aspectPreset === preset) return;
     const before = this.captureHistory();
-    this.canvasState = resetBackgroundTransform(this.image.width, this.image.height, preset, "fill");
+    this.canvasState = resetBackgroundTransform(this.image.width, this.image.height, preset, "fill", this.canvasState);
     this.updateUi(); this.renderNow();
     this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
@@ -521,8 +598,44 @@ export class MemeMakerController {
     this.updateUi(); this.scheduleRender(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
   }
 
+  private setOutputSize(width: number, height: number): void {
+    if (!this.image) return;
+    const before = this.captureHistory();
+    this.canvasState.outputWidth = Math.min(4096, Math.max(64, Math.round(width)));
+    this.canvasState.outputHeight = Math.min(4096, Math.max(64, Math.round(height)));
+    this.canvasState.aspectPreset = "custom";
+    this.canvasState.lockAspectRatio = true;
+    const scale = calculateFillScale(this.image.width, this.image.height, this.canvasState.outputWidth, this.canvasState.outputHeight);
+    Object.assign(this.canvasState, { backgroundScale: scale, backgroundOffsetX: 0, backgroundOffsetY: 0 });
+    this.updateUi(); this.renderNow(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+  }
+
+  private updateOutputSettings(target: EventTarget | null): void {
+    if (!this.image || !(target instanceof HTMLInputElement)) return;
+    if (!["output_width", "output_height", "lock_aspect", "canvas_background_color"].includes(target.name)) return;
+    const before = this.pendingHistory ?? this.captureHistory();
+    if (target.name === "lock_aspect") this.canvasState.lockAspectRatio = target.checked;
+    else if (target.name === "canvas_background_color") this.canvasState.canvasBackgroundColor = target.value;
+    else {
+      const oldRatio = this.canvasState.outputWidth / Math.max(1, this.canvasState.outputHeight);
+      const value = Math.min(4096, Math.max(64, Math.round(Number(target.value) || 64)));
+      if (target.name === "output_width") {
+        this.canvasState.outputWidth = value;
+        if (this.canvasState.lockAspectRatio) this.canvasState.outputHeight = Math.min(4096, Math.max(64, Math.round(value / oldRatio)));
+      } else {
+        this.canvasState.outputHeight = value;
+        if (this.canvasState.lockAspectRatio) this.canvasState.outputWidth = Math.min(4096, Math.max(64, Math.round(value * oldRatio)));
+      }
+      this.canvasState.aspectPreset = "custom";
+      const scale = calculateFillScale(this.image.width, this.image.height, this.canvasState.outputWidth, this.canvasState.outputHeight);
+      Object.assign(this.canvasState, { backgroundScale: scale, backgroundOffsetX: 0, backgroundOffsetY: 0 });
+    }
+    this.pendingHistory = null; this.updateUi(); this.renderNow(); this.history.record(before, this.captureHistory()); this.updateHistoryActions();
+  }
+
   private updateBackgroundFromForm(target?: EventTarget | null, commit = false): void {
     if (!this.image) return;
+    if (target instanceof HTMLInputElement && !["background_scale", "background_scale_number", "background_x", "background_x_number", "background_y", "background_y_number"].includes(target.name)) return;
     if (target instanceof HTMLInputElement && target.type === "number") {
       if (target.value.trim() === "" || !Number.isFinite(Number(target.value))) return;
       const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
@@ -708,6 +821,19 @@ export class MemeMakerController {
       this.setInput("box_stroke_color", box.strokeColor);
       this.setInput("box_align", box.align);
       this.setInput("box_font_preset", box.fontPreset);
+      this.setInput("box_font_weight", box.fontWeight);
+      this.syncRange("box_line_height", box.lineHeight, "×");
+      this.syncRange("box_letter_spacing", box.letterSpacing, "px");
+      this.setChecked("box_background_enabled", box.backgroundEnabled);
+      this.setInput("box_background_color", box.backgroundColor);
+      this.syncRange("box_background_opacity", box.backgroundOpacity * 100, "%");
+      this.syncRange("box_background_padding", box.backgroundPadding, "px");
+      this.syncRange("box_background_radius", box.backgroundRadius, "px");
+      this.setChecked("box_shadow_enabled", box.shadowEnabled);
+      this.setInput("box_shadow_color", box.shadowColor);
+      this.syncRange("box_shadow_blur", box.shadowBlur, "px");
+      this.syncRange("box_shadow_x", box.shadowOffsetX, "px");
+      this.syncRange("box_shadow_y", box.shadowOffsetY, "px");
       this.setOutput("box_font_size", `${Math.round(box.fontSize)}px`);
       this.setOutput("box_x", `${this.displayPercent(box.xPercent)}%`);
       this.setOutput("box_y", `${this.displayPercent(box.yPercent)}%`);
@@ -726,6 +852,10 @@ export class MemeMakerController {
     this.setOutput("background_scale", `${this.displayNumber(scalePercent)}%`);
     this.setOutput("background_x", `${this.displayNumber(this.canvasState.backgroundOffsetX)}%`);
     this.setOutput("background_y", `${this.displayNumber(this.canvasState.backgroundOffsetY)}%`);
+    this.setInput("output_width", this.canvasState.outputWidth || 64);
+    this.setInput("output_height", this.canvasState.outputHeight || 64);
+    this.setChecked("lock_aspect", this.canvasState.lockAspectRatio);
+    this.setInput("canvas_background_color", this.canvasState.canvasBackgroundColor);
     for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-aspect-preset]")) {
       button.classList.toggle("is-active", button.dataset.aspectPreset === this.canvasState.aspectPreset);
       button.setAttribute("aria-pressed", String(button.dataset.aspectPreset === this.canvasState.aspectPreset));
@@ -742,9 +872,11 @@ export class MemeMakerController {
     const clone = this.dialog.querySelector<HTMLButtonElement>("[data-clone-text-box]");
     const up = this.dialog.querySelector<HTMLButtonElement>("[data-layer-up]");
     const down = this.dialog.querySelector<HTMLButtonElement>("[data-layer-down]");
+    const paste = this.dialog.querySelector<HTMLButtonElement>("[data-paste-text-style]");
     if (clone) clone.disabled = !box || this.textBoxes.length >= MAX_TEXT_BOXES;
     if (up) up.disabled = index < 0 || index === this.textBoxes.length - 1;
     if (down) down.disabled = index <= 0;
+    if (paste) paste.disabled = !box || !this.styleClipboard;
     this.updateHistoryActions();
   }
 
@@ -852,7 +984,8 @@ export class MemeMakerController {
   private reset(): void {
     this.loadGeneration += 1; this.releaseImage(); this.form.reset();
     this.textBoxes = []; this.selectedTextBoxId = null; this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.backgroundInteraction = { type: "idle" }; this.background = null;
-    this.canvasState = { aspectPreset: "original", outputWidth: 0, outputHeight: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0 };
+    this.canvasState = { aspectPreset: "original", outputWidth: 0, outputHeight: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff" };
+    this.styleClipboard = null;
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.templateSelect.innerHTML = '<option value="">正在加载模板…</option>';
     this.canvas.width = 0; this.canvas.height = 0; this.updatePreview(false); this.setNotice(""); this.busy = false; this.updateUi();
@@ -875,13 +1008,16 @@ export class MemeMakerController {
     return field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement ? field.value : "";
   }
   private numberInput(name: string, min: number, max: number): number { return Math.min(max, Math.max(min, Number(this.inputValue(name)))); }
-  private colorInput(name: string, fallback: MemeColor): MemeColor { return this.inputValue(name) === "white" ? "white" : this.inputValue(name) === "black" ? "black" : fallback; }
+  private hexInput(name: string, fallback: string): string { return /^#[0-9a-f]{6}$/iu.test(this.inputValue(name)) ? this.inputValue(name) : fallback; }
+  private checkedInput(name: string): boolean { const field = this.form.elements.namedItem(name); return field instanceof HTMLInputElement && field.checked; }
   private displayPercent(value: number): string { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
   private displayNumber(value: number): string { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
   private setInput(name: string, value: string | number): void {
     const field = this.form.elements.namedItem(name);
     if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) field.value = String(value);
   }
+  private setChecked(name: string, value: boolean): void { const field = this.form.elements.namedItem(name); if (field instanceof HTMLInputElement) field.checked = value; }
+  private syncRange(name: string, value: number, unit: string): void { const shown = this.displayNumber(value); this.setInput(name, shown); this.setInput(`${name}_number`, shown); this.setOutput(name, `${shown}${unit}`); }
   private setOutput(name: string, value: string): void { this.required<HTMLOutputElement>(`[data-output="${name}"]`).value = value; }
   private required<T extends Element = HTMLElement>(selector: string): T {
     const element = this.dialog.querySelector<T>(selector);

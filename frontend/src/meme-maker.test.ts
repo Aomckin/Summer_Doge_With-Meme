@@ -32,8 +32,10 @@ function setup(overrides: Partial<MemeMakerApi> = {}) {
   document.body.innerHTML = '<button data-trigger type="button">open</button>';
   const context = {
     save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
+    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
+    globalAlpha: 1, shadowColor: "", shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0,
   } as unknown as CanvasRenderingContext2D;
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
   vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => callback(new Blob(["png"], { type: "image/png" })));
@@ -201,7 +203,7 @@ describe("Meme Maker controller", () => {
     expect(boxes).toHaveLength(2);
     expect(boxes[1].dataset.textBoxId).not.toBe(originalId);
     expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Clone me");
-    expect(dialog.querySelector<HTMLSelectElement>('[name="box_fill_color"]')?.value).toBe("black");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_fill_color"]')?.value).toBe("#000000");
     expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("53");
     for (let index = 2; index < 20; index += 1) dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click();
     expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(20);
@@ -509,5 +511,41 @@ describe("Meme Maker controller", () => {
     await vi.waitFor(() => expect(api.uploadMeme).toHaveBeenCalled());
     expect(vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1)).toEqual(exportRect);
     expect(api.uploadMeme).toHaveBeenCalledWith(expect.objectContaining({ template_id: 1, source: "meme-maker" }));
+  });
+
+  it("copies and pastes only style fields, resets style, and supports undo", async () => {
+    const { dialog } = setup(); await choose(dialog); type(dialog, "box_text", "Source"); type(dialog, "box_x", "35"); type(dialog, "box_width", "45");
+    type(dialog, "box_fill_color", "#ff0000"); type(dialog, "box_line_height", "1.5"); type(dialog, "box_letter_spacing", "3");
+    const background = dialog.querySelector<HTMLInputElement>('[name="box_background_enabled"]')!; background.checked = true; background.dispatchEvent(new Event("change", { bubbles: true }));
+    const paste = dialog.querySelector<HTMLButtonElement>("[data-paste-text-style]")!; expect(paste.disabled).toBe(true);
+    dialog.querySelector<HTMLButtonElement>("[data-copy-text-style]")!.click(); expect(paste.disabled).toBe(false);
+    dialog.querySelector<HTMLButtonElement>("[data-add-text-box]")!.click(); type(dialog, "box_text", "Target"); type(dialog, "box_x", "70"); type(dialog, "box_width", "60");
+    paste.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_fill_color"]')?.value).toBe("#ff0000");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_line_height"]')?.value).toBe("1.5");
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Target");
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("70"); expect(dialog.querySelector<HTMLInputElement>('[name="box_width"]')?.value).toBe("60");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); expect(dialog.querySelector<HTMLInputElement>('[name="box_fill_color"]')?.value).toBe("#ffffff");
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click(); dialog.querySelector<HTMLButtonElement>("[data-reset-text-style]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="box_fill_color"]')?.value).toBe("#ffffff");
+    expect(dialog.querySelector<HTMLTextAreaElement>('[name="box_text"]')?.value).toBe("Target"); expect(dialog.querySelector<HTMLInputElement>('[name="box_x"]')?.value).toBe("70");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); expect(dialog.querySelector<HTMLInputElement>('[name="box_fill_color"]')?.value).toBe("#ff0000");
+  });
+
+  it("updates custom output size with predictable aspect locking and canvas color history", async () => {
+    const { dialog, context } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>('[data-output-size="1080x1080"]')!.click();
+    expect(dialog.querySelector("[data-resolution]")?.textContent).toBe("1080 × 1080 PNG");
+    const width = dialog.querySelector<HTMLInputElement>('[name="output_width"]')!; width.focus(); width.value = "1200"; width.dispatchEvent(new Event("change", { bubbles: true })); width.blur();
+    expect(dialog.querySelector<HTMLInputElement>('[name="output_height"]')?.value).toBe("1200");
+    const lock = dialog.querySelector<HTMLInputElement>('[name="lock_aspect"]')!; lock.checked = false; lock.dispatchEvent(new Event("change", { bubbles: true }));
+    const height = dialog.querySelector<HTMLInputElement>('[name="output_height"]')!; height.value = "700"; height.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(width.value).toBe("1200"); expect(height.value).toBe("700");
+    width.value = "99999"; width.dispatchEvent(new Event("change", { bubbles: true })); expect(width.value).toBe("4096");
+    const color = dialog.querySelector<HTMLInputElement>('[name="canvas_background_color"]')!; color.value = "#123456"; color.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(context.fillRect).toHaveBeenCalled());
+    expect(color.value).toBe("#123456");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); await vi.waitFor(() => expect(color.value).toBe("#ffffff"));
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click(); await vi.waitFor(() => expect(color.value).toBe("#123456"));
   });
 });

@@ -4,11 +4,15 @@ import type { MemeTextBox, TextBoxMeasurement } from "./meme-renderer";
 
 const box = (id: string, overrides: Partial<MemeTextBox> = {}): MemeTextBox => ({
   id, text: id, xPercent: 50, yPercent: 50, widthPercent: 40, fontSize: 40,
-  fillColor: "white", strokeWidth: 3, strokeColor: "black", align: "center", fontPreset: "classic", ...overrides,
+  fillColor: "white", strokeWidth: 3, strokeColor: "black", align: "center", fontPreset: "classic",
+  fontWeight: "heavy", lineHeight: 1.15, letterSpacing: 0, backgroundEnabled: false, backgroundColor: "#000000",
+  backgroundOpacity: .7, backgroundPadding: 12, backgroundRadius: 8, shadowEnabled: false, shadowColor: "#000000",
+  shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2, ...overrides,
 });
 const measurement = (left: number, top: number, right: number, bottom: number): TextBoxMeasurement => ({
   lines: ["x"], lineHeight: 20, anchorX: 0, centerY: 0,
-  bounds: { left, top, right, bottom, width: right - left, height: bottom - top },
+  bounds: { left, top, right, bottom, width: right - left, height: bottom - top }, lineWidths: [right - left],
+  contentBounds: { left, top, right, bottom, width: right - left, height: bottom - top },
 });
 
 describe("Meme Maker interaction", () => {

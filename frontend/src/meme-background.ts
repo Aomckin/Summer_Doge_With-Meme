@@ -1,4 +1,4 @@
-export type MemeAspectPreset = "original" | "1:1" | "4:3" | "3:4" | "16:9";
+export type MemeAspectPreset = "original" | "1:1" | "4:3" | "3:4" | "16:9" | "custom";
 
 export interface MemeCanvasState {
   aspectPreset: MemeAspectPreset;
@@ -7,11 +7,13 @@ export interface MemeCanvasState {
   backgroundScale: number;
   backgroundOffsetX: number;
   backgroundOffsetY: number;
+  lockAspectRatio: boolean;
+  canvasBackgroundColor: string;
 }
 
 export interface BackgroundDrawRect { x: number; y: number; width: number; height: number }
 
-const RATIOS: Record<Exclude<MemeAspectPreset, "original">, number> = {
+const RATIOS: Record<Exclude<MemeAspectPreset, "original" | "custom">, number> = {
   "1:1": 1,
   "4:3": 4 / 3,
   "3:4": 3 / 4,
@@ -24,7 +26,7 @@ export function calculateOutputDimensions(
   preset: MemeAspectPreset,
 ): { width: number; height: number } {
   if (sourceWidth <= 0 || sourceHeight <= 0) throw new Error("底图尺寸无效。");
-  if (preset === "original") return { width: sourceWidth, height: sourceHeight };
+  if (preset === "original" || preset === "custom") return { width: sourceWidth, height: sourceHeight };
   const ratio = RATIOS[preset];
   if (sourceWidth / sourceHeight >= ratio) {
     return { width: Math.max(1, Math.round(sourceHeight * ratio)), height: sourceHeight };
@@ -60,8 +62,11 @@ export function resetBackgroundTransform(
   sourceHeight: number,
   aspectPreset: MemeAspectPreset,
   mode: "fit" | "fill" = "fill",
+  previous?: MemeCanvasState,
 ): MemeCanvasState {
-  const output = calculateOutputDimensions(sourceWidth, sourceHeight, aspectPreset);
+  const output = aspectPreset === "custom" && previous?.outputWidth && previous.outputHeight
+    ? { width: previous.outputWidth, height: previous.outputHeight }
+    : calculateOutputDimensions(sourceWidth, sourceHeight, aspectPreset);
   return {
     aspectPreset,
     outputWidth: output.width,
@@ -71,5 +76,7 @@ export function resetBackgroundTransform(
       : calculateFillScale(sourceWidth, sourceHeight, output.width, output.height),
     backgroundOffsetX: 0,
     backgroundOffsetY: 0,
+    lockAspectRatio: previous?.lockAspectRatio ?? true,
+    canvasBackgroundColor: previous?.canvasBackgroundColor ?? "#ffffff",
   };
 }

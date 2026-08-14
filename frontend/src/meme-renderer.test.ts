@@ -4,15 +4,19 @@ import { drawTextBox, measureTextBox, renderMemeCanvas, wrapTextBoxText, type Me
 function context() {
   return {
     save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
+    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), quadraticCurveTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: [...text].length * 10 })),
     font: "", textAlign: "start", textBaseline: "alphabetic", lineJoin: "miter", fillStyle: "", strokeStyle: "", lineWidth: 0,
+    globalAlpha: 1, shadowColor: "", shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0,
   } as unknown as CanvasRenderingContext2D;
 }
 
 const box = (overrides: Partial<MemeTextBox> = {}): MemeTextBox => ({
   id: "one", text: "Hello", xPercent: 50, yPercent: 50, widthPercent: 50,
   fontSize: 40, fillColor: "white", strokeWidth: 4, strokeColor: "black",
-  align: "center", fontPreset: "classic", ...overrides,
+  align: "center", fontPreset: "classic", fontWeight: "heavy", lineHeight: 1.15, letterSpacing: 0,
+  backgroundEnabled: false, backgroundColor: "#000000", backgroundOpacity: .7, backgroundPadding: 12, backgroundRadius: 8,
+  shadowEnabled: false, shadowColor: "#000000", shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2, ...overrides,
 });
 
 describe("TextBox renderer", () => {
@@ -33,6 +37,7 @@ describe("TextBox renderer", () => {
     renderMemeCanvas(canvas, {} as CanvasImageSource, [], 800, 400, {
       aspectPreset: "1:1", outputWidth: 400, outputHeight: 400,
       backgroundScale: 1, backgroundOffsetX: 10, backgroundOffsetY: -5,
+      lockAspectRatio: true, canvasBackgroundColor: "#ffffff",
     });
     expect([canvas.width, canvas.height]).toEqual([400, 400]);
     expect(ctx.drawImage).toHaveBeenCalledWith(expect.anything(), -160, -20, 800, 400);
@@ -76,10 +81,10 @@ describe("TextBox renderer", () => {
   });
 
   it.each([
-    ["white", "black", 4, "#ffffff", "#000000", true],
-    ["black", "white", 4, "#000000", "#ffffff", true],
-    ["black", "white", 0, "#000000", "#ffffff", false],
-    ["white", "black", 0, "#ffffff", "#000000", false],
+    ["#ffffff", "#000000", 4, "#ffffff", "#000000", true],
+    ["#000000", "#ffffff", 4, "#000000", "#ffffff", true],
+    ["#000000", "#ffffff", 0, "#000000", "#ffffff", false],
+    ["#ffffff", "#000000", 0, "#ffffff", "#000000", false],
   ] as const)("renders %s fill with %s stroke at width %s", (fillColor, strokeColor, strokeWidth, fill, stroke, stroked) => {
     const ctx = context();
     drawTextBox(ctx, box({ fillColor, strokeColor, strokeWidth }), 800, 600);
@@ -97,5 +102,32 @@ describe("TextBox renderer", () => {
     ], 800, 600);
     expect(ctx.fillText).toHaveBeenNthCalledWith(1, "A", 400, 300);
     expect(ctx.fillText).toHaveBeenNthCalledWith(2, "B", 400, 300);
+  });
+
+  it("applies line height, letter spacing and font weight to measurement and drawing", () => {
+    const ctx = context();
+    const measured = drawTextBox(ctx, box({ text: "AB\nCD", lineHeight: 1.5, letterSpacing: 2, fontWeight: "normal" }), 800, 600);
+    expect(measured.lineHeight).toBe(60);
+    expect(measured.lineWidths).toEqual([22, 22]);
+    expect(ctx.font).toContain("400 40px");
+    expect(ctx.fillText).toHaveBeenCalledTimes(4);
+  });
+
+  it("wraps using letter spacing width", () => {
+    const ctx = context();
+    expect(wrapTextBoxText(ctx, "ABCD", 35, 2)).toEqual(["ABC", "D"]);
+  });
+
+  it("draws an opaque rounded background around multiline content with padding", () => {
+    const ctx = context();
+    drawTextBox(ctx, box({ text: "A\nBB", backgroundEnabled: true, backgroundColor: "#123456", backgroundOpacity: .5, backgroundPadding: 10, backgroundRadius: 6 }), 800, 600);
+    expect(ctx.beginPath).toHaveBeenCalled(); expect(ctx.quadraticCurveTo).toHaveBeenCalled(); expect(ctx.fill).toHaveBeenCalled();
+    expect(ctx.globalAlpha).toBe(.5); expect(ctx.fillStyle).toBe("white");
+  });
+
+  it("applies enabled shadow and clears it when disabled", () => {
+    const enabled = context(); drawTextBox(enabled, box({ shadowEnabled: true, shadowColor: "#ff0000", shadowBlur: 7, shadowOffsetX: 3, shadowOffsetY: -2 }), 800, 600);
+    expect(enabled.shadowColor).toBe("#ff0000"); expect(enabled.shadowBlur).toBe(7); expect(enabled.shadowOffsetX).toBe(3); expect(enabled.shadowOffsetY).toBe(-2);
+    const disabled = context(); drawTextBox(disabled, box({ shadowEnabled: false }), 800, 600); expect(disabled.shadowColor).toBe("transparent");
   });
 });

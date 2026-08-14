@@ -1,16 +1,22 @@
-# Meme Vault v0.7.3
+# Meme Vault v0.7.4
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.3，Meme 制作器新增输出比例预设与底图取景，可在独立输出画布中缩放、平移 Template Reference Image 或本地静态底图，并通过 Fit、Fill、Reset 快速构图；全部操作继续接入会话内 Undo/Redo、PNG 导出与普通 Meme 入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.7.4，Meme Forge 第一阶段已封版：在底图取景与自由文本框基础上，新增任意文字/描边颜色、文本背景框、文字阴影、行高、字距、字重、会话内样式复制粘贴，以及常用/自定义输出尺寸、比例锁定和画布背景色。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## Meme 制作器
 
 顶部“Meme 制作器”入口可读取现有模板参考图，或选择仅在当前会话使用的本地 PNG、JPEG、WebP 底图。加载后会创建一个默认文本框；可继续添加、选择、删除或复制文本框，并为每个文本框独立设置文字、字号、X/Y、文本区域宽度、黑/白文字、黑/白描边、左/中/右对齐与三个系统字体预设。画布支持拖动、左右 handle 调宽及方向键微调（0.5%，Shift 为 2%）；最多 20 个文本框，并可上移或下移一层。
 
+每个文本框可使用任意 Hex 文字色和描边色、normal/bold/heavy 字重、0.8–2.0 行高倍率及 -4–20px 字距。文本背景框支持颜色、独立透明度、Padding 和圆角；文字阴影支持颜色、模糊和 X/Y 偏移。背景框先根据多行文字实际内容 bounds 外扩 Padding 再绘制，阴影使用 Canvas 原生文字阴影。经典白字黑边仍是默认样式。
+
+“复制样式 / 粘贴样式”只复用视觉与排版字段，不复制文字、ID、位置或文本框宽度；样式剪贴板仅存在当前 Maker 会话。扩展后的“重置样式”同样保留文字、位置和宽度，复制、粘贴、重置都接入 Undo/Redo。
+
 输出画布支持原图、1:1、4:3、3:4、16:9；固定比例尺寸取原图范围内最大内接矩形，不主动放大。底图可使用 10%–400% 缩放与 X/Y 百分比偏移，也可直接拖动画布空白区域平移；“适应画布”完整显示图片并允许白色留白，“填满画布”覆盖画布并允许边缘裁切，“重置底图”在当前比例下恢复 Fill + Center。裁剪通过输出画布与背景取景实现，当前不存在自由 Crop Rectangle。
 
-预览、导出与保存共享同一个背景矩形计算及 Canvas Renderer；选中框、resize handle 和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终输出 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持持久化或分支式 History、GIF Maker、图片图层、旋转、自由裁剪框、滤镜、任意颜色/字体上传或非 PNG 输出。
+输出还提供 1080×1080、1080×1350、1920×1080、1200×675、800×800 常用尺寸，并允许在 64–4096px 内自定义宽高。锁定比例时修改一边会按当前比例推算另一边，解锁后宽高独立；尺寸变化会执行 Fill + Center。画布背景色用于 Fit 或手动移开底图后的未覆盖区域。
+
+预览、导出与保存共享同一个背景矩形、文本测量与 Canvas Renderer；选中框、resize handle 和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终输出 Canvas PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，两者均记录 `source=meme-maker`。当前不支持旋转、图片图层、Sticker、滤镜、GIF 编辑、网络字体、自由裁剪框或非 PNG 输出。
 
 编辑历史保存最多 50 个轻量状态步骤，只包含文本框、当前选择、标题、输出比例/尺寸与底图缩放偏移，不保存 Canvas、Blob、底图 Bitmap 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D` 复制、`Delete` 删除、`Escape` 取消选择。输入框聚焦时这些快捷键不会被 Maker 劫持。文本框/背景拖动和 resize 的多次 pointermove、Slider 的连续 input 都合并为单个历史步骤；历史在关闭制作器后清空。
 

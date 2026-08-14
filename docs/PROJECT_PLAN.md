@@ -481,6 +481,17 @@ History 不保存底图对象、Canvas、Blob、DOM 或渲染结果，关闭 Mak
 
 裁剪通过输出画布与背景取景实现，当前不存在自由 Crop Rectangle；不提供旋转、镜像、滤镜、图片图层、自定义像素尺寸或 AI 构图。
 
+### v0.7.4：Meme Forge 完整化增强与第一阶段封版（已完成）
+
+- [x] TextBox 支持任意 Hex fill/stroke、三档字重、行高、字距、文本背景框与文字阴影。
+- [x] 背景框按多行内容 bounds 外扩 Padding，支持独立透明度和圆角；阴影使用 Canvas 原生参数。
+- [x] 会话内复制/粘贴视觉样式，不复制文字、ID、位置或宽度；Reset 保留内容与布局。
+- [x] 输出支持常用尺寸、64–4096px 自定义宽高、比例锁定及 Canvas Background Color。
+- [x] 所有新增 TextBox/Canvas 状态接入 50 步 Undo/Redo；Preview、Export、Save 共用 Renderer。
+- [x] 无新增后端模型/API/服务，无新增 npm/Python 依赖。
+
+Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供旋转、图片图层、Sticker、滤镜、GIF 编辑、草稿文件或复杂图层系统。
+
 ### v1.0：可公开访问版本
 
 - [ ] 用户系统、权限控制与分享链接
@@ -563,7 +574,7 @@ data/thumbnails/*
 - 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
 - Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.7.3 底图取景与输出画布已完成
+当前状态：v0.7.4 Meme Forge 第一阶段封版已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

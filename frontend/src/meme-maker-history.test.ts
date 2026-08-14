@@ -5,10 +5,13 @@ import type { MemeTextBox } from "./meme-renderer";
 const box = (fontSize: number): MemeTextBox => ({
   id: "box", text: "A", xPercent: 50, yPercent: 50, widthPercent: 50, fontSize,
   fillColor: "white", strokeWidth: 3, strokeColor: "black", align: "center", fontPreset: "classic",
+  fontWeight: "heavy", lineHeight: 1.15, letterSpacing: 0, backgroundEnabled: false, backgroundColor: "#000000",
+  backgroundOpacity: .7, backgroundPadding: 12, backgroundRadius: 8, shadowEnabled: false, shadowColor: "#000000",
+  shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2,
 });
 const state = (fontSize: number, title = "Title"): MemeMakerHistoryState => ({
   textBoxes: [box(fontSize)], selectedTextBoxId: "box", title,
-  canvasState: { aspectPreset: "original", outputWidth: 800, outputHeight: 600, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0 },
+  canvasState: { aspectPreset: "original", outputWidth: 800, outputHeight: 600, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff" },
 });
 
 describe("Meme Maker history", () => {

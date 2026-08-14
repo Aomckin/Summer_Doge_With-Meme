@@ -41,6 +41,7 @@ function setup(overrides: Partial<MemeMakerApi> = {}) {
   vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => callback(new Blob(["png"], { type: "image/png" })));
   const api: MemeMakerApi = {
     listTemplates: vi.fn().mockResolvedValue([staticTemplate, ...unavailable]),
+    listMemes: vi.fn().mockResolvedValue([]),
     uploadMeme: vi.fn().mockResolvedValue(meme()),
     ...overrides,
   };
@@ -134,6 +135,106 @@ describe("Meme Maker controller", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalled();
   });
 
+  it("adds a Vault image through the picker and restores it with undo and redo", async () => {
+    const vaultMeme = { ...meme(21), title: "Vault 素材", source: "vault" };
+    const listMemes = vi.fn().mockResolvedValue([vaultMeme]);
+    const { dialog, api, loadImage } = setup({ listMemes });
+    await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>('[data-open-vault-picker="add"]')!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-vault-meme-id]")).toHaveLength(1));
+    expect(listMemes).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, limit: 12 }));
+    dialog.querySelector<HTMLButtonElement>('[data-vault-meme-id="21"]')!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    expect(loadImage).toHaveBeenLastCalledWith(vaultMeme.image_url);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(0);
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    expect(api.uploadMeme).not.toHaveBeenCalled();
+  });
+
+  it("opens directly with a Viewer/Vault image as an undoable image layer", async () => {
+    const { controller, dialog, loadImage } = setup();
+    controller.close();
+    await controller.openWithVaultImage({
+      url: "/media/images/viewer.png", filename: "viewer.png", title: "Viewer 图",
+      mimeType: "image/png", width: 800, height: 600,
+    });
+    expect(dialog.open).toBe(true);
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_visible"]')?.checked).toBe(false);
+    expect(loadImage).toHaveBeenCalledWith("/media/images/viewer.png");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(0);
+  });
+
+  it("applies quick layout as one undoable step and explicitly refills content", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    imageFiles(dialog, [1, 2, 3, 4].map(index => new File(["png"], `${index}.png`, { type: "image/png" })));
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(4));
+    changeControl(dialog, "image_crop_x", "10");
+    const oldWidth = dialog.querySelector<HTMLInputElement>('[name="image_width"]')!.value;
+    dialog.querySelector<HTMLButtonElement>('[data-image-layout="grid-2x2"]')!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("75");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_y"]')?.value).toBe("75");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("50");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("75");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe(oldWidth);
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("10");
+    dialog.querySelector<HTMLButtonElement>("[data-redo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("50");
+  });
+
+  it("replaces an image source with Fill while preserving frame, order and opacity", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    imageFiles(dialog, [new File(["png"], "old.png", { type: "image/png" })]);
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    changeControl(dialog, "image_x", "35"); changeControl(dialog, "image_y", "40");
+    changeControl(dialog, "image_width", "60"); changeControl(dialog, "image_height", "30");
+    changeControl(dialog, "image_crop_x", "5"); changeControl(dialog, "image_crop_y", "7");
+    changeControl(dialog, "image_opacity", "42");
+    const replace = dialog.querySelector<HTMLInputElement>('[name="replace_image_layer"]')!;
+    Object.defineProperty(replace, "files", { configurable: true, value: [new File(["png"], "new.png", { type: "image/png" })] });
+    replace.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(dialog.querySelector("[data-maker-notice]")?.textContent).toContain("来源已替换"));
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("35");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_y"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("60");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_height"]')?.value).toBe("30");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("35");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_y"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_opacity"]')?.value).toBe("42");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("5");
+  });
+
+  it("clears image layers, clears text boxes and resets Forge as separate undoable actions", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    imageFiles(dialog, [new File(["png"], "one.png", { type: "image/png" })]);
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    type(dialog, "box_text", "保留测试");
+    dialog.querySelector<HTMLButtonElement>("[data-clear-image-layers]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(0);
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-clear-text-boxes]")!.click();
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(0);
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    changeControl(dialog, "background_x", "20");
+    dialog.querySelector<HTMLButtonElement>("[data-reset-forge]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(0);
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(0);
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("0");
+    dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
+    expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1);
+    expect(dialog.querySelectorAll("[data-text-box-id]")).toHaveLength(1);
+    expect(dialog.querySelector<HTMLInputElement>('[name="background_x"]')?.value).toBe("20");
+  });
+
   it("caps one batch at 30 image layers with unique layer identities", async () => {
     const { dialog } = setup(); await choose(dialog);
     imageFiles(dialog, Array.from({ length: 31 }, (_, index) => new File(["png"], `${index}.png`, { type: "image/png" })));
@@ -148,11 +249,11 @@ describe("Meme Maker controller", () => {
     const { dialog, context } = setup(); await choose(dialog);
     dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
     await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
-    type(dialog, "image_width", "55"); type(dialog, "image_height", "35"); type(dialog, "image_crop_scale", "180"); type(dialog, "image_crop_x", "12"); type(dialog, "image_opacity", "45");
+    type(dialog, "image_width", "55"); type(dialog, "image_height", "35"); type(dialog, "image_scale", "180"); type(dialog, "image_crop_x", "12"); type(dialog, "image_opacity", "45");
     await vi.waitFor(() => expect(context.clip).toHaveBeenCalled());
-    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width_number"]')?.value).toBe("247.5");
     dialog.querySelector<HTMLButtonElement>("[data-image-fit]")!.click();
-    expect(Number(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value)).toBeLessThanOrEqual(100);
+    expect(Number(dialog.querySelector<HTMLInputElement>('[name="image_scale"]')?.value)).toBeLessThanOrEqual(500);
     dialog.querySelector<HTMLButtonElement>("[data-clone-image-layer]")!.click();
     expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(2);
     dialog.querySelector<HTMLButtonElement>("[data-image-layer-down]")!.click();
@@ -167,7 +268,7 @@ describe("Meme Maker controller", () => {
     dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click(); expect(visible.checked).toBe(true);
   });
 
-  it("keeps frame and content independent and records frame move, resize, pan and zoom as separate history steps", async () => {
+  it("keeps frame edits and content pan independent while geometric scale preserves the current crop", async () => {
     const { dialog } = setup(); await choose(dialog);
     dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
     await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
@@ -177,17 +278,19 @@ describe("Meme Maker controller", () => {
     changeControl(dialog, "image_x", "60");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
     changeControl(dialog, "image_width", "55");
-    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_scale"]')?.value).toBe("40");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
     changeControl(dialog, "image_crop_x", "70");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("60");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
-    changeControl(dialog, "image_crop_scale", "80");
+    changeControl(dialog, "image_scale", "50");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("60");
-    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("55");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("68.8");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_height"]')?.value).toBe("50");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("72.5");
 
     dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
-    expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_scale"]')?.value).toBe("40");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_scale"]')?.value).toBe("40");
     expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("70");
     dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
     expect(dialog.querySelector<HTMLInputElement>('[name="image_crop_x"]')?.value).toBe("50");
@@ -195,6 +298,20 @@ describe("Meme Maker controller", () => {
     expect(dialog.querySelector<HTMLInputElement>('[name="image_width"]')?.value).toBe("40");
     dialog.querySelector<HTMLButtonElement>("[data-undo]")!.click();
     expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("50");
+  });
+
+  it("keeps the image layer scale range fixed at 500 percent without canvas-boundary clamping", async () => {
+    const { dialog } = setup(); await choose(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]")!.click();
+    await vi.waitFor(() => expect(dialog.querySelectorAll("[data-image-layer-id]")).toHaveLength(1));
+    const scale = dialog.querySelector<HTMLInputElement>('[name="image_scale"]')!;
+    expect(scale.max).toBe("500");
+    changeControl(dialog, "image_scale", "500");
+    expect(scale.value).toBe("500");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_width_number"]')?.value).toBe("500");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_height_number"]')?.value).toBe("500");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_x"]')?.value).toBe("50");
+    expect(dialog.querySelector<HTMLInputElement>('[name="image_y"]')?.value).toBe("50");
   });
 
   it("uses the identical independent frame and content transform for preview and export", async () => {
@@ -205,7 +322,7 @@ describe("Meme Maker controller", () => {
     cropMode.checked = true; cropMode.dispatchEvent(new Event("change", { bubbles: true }));
     changeControl(dialog, "image_x", "65"); changeControl(dialog, "image_y", "40");
     changeControl(dialog, "image_width", "35"); changeControl(dialog, "image_height", "60");
-    changeControl(dialog, "image_crop_x", "30"); changeControl(dialog, "image_crop_y", "70"); changeControl(dialog, "image_crop_scale", "85");
+    changeControl(dialog, "image_crop_x", "30"); changeControl(dialog, "image_crop_y", "70"); changeControl(dialog, "image_scale", "85");
     await vi.waitFor(() => expect(context.clip).toHaveBeenCalled());
     const previewDraw = vi.mocked(context.drawImage).mock.calls.at(-1)?.slice(1);
     const previewClip = vi.mocked(context.rect).mock.calls.at(-1);

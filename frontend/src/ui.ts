@@ -61,6 +61,7 @@ export interface AppElements {
   imageViewerTitle: HTMLElement;
   imageViewerLink: HTMLAnchorElement;
   imageViewerCopy: HTMLButtonElement;
+  imageViewerForge: HTMLButtonElement;
   imageViewerDownload: HTMLAnchorElement;
   imageViewerError: HTMLElement;
   imageViewerPrevious: HTMLButtonElement;
@@ -396,6 +397,7 @@ export function mountShell(root: HTMLElement): AppElements {
               rel="noopener noreferrer"
             >打开原图</a>
             <button class="button button-secondary" type="button" data-viewer-copy>复制当前图</button>
+            <button class="button button-secondary" type="button" data-viewer-forge>加入 Meme Forge</button>
             <a class="button button-primary" data-viewer-download>下载当前图</a>
             <button
               class="icon-button"
@@ -469,6 +471,7 @@ export function mountShell(root: HTMLElement): AppElements {
     imageViewerTitle: required(document, "[data-viewer-title]"),
     imageViewerLink: required(document, "[data-viewer-link]"),
     imageViewerCopy: required(document, "[data-viewer-copy]"),
+    imageViewerForge: required(document, "[data-viewer-forge]"),
     imageViewerDownload: required(document, "[data-viewer-download]"),
     imageViewerError: required(document, "[data-viewer-error]"),
     imageViewerPrevious: required(document, "[data-viewer-previous]"),

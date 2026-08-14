@@ -17,7 +17,7 @@ import {
   type ImageResizeHandle,
   type InteractionState,
 } from "./meme-maker-interaction";
-import type { MemeResponse, TemplateResponse, UploadMemeInput } from "./types";
+import type { ListMemesOptions, MemeResponse, TemplateResponse, UploadMemeInput } from "./types";
 import { MemeMakerHistory, type MemeMakerHistoryState } from "./meme-maker-history";
 import {
   calculateFillScale,
@@ -31,9 +31,16 @@ import {
   calculateImageLayerFrame,
   createDefaultImageLayer,
   hitTestImageLayers,
+  scaleImageLayerGeometry,
   type MemeImageLayer,
   type MemeImageSource,
 } from "./meme-image-layer";
+import {
+  applyImageLayout,
+  canApplyImageLayout,
+  layoutFrameCount,
+  type MemeImageLayout,
+} from "./meme-maker-layout";
 
 interface LoadedTemplateImage {
   source: CanvasImageSource;
@@ -44,10 +51,21 @@ interface LoadedTemplateImage {
 
 type MakerBackground =
   | { type: "template"; templateId: number; name: string }
-  | { type: "local"; file: File; name: string };
+  | { type: "local"; file: File; name: string }
+  | { type: "vault"; name: string; url: string };
+
+export interface MemeVaultImageInput {
+  url: string;
+  filename: string;
+  title: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
 
 export interface MemeMakerApi {
   listTemplates(): Promise<TemplateResponse[]>;
+  listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
 }
 
@@ -177,6 +195,10 @@ export class MemeMakerController {
   private snapGuideX = false;
   private snapGuideY = false;
   private styleClipboard: MemeTextStyle | null = null;
+  private vaultPickerPage = 0;
+  private vaultPickerResults: MemeResponse[] = [];
+  private vaultPickerMode: "add" | "replace" = "add";
+  private vaultPickerBusy = false;
   private readonly loadImage: (url: string) => Promise<LoadedTemplateImage>;
   private readonly scheduleFrame: (callback: FrameRequestCallback) => number;
   private readonly cancelFrame: (id: number) => void;
@@ -236,8 +258,20 @@ export class MemeMakerController {
               <div class="text-box-manager-heading"><strong id="image-layer-list-title">图片层</strong><span data-image-layer-count>0 / ${MAX_IMAGE_LAYERS}</span></div>
               <div class="text-box-list image-layer-list" data-image-layer-list role="listbox" aria-label="图片层列表"></div>
               <div class="text-box-actions">
-                <label class="button button-secondary maker-file-button">+ 添加图片<input name="image_layers" type="file" multiple accept="image/png,image/jpeg,image/webp" hidden></label>
+                <label class="button button-secondary maker-file-button">本地图片<input name="image_layers" type="file" multiple accept="image/png,image/jpeg,image/webp" hidden></label>
+                <button class="button button-secondary" type="button" data-open-vault-picker="add">从 Meme Vault 选择</button>
                 <button class="button button-ghost" type="button" data-delete-image-layer>删除当前图片层</button>
+              </div>
+            </section>
+            <section class="maker-quick-layouts" aria-labelledby="quick-layout-title">
+              <div class="text-box-manager-heading"><strong id="quick-layout-title">快捷布局</strong><span>作用于当前图片层</span></div>
+              <div class="maker-layout-buttons">
+                ${([[
+                  "split-columns", "左右二分"], ["split-rows", "上下二分"],
+                  ["three-columns", "三横排"], ["three-rows", "三竖排"],
+                  ["two-top-one-bottom", "上二下一"], ["one-top-two-bottom", "上一下二"],
+                  ["grid-2x2", "2×2"], ["tile-columns", "横向平铺"], ["tile-rows", "纵向平铺"],
+                ] as [MemeImageLayout, string][]).map(([layout, label]) => `<button class="button button-secondary" type="button" data-image-layout="${layout}">${label}</button>`).join("")}
               </div>
             </section>
             <fieldset class="image-layer-properties" data-image-layer-properties disabled>
@@ -247,9 +281,9 @@ export class MemeMakerController {
                 ${this.rangeMarkup("image_y", "Frame Y", 0, 100, "%", ".1")}
                 ${this.rangeMarkup("image_width", "Frame 宽度", 5, 100, "%", ".1")}
                 ${this.rangeMarkup("image_height", "Frame 高度", 5, 100, "%", ".1")}
+                ${this.rangeMarkup("image_scale", "图片层缩放", 10, 500, "%", ".1")}
               </details>
               <details class="maker-style-group" open><summary>裁切</summary>
-                ${this.rangeMarkup("image_crop_scale", "Content 缩放", 10, 500, "%", ".1")}
                 ${this.rangeMarkup("image_crop_x", "Content X", -500, 500, "%", ".1")}
                 ${this.rangeMarkup("image_crop_y", "Content Y", -500, 500, "%", ".1")}
                 <label class="maker-check"><input name="image_crop_mode" type="checkbox"> 调整裁切（拖动图片内容）</label>
@@ -258,6 +292,7 @@ export class MemeMakerController {
               <details class="maker-style-group"><summary>操作</summary>
                 ${this.rangeMarkup("image_opacity", "透明度", 0, 100, "%", "1")}
                 <label><span>替换图片</span><input name="replace_image_layer" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <button class="button button-secondary" type="button" data-open-vault-picker="replace">替换为 Vault 图片</button>
                 <div class="text-box-property-actions"><button class="button button-secondary" type="button" data-clone-image-layer>复制图片层</button><button class="button button-secondary" type="button" data-image-layer-down>下移一层</button><button class="button button-secondary" type="button" data-image-layer-up>上移一层</button><button class="button button-ghost" type="button" data-delete-image-layer>删除图片层</button></div>
               </details>
             </fieldset>
@@ -307,6 +342,14 @@ export class MemeMakerController {
                 <button class="button button-ghost" type="button" data-reset-text-style>重置样式</button>
               </div>
             </fieldset>
+            <section class="maker-reset-actions" aria-label="Forge 快捷清理">
+              <div class="text-box-manager-heading"><strong>快捷清理</strong></div>
+              <div class="maker-layout-buttons">
+                <button class="button button-ghost" type="button" data-clear-image-layers>清空图片层</button>
+                <button class="button button-ghost" type="button" data-clear-text-boxes>清空文本框</button>
+                <button class="button button-danger" type="button" data-reset-forge>重置 Forge</button>
+              </div>
+            </section>
           </div>
           <section class="meme-maker-preview" aria-label="Meme 预览">
             <div class="meme-maker-canvas-frame">
@@ -328,6 +371,15 @@ export class MemeMakerController {
             <button class="button button-primary" type="button" data-save-maker>保存到 Meme Vault</button>
           </div>
         </div>
+        <section class="maker-vault-picker" data-vault-picker hidden aria-label="Meme Vault 素材选择器">
+          <div class="maker-vault-picker-card">
+            <header><div><p class="eyebrow">MEME VAULT</p><h3>选择图片素材</h3></div><button class="icon-button" type="button" data-close-vault-picker aria-label="关闭素材选择器">×</button></header>
+            <div data-vault-search-form><input name="vault_query" type="search" placeholder="搜索标题、描述或来源" aria-label="搜索 Vault 素材"><select name="vault_template" aria-label="按模板筛选"><option value="">全部模板</option></select><button class="button button-secondary" type="button" data-vault-search>搜索</button></div>
+            <p data-vault-picker-status role="status"></p>
+            <div class="maker-vault-results" data-vault-results></div>
+            <footer><button class="button button-secondary" type="button" data-vault-previous>上一页</button><span data-vault-page>第 1 页</span><button class="button button-secondary" type="button" data-vault-next>下一页</button></footer>
+          </div>
+        </section>
       </form>`;
     document.body.append(this.dialog);
     this.form = this.required("[data-maker-form]");
@@ -351,6 +403,11 @@ export class MemeMakerController {
   }
 
   open(): void { this.reset(); this.dialog.showModal(); void this.loadTemplates(); }
+
+  async openWithVaultImage(image: MemeVaultImageInput): Promise<void> {
+    this.open();
+    await this.addVaultImage(image);
+  }
 
   close(): void {
     this.loadGeneration += 1;
@@ -428,6 +485,28 @@ export class MemeMakerController {
       const input = event.currentTarget as HTMLInputElement;
       const file = input.files?.[0]; if (file) void this.replaceSelectedImageSource(file); input.value = "";
     });
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-open-vault-picker]")) {
+      button.addEventListener("click", () => this.openVaultPicker(button.dataset.openVaultPicker === "replace" ? "replace" : "add"));
+    }
+    this.dialog.querySelector("[data-close-vault-picker]")?.addEventListener("click", () => this.closeVaultPicker());
+    this.dialog.querySelector("[data-vault-search]")?.addEventListener("click", () => { this.vaultPickerPage = 0; void this.loadVaultPicker(); });
+    this.dialog.querySelector<HTMLInputElement>('[name="vault_query"]')?.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); this.vaultPickerPage = 0; void this.loadVaultPicker(); }
+    });
+    this.dialog.querySelector<HTMLSelectElement>('[name="vault_template"]')?.addEventListener("change", () => { this.vaultPickerPage = 0; void this.loadVaultPicker(); });
+    this.dialog.querySelector("[data-vault-previous]")?.addEventListener("click", () => { if (this.vaultPickerPage > 0) { this.vaultPickerPage -= 1; void this.loadVaultPicker(); } });
+    this.dialog.querySelector("[data-vault-next]")?.addEventListener("click", () => { this.vaultPickerPage += 1; void this.loadVaultPicker(); });
+    this.dialog.querySelector("[data-vault-results]")?.addEventListener("click", event => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-vault-meme-id]");
+      const selected = this.vaultPickerResults.find(item => item.id === Number(button?.dataset.vaultMemeId));
+      if (selected) void this.chooseVaultMeme(selected);
+    });
+    for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-image-layout]")) {
+      button.addEventListener("click", () => this.applyQuickLayout(button.dataset.imageLayout as MemeImageLayout));
+    }
+    this.dialog.querySelector("[data-clear-image-layers]")?.addEventListener("click", () => this.clearImageLayers());
+    this.dialog.querySelector("[data-clear-text-boxes]")?.addEventListener("click", () => this.clearTextBoxes());
+    this.dialog.querySelector("[data-reset-forge]")?.addEventListener("click", () => this.resetForgeState());
     for (const button of this.dialog.querySelectorAll<HTMLButtonElement>("[data-delete-image-layer]")) button.addEventListener("click", () => this.deleteSelectedImageLayer());
     this.dialog.querySelector("[data-clone-image-layer]")?.addEventListener("click", () => this.cloneSelectedImageLayer());
     this.dialog.querySelector("[data-image-layer-up]")?.addEventListener("click", () => this.moveSelectedImageLayer(1));
@@ -483,11 +562,83 @@ export class MemeMakerController {
         else if (!template.reference_mime_type || !staticMimeTypes.has(template.reference_mime_type)) { option.text = `${template.name}（参考图格式不支持）`; option.disabled = true; }
         this.templateSelect.add(option);
       }
+      const vaultTemplate = this.dialog.querySelector<HTMLSelectElement>('[name="vault_template"]');
+      if (vaultTemplate) {
+        const selected = vaultTemplate.value;
+        vaultTemplate.replaceChildren(new Option("全部模板", ""), ...this.templates.map(template => new Option(template.name, String(template.id))));
+        vaultTemplate.value = selected;
+      }
       this.setNotice(this.templates.length ? "请选择模板开始制作。" : "还没有可用模板。");
     } catch (error) {
       this.setNotice(this.errorMessage(error, "模板加载失败，请稍后重试。"), true);
       this.templateSelect.innerHTML = '<option value="">模板加载失败</option>';
     }
+  }
+
+  private openVaultPicker(mode: "add" | "replace"): void {
+    if (mode === "replace" && !this.selectedImageLayer()) return;
+    if (mode === "add" && this.imageLayers.length >= MAX_IMAGE_LAYERS) return;
+    this.vaultPickerMode = mode;
+    this.vaultPickerPage = 0;
+    this.required<HTMLElement>("[data-vault-picker]").hidden = false;
+    void this.loadVaultPicker();
+  }
+
+  private closeVaultPicker(): void {
+    this.required<HTMLElement>("[data-vault-picker]").hidden = true;
+  }
+
+  private async loadVaultPicker(): Promise<void> {
+    if (this.vaultPickerBusy) return;
+    this.vaultPickerBusy = true;
+    const status = this.required<HTMLElement>("[data-vault-picker-status]");
+    const results = this.required<HTMLElement>("[data-vault-results]");
+    status.textContent = "正在读取 Meme Vault…";
+    results.replaceChildren();
+    try {
+      const query = this.inputValue("vault_query");
+      const templateId = Number(this.inputValue("vault_template")) || undefined;
+      this.vaultPickerResults = await this.api.listMemes({ offset: this.vaultPickerPage * 12, limit: 12, q: query, templateId });
+      for (const meme of this.vaultPickerResults) {
+        const image = meme.images[0];
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "maker-vault-result";
+        button.dataset.vaultMemeId = String(meme.id);
+        const thumbnail = image?.thumbnail_url ?? meme.thumbnail_url ?? image?.image_url ?? meme.image_url;
+        const preview = document.createElement("img"); preview.src = thumbnail; preview.alt = "";
+        const label = document.createElement("span"); label.textContent = meme.title;
+        button.append(preview, label);
+        results.append(button);
+      }
+      if (!this.vaultPickerResults.length) status.textContent = "没有找到可用的 Meme 图片。";
+      else status.textContent = this.vaultPickerMode === "replace" ? "选择一张图片替换当前图片层。" : "选择一张图片加入 Forge。";
+    } catch (error) {
+      this.vaultPickerResults = [];
+      status.textContent = this.errorMessage(error, "Vault 素材加载失败，请重试。");
+    } finally {
+      this.vaultPickerBusy = false;
+      this.required("[data-vault-page]").textContent = `第 ${this.vaultPickerPage + 1} 页`;
+      const previous = this.required<HTMLButtonElement>("[data-vault-previous]");
+      const next = this.required<HTMLButtonElement>("[data-vault-next]");
+      previous.disabled = this.vaultPickerPage === 0;
+      next.disabled = this.vaultPickerResults.length < 12;
+    }
+  }
+
+  private async chooseVaultMeme(meme: MemeResponse): Promise<void> {
+    const image = meme.images[0];
+    const input: MemeVaultImageInput = {
+      url: image?.image_url ?? meme.image_url,
+      filename: image?.original_filename ?? meme.original_filename,
+      title: meme.title,
+      mimeType: image?.mime_type ?? meme.mime_type,
+      width: image?.width ?? meme.width,
+      height: image?.height ?? meme.height,
+    };
+    if (this.vaultPickerMode === "replace") await this.replaceSelectedWithVaultImage(input);
+    else await this.addVaultImage(input);
+    this.closeVaultPicker();
   }
 
   private async selectTemplate(): Promise<void> {
@@ -588,6 +739,75 @@ export class MemeMakerController {
     }
   }
 
+  private async loadVaultImageSource(input: MemeVaultImageInput): Promise<MemeImageSource> {
+    if (input.mimeType === "image/gif" || !staticMimeTypes.has(input.mimeType)) throw new Error("该 Vault 图片不是支持的 PNG、JPEG 或 WEBP 静态图片。");
+    const loaded = await this.loadImage(input.url);
+    if (!loaded.width || !loaded.height) { loaded.dispose(); throw new Error("Vault 图片尺寸无效。"); }
+    nextImageSourceId += 1;
+    return {
+      id: `image-source-${nextImageSourceId}`,
+      type: "vault",
+      image: loaded.source,
+      naturalWidth: loaded.width,
+      naturalHeight: loaded.height,
+      filename: input.filename || input.title,
+      dispose: loaded.dispose,
+    };
+  }
+
+  private async ensureVaultCanvas(input: MemeVaultImageInput): Promise<void> {
+    if (this.image) return;
+    const loaded = await this.loadImage(input.url);
+    if (!loaded.width || !loaded.height) { loaded.dispose(); throw new Error("Vault 图片尺寸无效。"); }
+    this.image = loaded;
+    this.background = { type: "vault", name: input.title || input.filename.replace(/\.[^.]+$/u, "") || "Vault Meme", url: input.url };
+    this.backgroundVisible = false;
+    this.canvasState = resetBackgroundTransform(loaded.width, loaded.height, "original", "fill");
+    this.defaultFontSize = Math.min(300, Math.max(12, Math.round(loaded.width * 0.09)));
+    if (!this.inputValue("title").trim()) this.setInput("title", `${this.background.name} 拼图`);
+    this.updatePreview(true);
+    this.renderNow();
+  }
+
+  private async addVaultImage(input: MemeVaultImageInput): Promise<void> {
+    if (this.imageLayers.length >= MAX_IMAGE_LAYERS) { this.setNotice(`最多只能添加 ${MAX_IMAGE_LAYERS} 个图片层。`, true); return; }
+    const generation = this.loadGeneration;
+    try {
+      await this.ensureVaultCanvas(input);
+      if (generation !== this.loadGeneration || !this.dialog.open) return;
+      const before = this.captureHistory();
+      const source = await this.loadVaultImageSource(input);
+      if (generation !== this.loadGeneration || !this.dialog.open) { source.dispose?.(); return; }
+      const layer = this.appendImageLayer(source, this.imageLayers.length ? 2.5 : 0);
+      this.selectedImageLayerId = layer.id;
+      this.selectedTextBoxId = null;
+      this.history.record(before, this.captureHistory());
+      this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+      this.setNotice(`已从 Meme Vault 加入「${input.title}」。`, false);
+    } catch (error) {
+      this.setNotice(error instanceof Error ? error.message : "Vault 图片加载失败。", true);
+    }
+  }
+
+  private async replaceSelectedWithVaultImage(input: MemeVaultImageInput): Promise<void> {
+    const layerId = this.selectedImageLayerId;
+    if (!layerId) return;
+    const before = this.captureHistory();
+    const generation = this.loadGeneration;
+    try {
+      const source = await this.loadVaultImageSource(input);
+      const index = this.imageLayers.findIndex(layer => layer.id === layerId);
+      if (generation !== this.loadGeneration || !this.dialog.open || index < 0) { source.dispose?.(); return; }
+      this.imageSources.set(source.id, source);
+      this.imageLayers[index] = applyImageLayerMode({ ...this.imageLayers[index], sourceId: source.id }, source, this.canvasState.outputWidth, this.canvasState.outputHeight, "fill");
+      this.history.record(before, this.captureHistory());
+      this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+      this.setNotice("已替换为 Vault 图片，Frame、层级与透明度保持不变。", false);
+    } catch (error) {
+      this.setNotice(error instanceof Error ? error.message : "替换 Vault 图片失败。", true);
+    }
+  }
+
   private async loadBackgroundImageSource(): Promise<MemeImageSource> {
     if (!this.background || !this.image) throw new Error("请先加载底图。");
     let loaded: LoadedTemplateImage;
@@ -598,6 +818,9 @@ export class MemeMakerController {
       try { loaded = await this.loadImage(outerObjectUrl); }
       catch (error) { URL.revokeObjectURL(outerObjectUrl); throw error; }
       filename = `[底图副本] ${this.background.file.name}`;
+    } else if (this.background.type === "vault") {
+      loaded = await this.loadImage(this.background.url);
+      filename = `[底图副本] ${this.background.name}`;
     } else {
       const template = this.selectedTemplate();
       if (!template?.reference_image_url) throw new Error("当前模板参考图不可用。");
@@ -667,16 +890,17 @@ export class MemeMakerController {
   }
 
   private async replaceSelectedImageSource(file: File): Promise<void> {
-    const layer = this.selectedImageLayer(); if (!layer) return;
+    const layerId = this.selectedImageLayerId; if (!layerId) return;
     const before = this.captureHistory();
     const generation = this.loadGeneration;
     try {
       const source = await this.loadImageSource(file);
-      if (generation !== this.loadGeneration || !this.dialog.open || !this.imageLayers.includes(layer)) { source.dispose?.(); return; }
+      const index = this.imageLayers.findIndex(layer => layer.id === layerId);
+      if (generation !== this.loadGeneration || !this.dialog.open || index < 0) { source.dispose?.(); return; }
       this.imageSources.set(source.id, source);
-      layer.sourceId = source.id;
+      this.imageLayers[index] = applyImageLayerMode({ ...this.imageLayers[index], sourceId: source.id }, source, this.canvasState.outputWidth, this.canvasState.outputHeight, "fill");
       this.history.record(before, this.captureHistory()); this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
-      this.setNotice("图片层来源已替换，Frame 保持不变。", false);
+      this.setNotice("图片层来源已替换，Frame、层级与透明度保持不变。", false);
     } catch (error) { this.setNotice(error instanceof Error ? error.message : "替换图片失败。", true); }
   }
 
@@ -721,6 +945,54 @@ export class MemeMakerController {
     const before = this.captureHistory(); const index = this.imageLayers.indexOf(layer);
     this.imageLayers[index] = applyImageLayerMode(layer, source, this.canvasState.outputWidth, this.canvasState.outputHeight, mode);
     this.history.record(before, this.captureHistory()); this.updateUi(); this.scheduleRender();
+  }
+
+  private applyQuickLayout(layout: MemeImageLayout): void {
+    if (!canApplyImageLayout(layout, this.imageLayers.length) || !this.canvasState.outputWidth || !this.canvasState.outputHeight) return;
+    const before = this.captureHistory();
+    const affected = layoutFrameCount(layout, this.imageLayers.length);
+    this.imageLayers = applyImageLayout(this.imageLayers, this.imageSources, layout, this.canvasState.outputWidth, this.canvasState.outputHeight);
+    this.history.record(before, this.captureHistory());
+    this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+    this.setNotice(affected < this.imageLayers.length ? `该布局仅应用于前 ${affected} 张图片。` : `已应用快捷布局（${affected} 张图片）。`, false);
+  }
+
+  private clearImageLayers(): void {
+    if (!this.imageLayers.length) return;
+    const before = this.captureHistory();
+    this.imageLayers = [];
+    this.selectedImageLayerId = null;
+    this.cropModeImageLayerId = null;
+    this.history.record(before, this.captureHistory());
+    this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+    this.setNotice("已清空所有图片层，可撤销恢复。", false);
+  }
+
+  private clearTextBoxes(): void {
+    if (!this.textBoxes.length) return;
+    const before = this.captureHistory();
+    this.textBoxes = [];
+    this.selectedTextBoxId = null;
+    this.history.record(before, this.captureHistory());
+    this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+    this.setNotice("已清空所有文本框，可撤销恢复。", false);
+  }
+
+  private resetForgeState(): void {
+    if (!this.image) return;
+    const before = this.captureHistory();
+    this.textBoxes = [];
+    this.imageLayers = [];
+    this.selectedTextBoxId = null;
+    this.selectedImageLayerId = null;
+    this.cropModeImageLayerId = null;
+    this.backgroundVisible = this.background?.type !== "vault";
+    this.canvasState = resetBackgroundTransform(this.image.width, this.image.height, "original", "fill");
+    this.setInput("title", this.background ? `${this.background.name} 自制` : "");
+    this.history.record(before, this.captureHistory());
+    this.pendingHistory = null;
+    this.updateHistoryActions(); this.updateUi(); this.scheduleRender();
+    this.setNotice("Forge 已回到当前底图的初始状态，可撤销恢复。", false);
   }
 
   private addTextBox(): void {
@@ -805,20 +1077,32 @@ export class MemeMakerController {
       const range = this.form.elements.namedItem(target.name.replace(/_number$/u, ""));
       if (range instanceof HTMLInputElement) range.value = target.value;
     }
-    const originalFrameX = layer.frameX; const originalFrameY = layer.frameY;
-    layer.frameWidth = this.numberInput("image_width", 5, 100);
-    layer.frameHeight = this.numberInput("image_height", 5, 100);
-    layer.frameX = Math.min(100 - layer.frameWidth / 2, Math.max(layer.frameWidth / 2, this.numberInput("image_x", 0, 100)));
-    layer.frameY = Math.min(100 - layer.frameHeight / 2, Math.max(layer.frameHeight / 2, this.numberInput("image_y", 0, 100)));
     const fieldName = target instanceof HTMLInputElement ? target.name.replace(/_number$/u, "") : "";
-    layer.contentX = this.numberInput("image_crop_x", -500, 500);
-    layer.contentY = this.numberInput("image_crop_y", -500, 500);
-    if (this.cropModeImageLayerId !== layer.id) {
-      if (fieldName === "image_x") layer.contentX += layer.frameX - originalFrameX;
-      if (fieldName === "image_y") layer.contentY += layer.frameY - originalFrameY;
+    if (fieldName === "image_width") {
+      layer.frameWidth = this.numberInput("image_width", 5, 100);
+      layer.frameX = Math.min(100 - layer.frameWidth / 2, Math.max(layer.frameWidth / 2, layer.frameX));
+    } else if (fieldName === "image_height") {
+      layer.frameHeight = this.numberInput("image_height", 5, 100);
+      layer.frameY = Math.min(100 - layer.frameHeight / 2, Math.max(layer.frameHeight / 2, layer.frameY));
+    } else if (fieldName === "image_x") {
+      const originalFrameX = layer.frameX;
+      const requestedFrameX = this.numberInput("image_x", 0, 100);
+      layer.frameX = layer.frameWidth <= 100 ? Math.min(100 - layer.frameWidth / 2, Math.max(layer.frameWidth / 2, requestedFrameX)) : requestedFrameX;
+      if (this.cropModeImageLayerId !== layer.id) layer.contentX += layer.frameX - originalFrameX;
+    } else if (fieldName === "image_y") {
+      const originalFrameY = layer.frameY;
+      const requestedFrameY = this.numberInput("image_y", 0, 100);
+      layer.frameY = layer.frameHeight <= 100 ? Math.min(100 - layer.frameHeight / 2, Math.max(layer.frameHeight / 2, requestedFrameY)) : requestedFrameY;
+      if (this.cropModeImageLayerId !== layer.id) layer.contentY += layer.frameY - originalFrameY;
+    } else if (fieldName === "image_crop_x") {
+      layer.contentX = this.numberInput("image_crop_x", -500, 500);
+    } else if (fieldName === "image_crop_y") {
+      layer.contentY = this.numberInput("image_crop_y", -500, 500);
+    } else if (fieldName === "image_scale") {
+      Object.assign(layer, scaleImageLayerGeometry(layer, this.numberInput("image_scale", 10, 500) / 100));
+    } else if (fieldName === "image_opacity") {
+      layer.opacity = this.numberInput("image_opacity", 0, 100) / 100;
     }
-    layer.contentScale = this.numberInput("image_crop_scale", 10, 500) / 100;
-    layer.opacity = this.numberInput("image_opacity", 0, 100) / 100;
     this.cropModeImageLayerId = this.checkedInput("image_crop_mode") ? layer.id : null;
     this.updateUi(); this.scheduleRender(); if (commit) this.commitHistory();
   }
@@ -1196,7 +1480,7 @@ export class MemeMakerController {
       this.syncRange("image_y", imageLayer.frameY, "%");
       this.syncRange("image_width", imageLayer.frameWidth, "%");
       this.syncRange("image_height", imageLayer.frameHeight, "%");
-      this.syncRange("image_crop_scale", imageLayer.contentScale * 100, "%");
+      this.syncRange("image_scale", imageLayer.contentScale * 100, "%");
       this.syncRange("image_crop_x", imageLayer.contentX, "%");
       this.syncRange("image_crop_y", imageLayer.contentY, "%");
       this.syncRange("image_opacity", imageLayer.opacity * 100, "%");
@@ -1247,6 +1531,12 @@ export class MemeMakerController {
     const imageUp = this.dialog.querySelector<HTMLButtonElement>("[data-image-layer-up]"); if (imageUp) imageUp.disabled = imageIndex < 0 || imageIndex === this.imageLayers.length - 1;
     const imageDown = this.dialog.querySelector<HTMLButtonElement>("[data-image-layer-down]"); if (imageDown) imageDown.disabled = imageIndex <= 0;
     const fromBackground = this.dialog.querySelector<HTMLButtonElement>("[data-background-to-layer]"); if (fromBackground) fromBackground.disabled = !this.image || this.imageLayers.length >= MAX_IMAGE_LAYERS;
+    const addVault = this.dialog.querySelector<HTMLButtonElement>('[data-open-vault-picker="add"]'); if (addVault) addVault.disabled = this.imageLayers.length >= MAX_IMAGE_LAYERS;
+    const replaceVault = this.dialog.querySelector<HTMLButtonElement>('[data-open-vault-picker="replace"]'); if (replaceVault) replaceVault.disabled = !imageLayer;
+    for (const layout of this.dialog.querySelectorAll<HTMLButtonElement>("[data-image-layout]")) layout.disabled = !canApplyImageLayout(layout.dataset.imageLayout as MemeImageLayout, this.imageLayers.length);
+    const clearImages = this.dialog.querySelector<HTMLButtonElement>("[data-clear-image-layers]"); if (clearImages) clearImages.disabled = !this.imageLayers.length;
+    const clearText = this.dialog.querySelector<HTMLButtonElement>("[data-clear-text-boxes]"); if (clearText) clearText.disabled = !this.textBoxes.length;
+    const resetForge = this.dialog.querySelector<HTMLButtonElement>("[data-reset-forge]"); if (resetForge) resetForge.disabled = !this.image;
     this.updateHistoryActions();
   }
 
@@ -1375,6 +1665,8 @@ export class MemeMakerController {
     this.measurements.clear(); this.interaction = IDLE_INTERACTION; this.imageInteraction = IDLE_IMAGE_INTERACTION; this.backgroundInteraction = { type: "idle" }; this.background = null;
     this.canvasState = { aspectPreset: "original", outputWidth: 0, outputHeight: 0, backgroundScale: 1, backgroundOffsetX: 0, backgroundOffsetY: 0, lockAspectRatio: true, canvasBackgroundColor: "#ffffff" };
     this.styleClipboard = null;
+    this.vaultPickerPage = 0; this.vaultPickerResults = []; this.vaultPickerMode = "add"; this.vaultPickerBusy = false;
+    this.required<HTMLElement>("[data-vault-picker]").hidden = true;
     this.history.clear(); this.pendingHistory = null; this.snapGuideX = false; this.snapGuideY = false;
     this.templateSelect.innerHTML = '<option value="">正在加载模板…</option>';
     this.canvas.width = 0; this.canvas.height = 0; this.updatePreview(false); this.setNotice(""); this.busy = false; this.updateUi();

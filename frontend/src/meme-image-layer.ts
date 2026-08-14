@@ -13,7 +13,7 @@ export interface MemeImageLayer {
 
 export interface MemeImageSource {
   id: string;
-  type: "local" | "background";
+  type: "local" | "background" | "vault";
   image: CanvasImageSource;
   naturalWidth: number;
   naturalHeight: number;
@@ -95,6 +95,20 @@ export function applyImageLayerMode(
     ? calculateImageLayerFit(layer, source, canvasWidth, canvasHeight)
     : calculateImageLayerFill(layer, source, canvasWidth, canvasHeight);
   return { ...layer, ...transform };
+}
+
+export function scaleImageLayerGeometry(layer: MemeImageLayer, requestedContentScale: number): MemeImageLayer {
+  const currentScale = Math.max(0.01, layer.contentScale);
+  const targetScale = clamp(requestedContentScale, 0.1, 5);
+  const ratio = targetScale / currentScale;
+  return {
+    ...layer,
+    frameWidth: layer.frameWidth * ratio,
+    frameHeight: layer.frameHeight * ratio,
+    contentX: layer.frameX + (layer.contentX - layer.frameX) * ratio,
+    contentY: layer.frameY + (layer.contentY - layer.frameY) * ratio,
+    contentScale: targetScale,
+  };
 }
 
 export function createDefaultImageLayer(

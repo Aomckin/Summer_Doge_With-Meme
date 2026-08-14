@@ -1,14 +1,16 @@
-# Meme Vault v0.8
+# Meme Vault v0.8.3
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.8，Meme Forge 定位为轻量快捷 Meme 制作器：支持单底图、多图片层、多文字层、基础裁切拼装、样式与取景、PNG 导出和快速入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.8.3，Meme Forge 定位为轻量快捷 Meme 制作器：支持模板/本地底图、多图片层、多文字层、Frame/Content 裁切拼装、Vault 取材、快捷布局、替换来源、透明度、PNG 导出和快速入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
 
 ## Meme 制作器
 
 顶部“Meme 制作器”入口可读取现有模板参考图，或选择仅在当前会话使用的本地 PNG、JPEG、WebP 底图。加载后会创建一个默认文本框；可继续添加、选择、删除或复制文本框，并为每个文本框独立设置文字、字号、X/Y、文本区域宽度、黑/白文字、黑/白描边、左/中/右对齐与三个系统字体预设。画布支持拖动、左右 handle 调宽及方向键微调（0.5%，Shift 为 2%）；最多 20 个文本框，并可上移或下移一层。
 
-图片层可通过多文件选择、拖放到 Canvas、剪贴板粘贴或“从底图创建图片层”加入，支持 PNG/JPEG/WEBP，最多 30 层；GIF 明确拒绝。每层把矩形 `frameX/Y/Width/Height` 与图片内容 `contentX/Y/Scale` 分开保存：Frame 只是 Mask，Resize 或裁切模式下移动 Frame 不会重排图片内容；拖动内容和缩放只改变 Content。只有显式 Fit、Fill、重置裁切才重新计算 Content Transform。另支持复制、删除、图片层内部排序、透明度、替换来源、中心吸附和方向键微调；文字固定绘制在全部图片层上方。
+图片层可通过本地多文件、拖放、剪贴板、当前底图或轻量 Vault 素材选择器加入；Viewer 当前图也能直接送入 Forge。支持 PNG/JPEG/WEBP，最多 30 层；GIF 明确拒绝。每层把矩形 `frameX/Y/Width/Height` 与图片内容 `contentX/Y/Scale` 分开保存：Frame 只是 Mask，Resize 或裁切模式下移动 Frame 不会重排图片内容，裁切区拖动只平移 Content；几何区“图片层缩放”固定支持 10%–500%，以 Frame 中心为锚点同步缩放 Frame、内容尺寸与当前裁切偏移，保持现有裁切构图，并允许 Frame 超出画布。只有显式 Fit、Fill、重置裁切以及明确的一键布局/替换来源才重新计算裁切构图。另支持复制、删除、图片层内部排序、透明度、中心吸附和方向键微调；文字固定绘制在全部图片层上方。
+
+“快捷布局”可对当前所有图片层应用左右/上下二分、三横排、三竖排、上二下一、上一下二、2×2、最多六张横向或纵向平铺；一次布局作为一步历史，并对受影响图片显式执行 Fill + Center。当前图片层可替换为本地或 Vault 图片，保留 Frame、层级与透明度并让新图 Fill + Center。清空全部图片层、清空全部文本框和重置 Forge 均为独立可撤销操作。
 
 “显示底图”可在不清除模板、本地底图或取景参数的情况下隐藏背景，便于把同一底图裁成多个区域重新拼装。图片来源与图片层分离，同一来源可供多个层采用不同裁切；来源注册表保留到当前 Maker 会话结束，因此删除图片层后仍可 Undo 恢复。
 
@@ -22,9 +24,9 @@ Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前
 
 预览、导出与保存共享同一个 Canvas Renderer，固定顺序为画布背景色、可见底图、图片层数组、文字层数组；选中框、Resize handle、裁切状态和辅助线位于独立 DOM overlay，不会进入输出。保存时把最终 PNG 转成普通 `File` 并调用现有 Meme Upload API：Template 底图继承当前 `template_id`，Local 底图传 `template_id=null`，图片层来源不改变模板归属。
 
-编辑历史保存最多 50 个轻量状态步骤，包含图片层、文本框、互斥选择、标题、输出/底图状态与底图可见性，只保存图片 `sourceId`，不保存 File、Blob、Bitmap、Canvas 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D`、`Delete`、`Escape` 和方向键根据当前图片/文字选择执行。Frame Move、Frame Resize、Content Pan、Content Zoom 与其它 Slider 连续变化分别合并为一步；历史与来源注册表在关闭制作器后清空并释放。
+编辑历史保存最多 50 个轻量状态步骤，包含图片层、文本框、互斥选择、标题、输出/底图状态与底图可见性，只保存图片 `sourceId`，不保存 File、Blob、Bitmap、Canvas 或 DOM。撤销/重做可使用顶部按钮、`Ctrl+Z`、`Ctrl+Y` 或 `Ctrl+Shift+Z`；`Ctrl+D`、`Delete`、`Escape` 和方向键根据当前图片/文字选择执行。Frame Move、Frame Resize、Content Pan、图片层几何缩放与其它 Slider 连续变化分别合并为一步；历史与来源注册表在关闭制作器后清空并释放。
 
-当前明确不支持旋转、倾斜、蒙版、抠图、滤镜、Blend Mode、Shape/Sticker、图片与文字任意交叉排序、多选/Group、GIF/视频、AI 图片编辑或可重新打开的工程草稿；保存到 Vault 的仍是一张普通最终 PNG。
+当前明确不支持旋转、倾斜、自由蒙版、抠图、滤镜、Blend Mode、Shape/Sticker、图片与文字任意交叉排序、多选/Group、GIF/视频编辑、AI 自动拼图或可重新打开的工程草稿；保存到 Vault 的仍是一张普通最终 PNG。
 
 拖动文本框接近画布 X/Y 中心 1.25% 范围时会吸附到 50%，并在独立 overlay 中显示竖直或水平辅助线，松手立即隐藏且不进入 PNG。字号、X、Y、宽度和描边同时提供 Slider 与 Numeric Input；X/Y/宽度支持 0.1 精度，非法值在 change/blur 时恢复或 clamp。
 

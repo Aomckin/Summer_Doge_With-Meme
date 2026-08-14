@@ -60,6 +60,15 @@ describe("TextBox renderer", () => {
     expect(ctx.drawImage).toHaveBeenCalledTimes(2);
   });
 
+  it("applies image layer opacity through globalAlpha", () => {
+    const ctx = context();
+    const source = { id: "source", type: "vault", image: {} as CanvasImageSource, naturalWidth: 100, naturalHeight: 100, filename: "vault.png" } satisfies MemeImageSource;
+    const layer = { id: "a", sourceId: source.id, frameX: 50, frameY: 50, frameWidth: 50, frameHeight: 50, contentX: 50, contentY: 50, contentScale: .5, opacity: .37 } satisfies MemeImageLayer;
+    drawImageLayer(ctx, layer, source, 100, 100);
+    expect(ctx.globalAlpha).toBe(.37);
+    expect(ctx.drawImage).toHaveBeenCalledOnce();
+  });
+
   it("uses the same transformed background rectangle as the output canvas", () => {
     const ctx = context();
     const canvas = { width: 0, height: 0, getContext: vi.fn(() => ctx) } as unknown as HTMLCanvasElement;

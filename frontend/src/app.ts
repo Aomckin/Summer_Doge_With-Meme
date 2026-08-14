@@ -123,7 +123,7 @@ import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
-import { MemeMakerController } from "./meme-maker";
+import { MemeMakerController, type MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
@@ -381,6 +381,7 @@ export class MemeVaultApp {
   private readonly semanticIndexManager: SemanticIndexManager;
   private readonly enrichmentWorkbench: EnrichmentWorkbenchController;
   private readonly collectionManager: CollectionManagerController;
+  private readonly memeMaker: MemeMakerController;
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
@@ -501,9 +502,13 @@ export class MemeVaultApp {
     );
     this.settings = new AISettingsController(this.elements, this.api);
     this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
-    new MemeMakerController(
+    this.memeMaker = new MemeMakerController(
       this.elements.openMemeMakerButton,
-      { listTemplates: () => this.api.listTemplates(), uploadMeme: input => this.api.uploadMeme(input) },
+      {
+        listTemplates: () => this.api.listTemplates(),
+        listMemes: options => this.api.listMemes(options),
+        uploadMeme: input => this.api.uploadMeme(input),
+      },
       {
         onSaved: async () => {
           await Promise.all([
@@ -1015,6 +1020,21 @@ export class MemeVaultApp {
           this.elements.imageViewerCopy,
         );
       }
+    });
+    this.elements.imageViewerForge.addEventListener("click", () => {
+      const meme = this.viewerMeme;
+      if (!meme) return;
+      const image = meme.images[this.viewerIndex];
+      const input: MemeVaultImageInput = {
+        url: image?.image_url ?? meme.image_url,
+        filename: image?.original_filename ?? meme.original_filename,
+        title: meme.title,
+        mimeType: image?.mime_type ?? meme.mime_type,
+        width: image?.width ?? meme.width,
+        height: image?.height ?? meme.height,
+      };
+      closeViewer();
+      void this.memeMaker.openWithVaultImage(input);
     });
     document.addEventListener("keydown", (event) => {
       if (this.elements.imageViewerDialog.open && event.key === "ArrowLeft") moveViewer(-1);

@@ -5,6 +5,7 @@ import {
   calculateImageLayerFrame,
   createDefaultImageLayer,
   hitTestImageLayers,
+  scaleImageLayerGeometry,
   type MemeImageLayer,
   type MemeImageSource,
 } from "./meme-image-layer";
@@ -43,13 +44,34 @@ describe("Meme image layer geometry", () => {
     expect(resized).toEqual(expect.objectContaining({ contentX: layer.contentX, contentY: layer.contentY, contentScale: layer.contentScale }));
   });
 
-  it("pans and zooms content without changing the frame", () => {
+  it("supports direct content pan and transform calculations independently from the frame", () => {
     const panned = { ...layer, contentX: 25, contentY: 70 };
     const zoomed = { ...panned, contentScale: 1.2 };
     expect(calculateImageLayerFrame(panned, 1000, 600)).toEqual(calculateImageLayerFrame(layer, 1000, 600));
     expect(calculateImageLayerFrame(zoomed, 1000, 600)).toEqual(calculateImageLayerFrame(layer, 1000, 600));
     expect(calculateImageContentRect(panned, source, 1000, 600)).not.toEqual(calculateImageContentRect(layer, source, 1000, 600));
     expect(calculateImageContentRect(zoomed, source, 1000, 600).width).toBe(1200);
+  });
+
+  it("scales the frame and current crop together around the frame center", () => {
+    const scaled = scaleImageLayerGeometry(layer, .9);
+    expect(scaled).toEqual(expect.objectContaining({
+      frameX: 50, frameY: 50, frameWidth: 75, frameHeight: 75,
+      contentX: 65, contentY: 35,
+    }));
+    expect(scaled.contentScale).toBeCloseTo(.9);
+    expect((scaled.contentX - scaled.frameX) / (layer.contentX - layer.frameX)).toBeCloseTo(1.5);
+    expect((scaled.contentY - scaled.frameY) / (layer.contentY - layer.frameY)).toBeCloseTo(1.5);
+  });
+
+  it("allows geometric scale to reach the fixed 500 percent upper limit", () => {
+    const offCenter = { ...layer, frameX: 30, frameY: 40, frameWidth: 40, frameHeight: 30 };
+    const scaled = scaleImageLayerGeometry(offCenter, 5);
+    expect(scaled.frameWidth).toBeCloseTo(1000 / 3);
+    expect(scaled.frameHeight).toBeCloseTo(250);
+    expect(scaled.contentScale).toBe(5);
+    expect(scaled.frameX).toBe(30);
+    expect(scaled.frameY).toBe(40);
   });
 
   it("hit-tests topmost layers", () => {

@@ -1960,6 +1960,19 @@ describe("MemeVaultApp", () => {
     expect(viewer?.hasAttribute("src")).toBe(false);
   });
 
+  it("connects the current Viewer image to Meme Forge", async () => {
+    const meme = makeCompositeMeme(31);
+    const app = new MemeVaultApp(root(), makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }));
+    await app.start();
+    document.querySelector<HTMLElement>('[data-meme-id="31"]')?.click();
+    document.querySelector<HTMLButtonElement>('[data-image-index="1"]')?.click();
+    const viewer = document.querySelector<HTMLDialogElement>("#image-viewer-dialog")!;
+    expect(viewer.open).toBe(true);
+    viewer.querySelector<HTMLButtonElement>("[data-viewer-forge]")!.click();
+    expect(viewer.open).toBe(false);
+    expect(document.querySelector<HTMLDialogElement>("[data-meme-maker-dialog]")?.open).toBe(true);
+  });
+
   it("copies the image currently selected in the viewer", async () => {
     const meme = makeCompositeMeme();
     const write = vi.fn().mockResolvedValue(undefined);

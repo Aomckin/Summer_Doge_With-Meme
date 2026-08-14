@@ -497,10 +497,18 @@ Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供
 - [x] 新增独立 `imageLayers[]` 与 Session Image Source Registry，不建立统一 `Layer[]`。
 - [x] 支持多文件选择、Canvas Drag & Drop、Clipboard Paste、从当前底图创建图片层及底图显示/隐藏。
 - [x] 支持图片层互斥选择、移动、四角自由 Resize、中心吸附、方向键微调、复制、删除和图片层内部排序。
-- [x] 集中实现独立 Frame Mask 与 Content Transform：Frame Move/Resize 不隐式 Fit/Fill，Content Pan/Zoom 不改变 Frame；显式 Fit、Fill、Reset 才重算 Content。
-- [x] History 保存图片层 `sourceId` 与可序列化 Frame/Content 状态；Frame Move、Frame Resize、Content Pan、Content Zoom、多文件导入各自合并为一步，Registry 保留到 Maker 关闭。
+- [x] 集中实现独立 Frame Mask 与 Content Transform：Frame Move/Resize 不隐式 Fit/Fill，Content Pan 不改变 Frame；几何区图片层缩放同步缩放 Frame、内容和裁切偏移，显式 Fit、Fill、Reset 才重算裁切构图。
+- [x] History 保存图片层 `sourceId` 与可序列化 Frame/Content 状态；Frame Move、Frame Resize、Content Pan、图片层几何缩放、多文件导入各自合并为一步，Registry 保留到 Maker 关闭。
 - [x] Preview、Export、Save 固定按 Canvas Color → 可见 Background → ImageLayers → TextBoxes 渲染，最终 PNG 继续复用现有 Upload API。
 - [x] 无后端改动，无新增 npm/Python 依赖；仍不支持旋转、蒙版、滤镜、统一图层、GIF/视频或项目草稿。
+
+### v0.8.1～v0.8.3：Forge 工作流闭环强化（已完成）
+
+- [x] v0.8.1：Forge 内新增轻量 Vault 素材选择器，复用现有 Meme 查询、模板过滤、媒体 URL 与 Session Registry；Viewer 当前图可直接加入 Forge。
+- [x] v0.8.2：新增九种快捷布局，对当前图片层批量更新 Frame 并显式 Fill + Center；精确布局作用于前 N 张，通用平铺最多六张，一次布局为一步 History。
+- [x] v0.8.3：本地/Vault 替换来源保留 Frame、层级与透明度并重置 Content；补齐透明度、清空图片层、清空文本框与整体重置，全部支持 Undo/Redo。
+- [x] Preview、Export、Save 继续共用 Renderer；不新增后端模型/API/存储服务，不新增 npm/Python 依赖。
+- [x] 当前仍不支持旋转、滤镜、Sticker、GIF 编辑、自由蒙版、专业图层系统或可编辑工程保存。
 
 ### v1.0：可公开访问版本
 
@@ -584,7 +592,7 @@ data/thumbnails/*
 - 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
 - Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.8 Meme Forge 多图拼装已完成
+当前状态：v0.8.3 Meme Forge 工作流闭环强化已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

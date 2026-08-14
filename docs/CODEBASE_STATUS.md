@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.8 多图拼装实现状态（2026-08-14）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v0.8.3 Forge 工作流闭环实现状态（2026-08-14）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
 
@@ -392,7 +392,7 @@ v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补�
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
-## v0.8 Meme Forge 多图拼装边界
+## v0.8.3 Meme Forge 工作流闭环边界
 
 - 底图可来自现有 Template Reference Image 或本地 PNG/JPEG/WEBP；GIF 不支持，本地图只存在当前会话。
 - 文本框可选黑/白文字与黑/白描边，可调整文字、X/Y、宽度、字号、系统字体预设和左/中/右对齐；最多 20 个，数组顺序即绘制顺序。
@@ -401,7 +401,9 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - `MemeImageLayer` 只保存 `sourceId`、百分比 `frameX/frameY/frameWidth/frameHeight`、画布绝对百分比 `contentX/contentY`、独立 `contentScale` 与 opacity；`MemeImageSource` Registry 保存解码图像和自然尺寸，同一来源可供多个独立裁切层复用。
 - 来源注册表保留到 Maker 关闭，删除层不销毁来源以支持 Undo；会话结束统一释放 Object URL 与已解码资源。
 - 本地图片输入支持多文件选择、Canvas Drop 和图片剪贴板；PNG/JPEG/WEBP 可用，GIF/非图片/解码失败/超过 50 MiB 文件逐项拒绝，合法文件继续导入。
-- 图片 Frame 是纯矩形 Mask：移动/Resize Frame 不重新居中或缩放 Content；Crop Mode 拖动只平移 Content，Zoom 只改变 `contentScale` 并保持内容中心。普通对象移动才把 Frame 与 Content 同量平移；只有显式 Fit、Fill、Reset Crop 会重算 Content Transform。
+- Forge 的 Vault 素材选择器复用现有 `GET /api/memes` 查询与媒体 URL，提供关键词、模板过滤和轻量分页；选中封面/第一张图后直接进入 Session Image Source Registry，不新增后端表或媒体服务。
+- Viewer 的“加入 Meme Forge”传递当前正在查看的具体图片；Forge 若尚无底图，会用该图尺寸初始化隐藏背景画布并创建可撤销的图片层，之后仍可切换模板或本地底图。
+- 图片 Frame 是纯矩形 Mask：移动/Resize Frame 不重新居中或缩放 Content，Crop Mode 拖动只平移 Content。几何区的图片层缩放固定为 10%–500%，按目标 `contentScale` 求比例，以 Frame 中心同步缩放 Frame、内容尺寸和 Content 相对偏移，从而保留当前裁切构图；缩放不受画布边界限制，Frame 可超出画布。普通对象移动继续把 Frame 与 Content 同量平移；显式 Fit、Fill、Reset Crop 才重新计算裁切构图。
 - 当前底图可建立独立图片层并隐藏/显示；隐藏不清除底图来源或取景状态，Template/Local 保存归属规则不变。
 - History 保存深拷贝的图片层、文本框、互斥选择、标题、Canvas/Background State 与 `backgroundVisible`，上限 50；图片只保存 `sourceId`，File、Blob、Bitmap、Canvas 和 DOM 不进入快照。
 - Ctrl+Z/Y/Shift+Z、Ctrl+D、Delete、Escape 与 Arrow 系列只在非输入焦点生效；拖动、Resize 与 Slider 连续操作合并为一步。
@@ -411,9 +413,11 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - 背景支持 10%–400% Zoom、X/Y 百分比 Pan、空白画布拖动、Fit、Fill 与当前比例 Reset；画布未覆盖区域固定填白。
 - History 额外保存轻量 Output Canvas 与 Background Transform；背景文件、Object URL、Canvas、Blob 和 DOM 仍不进入快照。
 - Preview、Export 与 Save 使用完全一致的背景、图片层和文本渲染逻辑；Overlay 装饰不进入 Export，输出固定为 PNG。
+- 快捷布局支持左右/上下二分、三横/三竖、上二下一、上一下二、2×2 与最多六张横/纵平铺；布局只作用于所需的前 N 层，并为每层显式执行 Fill + Center，整个布局只记录一步 History。
+- 替换本地/Vault 来源保留 Frame、数组层级和 opacity，重置 Content 为 Fill + Center；清空全部图片层、清空全部文本框、重置当前 Forge 状态均为单步且可 Undo/Redo。
 - 保存复用 `POST /api/memes`：Template 模式继承模板，Local 模式传 `template_id=null`；不自动生成 Embedding 或调用 Enrichment。
 - 图片层裁切使用矩形 Frame + Canvas clip，不提供自由多边形/圆形 Crop、蒙版、旋转、滤镜、持久化/分支式 History、GIF Maker 或草稿持久化。
 - 文本视觉支持 Hex fill/stroke、背景框颜色/透明度/Padding/圆角、阴影颜色/模糊/偏移、三档字重、行高和字距；字体仍仅使用系统预设。
 - 样式剪贴板仅复制视觉与排版字段，不复制文字、ID、X/Y 或宽度，关闭 Maker 后释放。
 - 输出支持常用像素预设及 64–4096px 自定义宽高；比例锁定按修改前比例联动，解锁后独立，画布背景色先于底图绘制。
-- v0.8 明确不支持旋转、Sticker、Shape、滤镜、Blend Mode、图片/文字任意交叉排序、多选/Group、GIF 编辑、项目草稿或复杂图层系统。
+- v0.8.3 明确不支持旋转、Sticker、Shape、滤镜、Blend Mode、自由蒙版、图片/文字任意交叉排序、多选/Group、GIF 编辑、项目草稿或复杂图层系统。

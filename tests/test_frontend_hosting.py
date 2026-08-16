@@ -59,6 +59,28 @@ def test_frontend_is_not_mounted_without_index(tmp_path: Path) -> None:
     assert get(app, "/docs").status_code == 200
 
 
+def test_mobile_ingest_has_a_clean_route_when_built(tmp_path: Path) -> None:
+    frontend_dir = tmp_path / "frontend"
+    mobile_dir = frontend_dir / "mobile"
+    mobile_dir.mkdir(parents=True)
+    (frontend_dir / "index.html").write_text(
+        "<!doctype html><title>Meme Vault</title>",
+        encoding="utf-8",
+    )
+    (mobile_dir / "index.html").write_text(
+        "<!doctype html><title>Mobile Ingest</title>",
+        encoding="utf-8",
+    )
+
+    app = create_app(tmp_path / "images", tmp_path / "thumbnails", frontend_dir)
+
+    response = get(app, "/mobile")
+    assert response.status_code == 200
+    assert "Mobile Ingest" in response.text
+    route_paths = [route.path for route in app.routes if hasattr(route, "path")]
+    assert route_paths.index("/mobile") < route_paths.index("")
+
+
 def test_frontend_mount_does_not_shadow_api_or_media(tmp_path: Path) -> None:
     frontend_dir = tmp_path / "frontend"
     frontend_dir.mkdir()

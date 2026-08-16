@@ -1,8 +1,21 @@
-# Meme Vault v0.8.3
+# Meme Vault v0.9.0
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.8.3，Meme Forge 定位为轻量快捷 Meme 制作器：支持模板/本地底图、多图片层、多文字层、Frame/Content 裁切拼装、Vault 取材、快捷布局、替换来源、透明度、PNG 导出和快速入库。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.9.0，新增可信局域网内的 Mobile Ingest 手机投喂入口；桌面端仍是主要管理终端。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+
+## Mobile Ingest
+
+先构建前端并让 FastAPI 监听局域网网卡：
+
+```powershell
+npm.cmd --prefix frontend run build
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+手机与电脑接入同一可信局域网后，在手机浏览器访问 `http://电脑的局域网IPv4:8000/mobile`。页面支持从系统相册多选 JPG/JPEG、PNG、WebP 和 GIF，按顺序逐张调用现有 `POST /api/memes` 入库；上传期间显示处理进度，完成后分别汇总成功数、失败数和失败文件名。“继续投喂”会清空本轮状态并开始下一轮。
+
+Mobile Ingest 使用同源相对 API，不需要配置或硬编码电脑 IP。它复用桌面端相同的图片校验、10 MB 大小限制、去重、文件名处理、原图/缩略图存储、数据库事务和 Derived Data Invalidation，不提供浏览、编辑、删除、登录、PWA 或公网访问能力。
 
 ## Meme 制作器
 
@@ -80,7 +93,7 @@ npm.cmd --prefix frontend install
 分别在两个终端启动后端与 Vite 开发服务器：
 
 ```powershell
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ```powershell
@@ -103,7 +116,7 @@ BACKEND_TARGET=http://127.0.0.1:8000
 
 ```powershell
 npm.cmd --prefix frontend run build
-python -m uvicorn app.main:app
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 `build` 会先执行 `tsc --noEmit` 类型检查，再执行 Vite 构建。只有 `frontend/dist/index.html` 存在时，FastAPI 才会在根路径托管网页；没有构建产物时，后端 API 仍可独立启动。
@@ -111,6 +124,7 @@ python -m uvicorn app.main:app
 生产模式可访问：
 
 - 网页管理台：<http://127.0.0.1:8000/>
+- 手机投喂入口：<http://127.0.0.1:8000/mobile>（手机访问时把 `127.0.0.1` 替换为电脑的局域网 IPv4）
 - 健康检查：<http://127.0.0.1:8000/api/health>
 - Swagger API 文档：<http://127.0.0.1:8000/docs>
 

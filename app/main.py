@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.ai_settings import router as ai_settings_router
@@ -89,7 +90,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.6.5",
+        version="0.9.0",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -153,6 +154,16 @@ def create_app(
 
     # 根路径挂载必须最后注册，避免吞掉 API、媒体与 Swagger 路由。
     # 只有完整构建的入口文件存在时才启用，后端因此可独立启动。
+    mobile_index = resolved_frontend / "mobile" / "index.html"
+    if mobile_index.is_file():
+        application.add_api_route(
+            "/mobile",
+            lambda: FileResponse(mobile_index),
+            methods=["GET"],
+            include_in_schema=False,
+            name="mobile-ingest",
+        )
+
     if (resolved_frontend / "index.html").is_file():
         application.mount(
             "/",

@@ -592,7 +592,16 @@ data/thumbnails/*
 - 全局非输入区支持撤销/重做、复制、删除、取消选择和位置微调快捷键。
 - Drag 中心吸附只针对 Canvas X/Y=50%，辅助线位于 overlay；数值属性支持 Slider 与 Numeric 双向精调。
 
-当前状态：v0.8.3 Meme Forge 工作流闭环强化已完成
+### v0.9.0：Mobile Ingest（已完成）
+
+- [x] 新增独立 `/mobile` 页面和 Vite 多页面构建入口，不改变桌面主站布局。
+- [x] 使用原生多文件图片选择器，支持 JPG/JPEG、PNG、WebP 与 GIF。
+- [x] 逐文件复用现有 `uploadMeme` / `POST /api/memes`，不复制文件存储或 Meme 入库逻辑。
+- [x] 实现 idle、selected、uploading、success、partial failure 与 failure 状态，以及成功/失败计数、失败文件名和连续投喂。
+- [x] 使用同源相对 API；生产启动说明显式监听 `0.0.0.0`，手机通过电脑局域网 IPv4 访问。
+- [x] 补充 Mobile 状态机、断线恢复、特殊文件名、连续上传和静态路由测试。
+
+当前状态：v0.9.0 Mobile Ingest 已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -601,5 +610,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：真实使用验收；不自动扩展旋转、蒙版、滤镜或统一图层系统
+下一步：Mobile Ingest 实机上传验收；不自动扩展 PWA、登录、公网穿透、Maibot 或社交平台对接
 ```

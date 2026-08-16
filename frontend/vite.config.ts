@@ -18,6 +18,14 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        input: {
+          main: "index.html",
+          mobile: "mobile/index.html",
+        },
+      },
+    },
     test: {
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],

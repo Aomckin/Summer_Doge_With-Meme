@@ -434,12 +434,27 @@ class MemeService:
     def get_random_meme(
         self, *, tags: Sequence[str] | None = None, template_id: int | None = None
     ) -> Meme:
-        # Repository 负责随机查询，Service 负责解释“没有结果”及检查文件。
-        meme = self.repository.get_random(tags=tags, template_id=template_id)
-        if meme is None:
-            raise NoMemesAvailableError("No Meme matches the requested range")
-        self._ensure_files_exist(meme)
-        return meme
+        # Repository 负责随机元数据查询；缺失磁盘文件的记录不会泄漏给消费者。
+        unavailable_ids: list[int] = []
+        while True:
+            meme = self.repository.get_random(
+                tags=tags,
+                template_id=template_id,
+                exclude_ids=unavailable_ids,
+            )
+            if meme is None:
+                detail = (
+                    "No usable Meme matches the requested range"
+                    if unavailable_ids
+                    else "No Meme matches the requested range"
+                )
+                raise NoMemesAvailableError(detail)
+            try:
+                self._ensure_files_exist(meme)
+            except MemeFileMissingError:
+                unavailable_ids.append(meme.id)
+                continue
+            return meme
 
     def analyze_meme(
         self,

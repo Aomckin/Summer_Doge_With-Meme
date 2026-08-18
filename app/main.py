@@ -90,7 +90,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="0.9.0",
+        version="0.9.1",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -137,13 +137,14 @@ def create_app(
     )
 
     # 各业务路由在独立模块中定义，入口文件只负责把它们挂到应用上。
+    # Semantic static Meme paths must precede the dynamic /api/memes/{meme_id} route.
+    application.include_router(semantic_router)
     application.include_router(meme_router)
     application.include_router(collection_router)
     application.include_router(import_job_router)
     application.include_router(export_job_router)
     application.include_router(embedding_job_router)
     application.include_router(enrichment_router)
-    application.include_router(semantic_router)
     application.include_router(recommendation_router)
     application.include_router(similarity_inspection_router)
     application.include_router(caption_router)

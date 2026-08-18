@@ -35,6 +35,7 @@ def meme_to_response(meme: Meme) -> MemeResponse:
     )
     return MemeResponse(
         id=meme.id,
+        filename=cover.original_filename,
         title=meme.title,
         description=meme.description,
         source=meme.source,
@@ -58,4 +59,12 @@ def meme_to_response(meme: Meme) -> MemeResponse:
         ),
         images=images,
         image_count=len(images),
+    )
+
+
+def meme_to_external_response(meme: Meme) -> MemeResponse:
+    """Keep the established DTO while exposing a stable ID-based asset URL."""
+    response = meme_to_response(meme)
+    return response.model_copy(
+        update={"image_url": f"/api/memes/{meme.id}/image"}
     )

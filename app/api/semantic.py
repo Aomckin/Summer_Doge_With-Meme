@@ -9,7 +9,7 @@ from app.ai.client import (
     AIRequestTimeoutError,
     AIUpstreamError,
 )
-from app.api.mappers import meme_to_response
+from app.api.mappers import meme_to_external_response, meme_to_response
 from app.database import get_db
 from app.schemas.semantic import (
     MemeEmbeddingStatusResponse,
@@ -65,6 +65,30 @@ def semantic_search(
         items=[ScoredMeme(meme=meme_to_response(meme), score=score) for meme, score in hits],
         **result,
     )
+
+
+@router.get("/api/memes/semantic", response_model=ScoredMeme)
+def semantic_random_top_five(
+    service: ServiceDependency,
+    q: Annotated[str, Query(max_length=500)],
+    limit: Annotated[int, Query(ge=1, le=1)] = 1,
+) -> ScoredMeme:
+    del limit  # The external response still contains exactly one Meme.
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(400, "q must contain at least 2 characters")
+    try:
+        hit = service.search_random_top_five(query=query)
+    except (AIConfigurationError, MemeEmbeddingUnavailableError) as error:
+        raise HTTPException(503, str(error)) from error
+    except AIRequestTimeoutError as error:
+        raise HTTPException(504, str(error)) from error
+    except (AIUpstreamError, AIInvalidResponseError) as error:
+        raise HTTPException(502, str(error)) from error
+    if hit is None:
+        raise HTTPException(404, "No semantic Meme matches the query")
+    meme, score = hit
+    return ScoredMeme(meme=meme_to_external_response(meme), score=score)
 
 
 @router.get("/api/memes/{meme_id}/similar", response_model=SimilarMemeResponse)

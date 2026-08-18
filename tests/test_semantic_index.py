@@ -231,6 +231,70 @@ def test_semantic_search_orders_cosine_filters_tags_and_caches_pages(semantic_co
         assert fake.calls == 1
 
 
+def test_semantic_top_five_random_reuses_local_ranking_and_skips_unavailable_asset(
+    semantic_context, monkeypatch
+) -> None:
+    factory, storage, model_id, tmp_path = semantic_context
+    query_vector = [0.0] * 1024
+    query_vector[0] = 1.0
+    scores = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5)
+    with factory() as session:
+        memes = [
+            add_meme(session, storage, f"rank-{position}")
+            for position in range(1, 7)
+        ]
+        for meme, score in zip(memes, scores, strict=True):
+            vector = [0.0] * 1024
+            vector[0] = score
+            vector[1] = (1 - score**2) ** 0.5
+            ready_embedding(session, meme, model_id, vector)
+        session.commit()
+        storage.original_path(memes[0].file_path).unlink()
+
+    fake = FakeClient(query_vector)
+    with factory() as session:
+        service = SemanticSearchService(
+            session,
+            storage,
+            tmp_path / "key",
+            SemanticIndex(factory),
+            SemanticSearchResultCache(),
+            client=fake,
+        )
+        monkeypatch.setattr(
+            "app.services.semantic_search_service.random.choice",
+            lambda candidates: candidates[-1],
+        )
+        hit = service.search_random_top_five(query="available top five")
+
+    assert hit is not None
+    # Rank 1 is unavailable, ranks 2-5 are candidates, and rank 6 is excluded.
+    assert hit[0].id == memes[4].id
+    assert fake.calls == 1
+
+
+def test_semantic_top_five_random_reports_library_without_ready_embeddings(
+    semantic_context,
+) -> None:
+    factory, storage, _, tmp_path = semantic_context
+    with factory() as session:
+        add_meme(session, storage, "not-indexed")
+    fake = FakeClient([1.0] + [0.0] * 1023)
+    with factory() as session:
+        service = SemanticSearchService(
+            session,
+            storage,
+            tmp_path / "key",
+            SemanticIndex(factory),
+            SemanticSearchResultCache(),
+            client=fake,
+        )
+        with pytest.raises(
+            MemeEmbeddingUnavailableError, match="No ready semantic embeddings"
+        ):
+            service.search_random_top_five(query="not indexed")
+
+
 def test_index_generation_invalidates_query_cache_and_similar_never_calls_provider(semantic_context) -> None:
     factory, storage, model_id, tmp_path = semantic_context
     vector = [0.0] * 1024

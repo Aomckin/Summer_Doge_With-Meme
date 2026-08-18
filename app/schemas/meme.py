@@ -66,6 +66,7 @@ class MemeResponse(MemeCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    filename: str = ""
     original_filename: str
     stored_filename: str
     image_url: str

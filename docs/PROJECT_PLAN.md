@@ -601,7 +601,15 @@ data/thumbnails/*
 - [x] 使用同源相对 API；生产启动说明显式监听 `0.0.0.0`，手机通过电脑局域网 IPv4 访问。
 - [x] 补充 Mobile 状态机、断线恢复、特殊文件名、连续上传和静态路由测试。
 
-当前状态：v0.9.0 Mobile Ingest 已完成
+### v0.9.1：External Meme API（已完成）
+
+- [x] 复用现有 Random Meme 查询并跳过文件不可用记录，不加载图片二进制
+- [x] 新增通用 Semantic 单结果 GET 接口，复用 `SemanticSearchService`、缓存与 NumPy 索引，并从本地 Top 5 可用候选中随机返回一张
+- [x] 新增按 Meme ID 获取原始封面的图片接口，保持 JPEG/PNG/WebP/GIF 实际 MIME
+- [x] 返回相对 `image_url`，不绑定 MaiBot/NapCat/QQ，不暴露磁盘路径
+- [x] 新增 External API Contract，以及随机、语义、图片和异常路径自动测试
+
+当前状态：v0.9.1 External Meme API 已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -610,5 +618,5 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：Mobile Ingest 实机上传验收；不自动扩展 PWA、登录、公网穿透、Maibot 或社交平台对接
+下一步：v0.9.2 Meme + Caption；本版本不提前实现 Caption 返回、MaiBot Plugin、登录、公网穿透或社交平台对接
 ```

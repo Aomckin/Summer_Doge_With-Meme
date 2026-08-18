@@ -191,7 +191,11 @@ class MemeRepository:
         return meme
 
     def get_random(
-        self, *, tags: Sequence[str] | None = None, template_id: int | None = None
+        self,
+        *,
+        tags: Sequence[str] | None = None,
+        template_id: int | None = None,
+        exclude_ids: Sequence[int] = (),
     ) -> Meme | None:
         statement = select(Meme)
         normalized_tags = list(
@@ -208,6 +212,8 @@ class MemeRepository:
             )
         if template_id is not None:
             statement = statement.where(Meme.template_id == template_id)
+        if exclude_ids:
+            statement = statement.where(Meme.id.not_in(set(exclude_ids)))
         # SQLite 的 random() 为候选行生成随机顺序，只取第一条。
         statement = statement.order_by(func.random()).limit(1)
         return self.session.scalar(statement)

@@ -1,5 +1,6 @@
 from math import ceil
 from pathlib import Path
+import random
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -161,6 +162,43 @@ class SemanticSearchService:
             "missing_count": counts["total"] - counts["ready"],
             "model_id": model.model_id,
         }
+
+    def search_random_top_five(
+        self,
+        *,
+        query: str,
+        tags: list[str] | None = None,
+        template_id: int | None = None,
+    ) -> tuple[Meme, float] | None:
+        """Choose one usable Meme from the locally ranked Top 5."""
+        result = self.search(
+            query=query,
+            tags=tags or [],
+            template_id=template_id,
+            page=1,
+            page_size=5,
+        )
+        total = int(result["total"])
+        if total == 0:
+            if int(result["indexed_count"]) == 0 and int(result["missing_count"]) > 0:
+                raise MemeEmbeddingUnavailableError(
+                    "No ready semantic embeddings are available"
+                )
+            return None
+
+        candidates: list[tuple[Meme, float]] = []
+        for meme, score in result["hits"]:
+            references = list(meme.images) or [meme]
+            try:
+                available = all(
+                    self.storage.exists(image.file_path, image.thumbnail_path)
+                    for image in references
+                )
+            except (OSError, ValueError):
+                available = False
+            if available:
+                candidates.append((meme, score))
+        return random.choice(candidates) if candidates else None
 
     def similar(self, meme_id: int, *, limit: int) -> list[tuple[Meme, float]]:
         if self.session.get(Meme, meme_id) is None:

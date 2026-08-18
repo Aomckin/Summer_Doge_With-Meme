@@ -27,7 +27,7 @@ from app.ai.client import (
     AIRequestTimeoutError,
     AIUpstreamError,
 )
-from app.api.mappers import meme_to_response
+from app.api.mappers import meme_to_external_response, meme_to_response
 from app.database import get_db
 from app.models.meme import Meme
 from app.models.ai_analysis import MemeAIAnalysis
@@ -43,7 +43,12 @@ from app.services.meme_service import (
     MemeService,
     NoMemesAvailableError,
 )
-from app.storage.image_storage import ImageStorage, ImageTooLargeError, InvalidImageError
+from app.storage.image_storage import (
+    FORMAT_DETAILS,
+    ImageStorage,
+    ImageTooLargeError,
+    InvalidImageError,
+)
 from app.utils.download_names import safe_download_filename, safe_extension, sanitize_stem, unique_archive_name
 
 
@@ -173,6 +178,26 @@ async def upload_meme(
     return meme_to_response(meme)
 
 
+@router.get("/{meme_id}/image", response_class=FileResponse)
+def get_meme_image(meme_id: int, service: ServiceDependency) -> FileResponse:
+    """Return the original cover asset inline, including an unmodified GIF."""
+    try:
+        meme = service.get_meme(meme_id)
+    except MemeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except MemeFileMissingError as error:
+        raise HTTPException(status_code=410, detail=str(error)) from error
+
+    image = min(meme.images, key=lambda item: item.position) if meme.images else meme
+    supported_mime_types = {mime_type for _, mime_type in FORMAT_DETAILS.values()}
+    if image.mime_type not in supported_mime_types:
+        raise HTTPException(status_code=409, detail="Meme image metadata is invalid")
+    return FileResponse(
+        service.storage.original_path(image.file_path),
+        media_type=image.mime_type,
+    )
+
+
 @router.get("", response_model=list[MemeResponse])
 def list_memes(
     service: ServiceDependency,
@@ -243,7 +268,7 @@ def get_random_meme(
     except MemeFileMissingError as error:
         # 410 表示记录曾存在，但其对应文件已经不可用。
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return meme_to_response(meme)
+    return meme_to_external_response(meme)
 
 
 @router.post("/{meme_id}/analyze", response_model=AIAnalysisResponse)

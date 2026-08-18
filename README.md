@@ -1,8 +1,19 @@
-# Meme Vault v0.9.0
+# Meme Vault v0.9.1
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.9.0，新增可信局域网内的 Mobile Ingest 手机投喂入口；桌面端仍是主要管理终端。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v0.9.1，在 Mobile Ingest 基础上新增可信局域网内的通用 External Meme API；桌面端仍是主要管理终端。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+
+## External Meme API
+
+可信局域网内的通用消费者可通过以下接口取用 Meme：
+
+- `GET /api/memes/random`：随机返回一张当前可用 Meme 的元数据。
+- `GET /api/memes/semantic?q=无语&limit=1`：复用现有语义索引，从本地 Top 5 中随机返回一张。
+- `GET /api/memes/{id}/image`：按实际 MIME 返回原始封面，GIF 保持原文件。
+
+响应中的 `image_url` 是相对 URL，不包含服务器磁盘路径。完整参数、响应与错误契约见
+[`docs/external-api.md`](docs/external-api.md)。
 
 ## Mobile Ingest
 

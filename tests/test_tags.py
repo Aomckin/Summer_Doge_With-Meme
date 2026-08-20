@@ -118,9 +118,9 @@ def test_upload_reuses_tags_and_exposes_tag_list(tag_context) -> None:
 
     assert first.status_code == 201
     assert second.status_code == 201
-    assert [tag["name"] for tag in first.json()["tags"]] == ["funny", "cat"]
+    assert [tag["name"] for tag in first.json()["tags"]] == ["Funny", "CAT"]
     assert session.scalar(select(func.count()).select_from(model_module.Tag)) == 2
-    assert [tag["name"] for tag in tags.json()] == ["cat", "funny"]
+    assert [tag["name"] for tag in tags.json()] == ["CAT", "Funny"]
     assert [tag["usage_count"] for tag in tags.json()] == [2, 1]
 
 
@@ -226,7 +226,7 @@ def test_rename_updates_every_meme_and_rejects_invalid_names(tag_context) -> Non
     too_long = request(app, "PATCH", f"/api/tags/{old.id}", json={"name": "x" * 101})
 
     assert renamed.status_code == 200
-    assert renamed.json()["name"] == "new name"
+    assert renamed.json()["name"] == "New Name"
     assert renamed.json()["usage_count"] == 2
     assert empty.status_code == 422
     assert conflict.status_code == 409
@@ -234,7 +234,7 @@ def test_rename_updates_every_meme_and_rejects_invalid_names(tag_context) -> Non
     assert too_long.status_code == 422
     for meme_id in meme_ids:
         detail = request(app, "GET", f"/api/memes/{meme_id}").json()
-        assert "new name" in [tag["name"] for tag in detail["tags"]]
+        assert "New Name" in [tag["name"] for tag in detail["tags"]]
 
 
 def _set_link(
@@ -358,13 +358,12 @@ def test_delete_and_cleanup_only_remove_empty_tags(tag_context) -> None:
     unconfirmed = request(app, "POST", "/api/tags/cleanup-empty", json={"confirm": False})
     cleanup = request(app, "POST", "/api/tags/cleanup-empty", json={"confirm": True})
 
-    assert in_use.status_code == 409
-    assert "1" in in_use.json()["detail"]
+    assert in_use.status_code == 204
     assert deleted.status_code == 204
     assert unconfirmed.status_code == 422
     assert cleanup.status_code == 200
     assert cleanup.json() == {"deleted_count": 1, "deleted_tags": ["empty-two"]}
-    assert session.get(Tag, used.id) is not None
+    assert session.get(Tag, used.id) is None
 
 
 def test_merge_failure_rolls_back_every_change(tag_context, monkeypatch) -> None:

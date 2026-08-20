@@ -104,6 +104,7 @@ def run_startup_migrations(bind: Engine = engine) -> None:
             "response_summary",
             "ALTER TABLE enrichment_job_items ADD COLUMN response_summary TEXT",
         ),
+        ("tags", "normalized_name", "ALTER TABLE tags ADD COLUMN normalized_name VARCHAR(100)"),
     )
     with bind.begin() as connection:
         for table_name, column_name, statement in upgrades:
@@ -114,6 +115,9 @@ def run_startup_migrations(bind: Engine = engine) -> None:
             }
             if column_name not in columns:
                 connection.execute(text(statement))
+        if inspector.has_table("tags"):
+            connection.execute(text("UPDATE tags SET normalized_name = lower(trim(name)) WHERE normalized_name IS NULL OR normalized_name = ''"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_tags_normalized_name ON tags (normalized_name)"))
         if inspector.has_table("memes") and inspector.has_table("meme_images"):
             connection.execute(text("""
                 INSERT INTO meme_images (

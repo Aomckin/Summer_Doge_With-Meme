@@ -34,15 +34,17 @@ function setup(overrides: Record<string, unknown> = {}) {
     ignore: vi.fn().mockResolvedValue({}),
     relate: vi.fn().mockResolvedValue([]),
     merge: vi.fn().mockImplementation((targetId: number) => Promise.resolve(meme(targetId, "合并结果"))),
+    deleteMeme: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const actions = { openViewer: vi.fn(), onMerge: vi.fn() };
+  const actions = { openViewer: vi.fn(), onMerge: vi.fn(), onDelete: vi.fn() };
   new VaultInspectorController(document.querySelector<HTMLButtonElement>("#open")!, api, actions);
   document.querySelector<HTMLButtonElement>("#open")!.click();
   return { api, actions, dialog: document.querySelector<HTMLDialogElement>("[data-vault-inspector-dialog]")! };
 }
 
 function fill(dialog: HTMLDialogElement): void {
+  dialog.querySelector<HTMLInputElement>('[name="scope"][value="id_range"]')!.click();
   dialog.querySelector<HTMLInputElement>('[name="start_meme_id"]')!.value = "7201";
   dialog.querySelector<HTMLInputElement>('[name="end_meme_id"]')!.value = "7300";
   dialog.querySelector<HTMLInputElement>('[name="top_k"]')!.value = "5";
@@ -51,6 +53,14 @@ function fill(dialog: HTMLDialogElement): void {
 
 describe("vault inspector", () => {
   beforeEach(() => { document.body.innerHTML = ""; vi.restoreAllMocks(); });
+
+  it("starts whole-vault inspection without requiring an ID range", async () => {
+    const { api, dialog } = setup();
+    dialog.querySelector<HTMLButtonElement>("[data-start-inspection]")!.click();
+    await vi.waitFor(() => expect(api.inspect).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "whole_vault", start_meme_id: null, end_meme_id: null,
+    })));
+  });
 
   it("opens, submits range parameters, shows loading, stats, pair details and navigation", async () => {
     let resolve!: (value: SimilarityInspectionResponse) => void;
@@ -75,6 +85,7 @@ describe("vault inspector", () => {
 
   it("shows validation, error and empty states", async () => {
     const { api, dialog } = setup();
+    dialog.querySelector<HTMLInputElement>('[name="scope"][value="id_range"]')!.click();
     dialog.querySelector<HTMLInputElement>('[name="start_meme_id"]')!.value = "5";
     dialog.querySelector<HTMLInputElement>('[name="end_meme_id"]')!.value = "3";
     dialog.querySelector<HTMLButtonElement>("[data-start-inspection]")!.click();
@@ -120,6 +131,18 @@ describe("vault inspector", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("#4 · Meme 4"));
     expect(document.body.textContent).toContain("1 / 1");
     expect(document.body.textContent).toContain("向量已标记过期");
+  });
+
+  it("deletes one side and removes every pair containing that Meme", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { api, actions, dialog } = setup();
+    fill(dialog);
+    dialog.querySelector<HTMLButtonElement>("[data-start-inspection]")!.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("1 / 3"));
+    dialog.querySelector<HTMLButtonElement>("[data-delete-left]")!.click();
+    await vi.waitFor(() => expect(api.deleteMeme).toHaveBeenCalledWith(1));
+    expect(actions.onDelete).toHaveBeenCalledWith(1);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("1 / 1"));
   });
 
   it("supports right target, ignores stale responses, and clears temporary state on close", async () => {

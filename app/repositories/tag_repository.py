@@ -37,18 +37,22 @@ class TagRepository:
 
     @staticmethod
     def normalize_name(name: str) -> str:
-        # “ Cat ”和“cat”会归一为同一个名称，防止产生肉眼相同的重复标签。
-        return name.strip().lower()
+        return name.strip().casefold()
+
+    @staticmethod
+    def display_name(name: str) -> str:
+        return name.strip()
 
     def get_or_create(self, name: str, *, category: str = "custom") -> Tag:
-        normalized = self.normalize_name(name)
+        display = self.display_name(name)
+        normalized = self.normalize_name(display)
         if not normalized:
             raise ValueError("Tag name cannot be empty")
 
-        tag = self.session.scalar(select(Tag).where(Tag.name == normalized))
+        tag = self.session.scalar(select(Tag).where(Tag.normalized_name == normalized))
         if tag is None:
             # 只有查不到时才新建；已有标签直接复用。
-            tag = Tag(name=normalized, category=category)
+            tag = Tag(name=display, normalized_name=normalized, category=category)
             self.session.add(tag)
             self.session.flush()
         return tag
@@ -60,7 +64,7 @@ class TagRepository:
         normalized = self.normalize_name(name)
         if not normalized:
             return None
-        return self.session.scalar(select(Tag).where(Tag.name == normalized))
+        return self.session.scalar(select(Tag).where(Tag.normalized_name == normalized))
 
     def meme_ids_for_tag(self, tag_id: int) -> list[int]:
         return list(self.session.scalars(
@@ -75,18 +79,17 @@ class TagRepository:
         source: str = "user",
     ) -> list[Tag]:
         # dict.fromkeys 在去重的同时保留用户输入顺序。
-        normalized_names = list(
-            dict.fromkeys(
-                normalized
-                for name in names
-                if (normalized := self.normalize_name(name))
-            )
-        )
+        display_by_identity: dict[str, str] = {}
+        for name in names:
+            display = self.display_name(name)
+            normalized = self.normalize_name(display)
+            if normalized and normalized not in display_by_identity:
+                display_by_identity[normalized] = display
 
         # PATCH 标签采用“整体替换”语义：先清空旧关联，再建立新关联。
         # 被其他 Meme 使用的 Tag 本体不会因此删除。
         meme.tag_links.clear()
-        for name in normalized_names:
+        for name in display_by_identity.values():
             meme.tag_links.append(
                 MemeTag(tag=self.get_or_create(name), source=source)
             )
@@ -98,7 +101,7 @@ class TagRepository:
         meme: Meme,
         suggestions: Sequence[tuple[str, float]],
     ) -> list[Tag]:
-        links_by_name = {link.tag.name: link for link in meme.tag_links}
+        links_by_name = {link.tag.normalized_name: link for link in meme.tag_links}
         for name, confidence in suggestions:
             normalized = self.normalize_name(name)
             if not normalized:
@@ -111,7 +114,7 @@ class TagRepository:
                 continue
 
             link = MemeTag(
-                tag=self.get_or_create(normalized),
+                tag=self.get_or_create(name),
                 source="ai",
                 confidence=confidence,
             )
@@ -134,16 +137,16 @@ class TagRepository:
         remove_set = {self.normalize_name(name) for name in remove_names}
         if remove_set:
             meme.tag_links[:] = [
-                link for link in meme.tag_links if link.tag.name not in remove_set
+                link for link in meme.tag_links if link.tag.normalized_name not in remove_set
             ]
 
-        links_by_name = {link.tag.name: link for link in meme.tag_links}
+        links_by_name = {link.tag.normalized_name: link for link in meme.tag_links}
         for name in add_names:
             normalized = self.normalize_name(name)
             if not normalized or normalized in links_by_name:
                 continue
             link = MemeTag(
-                tag=self.get_or_create(normalized),
+                tag=self.get_or_create(name),
                 source=source,
                 confidence=confidence,
             )
@@ -168,7 +171,7 @@ class TagRepository:
         )
         query = self.normalize_name(q or "")
         if query:
-            statement = statement.where(Tag.name.contains(query))
+            statement = statement.where(Tag.normalized_name.contains(query))
         if not include_empty:
             statement = statement.having(usage > 0)
         order = {
@@ -182,8 +185,9 @@ class TagRepository:
         rows = self.session.execute(statement.order_by(*order)).all()
         return [TagWithUsage.from_tag(tag, int(count)) for tag, count in rows]
 
-    def rename(self, tag: Tag, name: str) -> Tag:
+    def rename(self, tag: Tag, name: str, normalized_name: str) -> Tag:
         tag.name = name
+        tag.normalized_name = normalized_name
         self.session.flush()
         return tag
 
@@ -252,12 +256,11 @@ class TagRepository:
         self.session.flush()
         return target
 
-    def delete_empty(self, tag: Tag) -> bool:
-        if self.usage_count(tag.id) != 0:
-            return False
+    def delete(self, tag: Tag) -> None:
+        tag.meme_links.clear()
+        self.session.flush()
         self.session.delete(tag)
         self.session.flush()
-        return True
 
     def cleanup_empty(self) -> list[str]:
         empty_tags = list(

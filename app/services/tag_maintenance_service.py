@@ -54,7 +54,7 @@ class TagMaintenanceService:
                 "Tags cannot be added and removed together: "
                 + ", ".join(sorted(overlap))
             )
-        links_by_name = {link.tag.name: link for link in meme.tag_links}
+        links_by_name = {link.tag.normalized_name: link for link in meme.tag_links}
         protected = sorted(
             name for name in removals
             if name in links_by_name and links_by_name[name].source in PROTECTED_TAG_SOURCES
@@ -65,7 +65,10 @@ class TagMaintenanceService:
         actual_removals = tuple(name for name in removals if name in links_by_name)
         before = tuple((link.tag.name, link.source) for link in meme.tag_links)
         removal_set = set(actual_removals)
-        after = tuple(item for item in before if item[0] not in removal_set) + tuple(
+        after = tuple(
+            item for item in before
+            if self.tags.normalize_name(item[0]) not in removal_set
+        ) + tuple(
             (name, "codex") for name in actual_additions
         )
         return TagMaintenancePlan(

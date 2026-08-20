@@ -1,5 +1,7 @@
 import { MemeVaultApp } from "./app";
 import "./styles/main.css";
+import "./styles/appearance.css";
+import "./styles/immersive.css";
 
 const root = document.querySelector<HTMLElement>("#app");
 

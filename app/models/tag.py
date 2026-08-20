@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.database import Base
 
@@ -21,6 +21,7 @@ class Tag(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    normalized_name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     category: Mapped[str] = mapped_column(String(50), default="custom")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -28,6 +29,12 @@ class Tag(Base):
         back_populates="tag",
         cascade="all, delete-orphan",
     )
+
+    @validates("name")
+    def preserve_display_and_sync_identity(self, _key: str, value: str) -> str:
+        display = value.strip()
+        self.normalized_name = display.casefold()
+        return display
 
 
 class MemeTag(Base):

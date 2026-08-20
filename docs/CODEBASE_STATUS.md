@@ -1,8 +1,14 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v0.9.1 External Meme API 实现状态（2026-08-16）。本文描述已经落地的代码，不是下一阶段需求。
+> 更新基线：v1.0.0 Phase 1 UX Debt Cleanup 与 Vault Inspector Upgrade（2026-08-18）。本文描述已经落地的代码，不是下一阶段需求。
 
 ## 当前能力
+
+- Tag 使用显示名 + `normalized_name` 双字段；大小写不敏感去重但保留 UI 大小写，使用中的 Tag 可事务性强制删除并令受影响语义数据过期。
+- 主资料库支持 `#4496`、`Meme 4496` 等 ID 精确跳转和 24/48/96 分页。
+- 动态 Template Selector 共享实时子串搜索；主资料库模板筛选也可即时搜索。
+- 宝库巡检支持全库或 ID Range Source Set、全局 SemanticIndex 候选、左右直接删除、Ignore、弱关联和 Merge。
+- GIF 复制会尝试将原始 `image/gif` 写入剪贴板；浏览器不支持时明确提示下载，不会转 PNG 冒充动画。
 
 - 本地 Meme 库：原图/复合图片组下载、持久化批量 ZIP 导出、单图 API、普通串行批量上传、持久化 ZIP 批量导入、缩略图、全局重复图片检测、搜索、标签筛选、随机查看、编辑、删除与正式分页浏览。
 - 复合 Meme：一个 Meme 包含一张或多张按零基 `position` 排序的图片；第一张是封面。
@@ -423,3 +429,8 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - 样式剪贴板仅复制视觉与排版字段，不复制文字、ID、X/Y 或宽度，关闭 Maker 后释放。
 - 输出支持常用像素预设及 64–4096px 自定义宽高；比例锁定按修改前比例联动，解锁后独立，画布背景色先于底图绘制。
 - v0.8.3 明确不支持旋转、Sticker、Shape、滤镜、Blend Mode、自由蒙版、图片/文字任意交叉排序、多选/Group、GIF 编辑、项目草稿或复杂图层系统。
+## v1.0.0 Card Motion Feature Freeze
+
+- 主库 Meme Card 的最终动态层由 Motion Preset、Card Size Multiplier、Aspect Ratio 衰减、Lift/Tilt/Magnetic Follow，以及仅在“喝了假酒”档启用的 `DrunkPhysicsController` 组成。
+- 假酒物理使用单一 `requestAnimationFrame`、`IntersectionObserver` viewport-near 集合和每卡独立随机 phase/speed/amplitude；Hover 卡片降低环境层强度，触屏与 reduced-motion 不启用。
+- Card Motion 系统自此 Feature Freeze：后续只接受缺陷修复、性能优化和可访问性修复，不再增加新特效或新动态层。

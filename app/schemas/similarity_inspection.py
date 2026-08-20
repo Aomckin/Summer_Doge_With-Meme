@@ -1,16 +1,23 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.meme import MemeResponse
 
 
 class SimilarityInspectionRequest(BaseModel):
-    start_meme_id: int = Field(ge=1)
-    end_meme_id: int = Field(ge=1)
+    scope: Literal["whole_vault", "id_range"] = "id_range"
+    start_meme_id: int | None = Field(default=None, ge=1)
+    end_meme_id: int | None = Field(default=None, ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
     similarity_threshold: float = Field(default=0.85, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_range(self) -> "SimilarityInspectionRequest":
+        if self.scope == "whole_vault":
+            return self
+        if self.start_meme_id is None or self.end_meme_id is None:
+            raise ValueError("start_meme_id and end_meme_id are required for id_range")
         if self.end_meme_id < self.start_meme_id:
             raise ValueError("end_meme_id must be greater than or equal to start_meme_id")
         if self.end_meme_id - self.start_meme_id + 1 > 1000:

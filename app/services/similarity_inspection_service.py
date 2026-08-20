@@ -38,23 +38,25 @@ class SimilarityInspectionService:
     def inspect(
         self,
         *,
-        start_meme_id: int,
-        end_meme_id: int,
-        top_k: int,
-        similarity_threshold: float,
+        scope: str = "id_range",
+        start_meme_id: int | None = None,
+        end_meme_id: int | None = None,
+        top_k: int = 5,
+        similarity_threshold: float = 0.85,
     ) -> dict[str, object]:
         model = AISettingsRepository(self.session).active_embedding_model()
         if model is None:
             raise SimilarityInspectionUnavailableError(
                 "Semantic embedding model is not configured"
             )
-        requested_ids = set(
-            self.session.scalars(
-                select(Meme.id).where(
-                    Meme.id >= start_meme_id, Meme.id <= end_meme_id
-                )
+        statement = select(Meme.id)
+        if scope == "id_range":
+            if start_meme_id is None or end_meme_id is None:
+                raise ValueError("ID range is required")
+            statement = statement.where(
+                Meme.id >= start_meme_id, Meme.id <= end_meme_id
             )
-        )
+        requested_ids = set(self.session.scalars(statement))
         requested_count = len(requested_ids)
         records = list(
             self.session.scalars(

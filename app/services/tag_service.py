@@ -59,14 +59,15 @@ class TagService:
     def rename_tag(self, tag_id: int, name: str) -> TagWithUsage:
         tag = self._get_tag(tag_id)
         affected = self.repository.meme_ids_for_tag(tag_id)
-        normalized = self._normalize_name(name)
+        display = self.repository.display_name(name)
+        normalized = self._normalize_name(display)
         conflict = self.repository.get_by_name(normalized)
         if conflict is not None and conflict.id != tag.id:
             raise TagNameConflictError(
                 f'Tag name "{normalized}" already exists; use the merge function instead'
             )
         try:
-            updated = self.repository.rename(tag, normalized)
+            updated = self.repository.rename(tag, display, normalized)
             result = self._with_usage(updated)
             invalidate_meme_semantic_data(self.session, affected)
             self.session.commit()
@@ -96,12 +97,10 @@ class TagService:
 
     def delete_tag(self, tag_id: int) -> None:
         tag = self._get_tag(tag_id)
-        count = self.repository.usage_count(tag.id)
-        if count:
-            raise TagInUseError(tag.id, count)
+        affected = self.repository.meme_ids_for_tag(tag.id)
         try:
-            if not self.repository.delete_empty(tag):
-                raise TagInUseError(tag.id, self.repository.usage_count(tag.id))
+            self.repository.delete(tag)
+            invalidate_meme_semantic_data(self.session, affected)
             self.session.commit()
         except Exception:
             self.session.rollback()

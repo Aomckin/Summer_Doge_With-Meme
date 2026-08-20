@@ -177,6 +177,7 @@ export function inspectMemeSimilarity(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        scope: input.scope,
         start_meme_id: input.start_meme_id,
         end_meme_id: input.end_meme_id,
         top_k: input.top_k,

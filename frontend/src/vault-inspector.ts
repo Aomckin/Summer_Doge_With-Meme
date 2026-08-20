@@ -11,11 +11,13 @@ export interface VaultInspectorApi {
   ignore(memeAId: number, memeBId: number): Promise<unknown>;
   relate(memeId: number, relatedIds: number[]): Promise<MemeResponse[]>;
   merge(targetMemeId: number, sourceMemeId: number): Promise<MemeResponse>;
+  deleteMeme(memeId: number): Promise<void>;
 }
 
 export interface VaultInspectorActions {
   openViewer(meme: MemeResponse): void;
   onMerge(target: MemeResponse, sourceId: number): void | Promise<void>;
+  onDelete(memeId: number): void | Promise<void>;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -45,10 +47,11 @@ export class VaultInspectorController {
     this.dialog.innerHTML = `
       <form class="modal-card vault-inspector-shell" data-inspector-form>
         <div class="modal-heading"><div><p class="eyebrow">VAULT INSPECTOR</p><h2>宝库巡检</h2></div><button class="icon-button" type="button" data-close-inspector aria-label="关闭宝库巡检">×</button></div>
+        <div class="inspector-scope"><strong>巡检范围</strong><label><input type="radio" name="scope" value="whole_vault" checked>全库</label><label><input type="radio" name="scope" value="id_range">指定 ID</label></div>
         <div class="inspector-parameters">
-          <label>开始 Meme ID<input name="start_meme_id" type="number" min="1" required></label>
+          <label data-range-field hidden>开始 Meme ID<input name="start_meme_id" type="number" min="1"></label>
           <span>～</span>
-          <label>结束 Meme ID<input name="end_meme_id" type="number" min="1" required></label>
+          <label data-range-field hidden>结束 Meme ID<input name="end_meme_id" type="number" min="1"></label>
           <label>每个 Meme 候选数<input name="top_k" type="number" min="1" max="20" value="5" required></label>
           <label>最低相似度<input name="similarity_threshold" type="number" min="0" max="1" step="0.01" value="0.85" required></label>
           <button class="button button-primary" type="submit" data-start-inspection>开始巡检</button>
@@ -101,17 +104,24 @@ export class VaultInspectorController {
       else if (target.closest("[data-relate-pair]")) void this.relate();
       else if (target.closest("[data-merge-left]")) void this.merge("left");
       else if (target.closest("[data-merge-right]")) void this.merge("right");
+      else if (target.closest("[data-delete-left]")) void this.deleteSide("left");
+      else if (target.closest("[data-delete-right]")) void this.deleteSide("right");
+    });
+    this.dialog.addEventListener("change", event => {
+      if ((event.target as Element).matches('[name="scope"]')) this.renderScope();
     });
   }
 
   private async inspect(): Promise<void> {
+    const scope = this.required<HTMLInputElement>('[name="scope"]:checked').value === "id_range" ? "id_range" : "whole_vault";
     const input: SimilarityInspectionInput = {
-      start_meme_id: this.number("start_meme_id"),
-      end_meme_id: this.number("end_meme_id"),
+      scope,
+      start_meme_id: scope === "id_range" ? this.number("start_meme_id") : null,
+      end_meme_id: scope === "id_range" ? this.number("end_meme_id") : null,
       top_k: this.number("top_k"),
       similarity_threshold: this.number("similarity_threshold"),
     };
-    if (!Number.isInteger(input.start_meme_id) || !Number.isInteger(input.end_meme_id) || input.start_meme_id < 1 || input.end_meme_id < input.start_meme_id || input.end_meme_id - input.start_meme_id + 1 > 1000) {
+    if (scope === "id_range" && (!Number.isInteger(input.start_meme_id) || !Number.isInteger(input.end_meme_id) || input.start_meme_id! < 1 || input.end_meme_id! < input.start_meme_id! || input.end_meme_id! - input.start_meme_id! + 1 > 1000)) {
       this.error = "请输入有效且不超过 1000 个 ID 的 Meme 范围。";
       this.render();
       return;
@@ -181,6 +191,20 @@ export class VaultInspectorController {
     });
   }
 
+  private async deleteSide(side: "left" | "right"): Promise<void> {
+    const pair = this.current();
+    if (!pair || this.actionBusy) return;
+    const meme = side === "left" ? pair.meme_a : pair.meme_b;
+    if (!window.confirm(`永久删除 Meme #${meme.id}？\n\n此操作将删除 Meme 数据、对应图片以及现有业务关联和派生数据。\n\n此操作当前不可撤销。`)) return;
+    await this.action(async () => {
+      await this.api.deleteMeme(meme.id);
+      this.pairs = this.pairs.filter(item => item.meme_a.id !== meme.id && item.meme_b.id !== meme.id);
+      this.index = Math.min(this.index, Math.max(0, this.pairs.length - 1));
+      this.notice = `Meme #${meme.id} 已删除，相关候选 Pair 已移除。`;
+      await this.actions.onDelete(meme.id);
+    });
+  }
+
   private async action(callback: () => Promise<void>): Promise<void> {
     this.actionBusy = true;
     this.error = null;
@@ -217,6 +241,7 @@ export class VaultInspectorController {
     this.error = null;
     this.notice = null;
     this.required<HTMLFormElement>("[data-inspector-form]").reset();
+    this.renderScope();
     this.render();
   }
 
@@ -236,7 +261,7 @@ export class VaultInspectorController {
     if (this.loading) container.innerHTML = '<p class="muted inspector-empty">正在读取本地语义索引…</p>';
     else if (!pair && this.response) container.innerHTML = '<p class="muted inspector-empty">没有待处理的候选 Pair。</p>';
     else if (!pair) container.innerHTML = "";
-    else container.innerHTML = `<div class="inspector-score">语义相似度 ${pair.score.toFixed(3)}</div><div class="inspector-comparison">${this.card(pair.meme_a, "a")}${this.card(pair.meme_b, "b")}</div><div class="inspector-actions"><button class="button button-primary" type="button" data-merge-left ${this.actionBusy ? "disabled" : ""}>保留左侧并合并右侧</button><button class="button button-primary" type="button" data-merge-right ${this.actionBusy ? "disabled" : ""}>保留右侧并合并左侧</button><button class="button button-secondary" type="button" data-relate-pair ${pair.weak_relation_exists || this.actionBusy ? "disabled" : ""}>${pair.weak_relation_exists ? "已有弱关联" : "建立弱关联"}</button><button class="button button-ghost" type="button" data-ignore-pair ${this.actionBusy ? "disabled" : ""}>忽略此对</button></div>`;
+    else container.innerHTML = `<div class="inspector-score">语义相似度 ${pair.score.toFixed(3)}</div><div class="inspector-comparison">${this.card(pair.meme_a, "a")}${this.card(pair.meme_b, "b")}</div><div class="inspector-actions"><button class="button button-primary" type="button" data-merge-left ${this.actionBusy ? "disabled" : ""}>保留左侧并合并右侧</button><button class="button button-primary" type="button" data-merge-right ${this.actionBusy ? "disabled" : ""}>保留右侧并合并左侧</button><button class="button button-danger" type="button" data-delete-left ${this.actionBusy ? "disabled" : ""}>删除左侧</button><button class="button button-danger" type="button" data-delete-right ${this.actionBusy ? "disabled" : ""}>删除右侧</button><button class="button button-secondary" type="button" data-relate-pair ${pair.weak_relation_exists || this.actionBusy ? "disabled" : ""}>${pair.weak_relation_exists ? "已有弱关联" : "建立弱关联"}</button><button class="button button-ghost" type="button" data-ignore-pair ${this.actionBusy ? "disabled" : ""}>忽略此对</button></div>`;
     this.required<HTMLElement>("[data-pair-position]").textContent = this.pairs.length ? `${this.index + 1} / ${this.pairs.length}` : "0 / 0";
     this.required<HTMLButtonElement>("[data-previous-pair]").disabled = this.actionBusy || this.index <= 0;
     this.required<HTMLButtonElement>("[data-next-pair]").disabled = this.actionBusy || !this.pairs.length || this.index >= this.pairs.length - 1;
@@ -249,6 +274,13 @@ export class VaultInspectorController {
 
   private number(name: string): number {
     return Number(this.required<HTMLInputElement>(`[name="${name}"]`).value);
+  }
+
+  private renderScope(): void {
+    const range = this.dialog.querySelector<HTMLInputElement>('[name="scope"]:checked')?.value === "id_range";
+    for (const element of this.dialog.querySelectorAll<HTMLElement>("[data-range-field]")) element.hidden = !range;
+    const separator = this.dialog.querySelector<HTMLElement>(".inspector-parameters > span");
+    if (separator) separator.hidden = !range;
   }
 
   private required<T extends Element = HTMLElement>(selector: string): T {

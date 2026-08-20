@@ -167,9 +167,12 @@ export class TagManagerController {
     const remove = target.closest<HTMLButtonElement>("[data-delete-tag]");
     if (remove) {
       const tag = this.tags.find((item) => item.id === Number(remove.dataset.deleteTag));
-      if (!tag || tag.usage_count > 0) return;
+      if (!tag) return;
       const confirm = this.options.confirm ?? window.confirm;
-      if (!confirm(`确定删除未使用标签“${tag.name}”吗？`)) return;
+      const message = tag.usage_count > 0
+        ? `删除标签“${tag.name}”？\n\n该标签当前被 ${tag.usage_count} 个 Meme 使用。\n删除后，它将从这些 Meme 中全部移除。\n\n受影响 Meme 的语义向量将标记为过期。\n\n此操作不可撤销。`
+        : `删除标签“${tag.name}”？`;
+      if (!confirm(message)) return;
       void this.mutate(async () => {
         await this.api.deleteTag(tag.id);
         return { type: "delete", name: tag.name };
@@ -220,7 +223,7 @@ export class TagManagerController {
           ${this.tags.filter((item) => item.id !== tag.id).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}
         </select>
         <button class="button button-secondary" type="button" data-merge-tag="${tag.id}" ${this.busy ? "disabled" : ""}>合并</button>
-        ${tag.usage_count === 0 ? `<button class="button button-danger" type="button" data-delete-tag="${tag.id}" ${this.busy ? "disabled" : ""}>删除</button>` : ""}
+        <button class="button button-danger" type="button" data-delete-tag="${tag.id}" ${this.busy ? "disabled" : ""}>删除</button>
       </article>`).join("");
     this.dialog.innerHTML = `
       <div class="settings-shell tag-manager-shell">

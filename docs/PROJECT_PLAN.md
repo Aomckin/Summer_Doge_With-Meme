@@ -609,7 +609,16 @@ data/thumbnails/*
 - [x] 返回相对 `image_url`，不绑定 MaiBot/NapCat/QQ，不暴露磁盘路径
 - [x] 新增 External API Contract，以及随机、语义、图片和异常路径自动测试
 
-当前状态：v0.9.1 External Meme API 已完成
+### v1.0.0 Phase 1：UX Debt Cleanup 与 Vault Inspector Upgrade（已完成）
+
+- [x] Tag 显示名与 casefold 规范身份分离；旧库原样回填，使用中 Tag 可事务性删除并令受影响向量过期。
+- [x] Mutation 保持当前浏览上下文；支持 Meme ID 精确跳转并保留 24/48/96 分页。
+- [x] 主要 Template Selector 统一获得实时大小写不敏感子串搜索。
+- [x] Vault Inspector 支持左右直接删除、Whole Vault / ID Range Source Set、全局索引候选、Pair 去重与既有 Ignore/弱关联语义。
+- [x] GIF Clipboard 仅在原始 `image/gif` 实际写入成功时报告成功，不支持时保留下载降级。
+- [x] 保持 Mobile Ingest、External Meme API 与现有语义调用链兼容。
+
+当前状态：v1.0.0 Phase 1 已完成
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

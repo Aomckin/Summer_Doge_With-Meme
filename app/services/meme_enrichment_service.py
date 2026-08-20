@@ -261,7 +261,12 @@ class MemeEnrichmentService:
             meme.template_id = suggestion.suggested_template_id
             changed = True
         if "remove_tags" in selected:
-            protected = sorted(link.tag.name for link in meme.tag_links if link.tag.name in remove_tags and link.source in {"user", "manual"})
+            removal_identities = {self.tags.normalize_name(name) for name in remove_tags}
+            protected = sorted(
+                link.tag.name for link in meme.tag_links
+                if link.tag.normalized_name in removal_identities
+                and link.source in {"user", "manual"}
+            )
             if protected:
                 raise EnrichmentConflictError("Cannot remove user/manual tags: " + ", ".join(protected))
         tag_fields = {"add_tags", "remove_tags"} & set(selected)

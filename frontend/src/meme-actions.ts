@@ -58,7 +58,6 @@ export function memeCopySource(meme: MemeResponse): CopyImageSource | null {
 
 export function copyUnavailableReason(source: CopyImageSource | null): string | null {
   if (!source) return "复合 Meme 请先选择其中一张图片";
-  if (normalizedMime(source.mime_type) === "image/gif") return "不支持直接复制 GIF，请使用下载";
   if (!clipboardImageSupported()) return "当前浏览器不支持图片剪贴板，请使用下载";
   return null;
 }
@@ -89,9 +88,6 @@ export async function copyImageToClipboard(
 ): Promise<void> {
   const current = { ...dependencies(), ...overrides };
   const mime = normalizedMime(source.mime_type);
-  if (mime === "image/gif") {
-    throw new MemeCopyError("gif-unsupported", "不支持直接复制 GIF，请使用下载");
-  }
   if (typeof current.clipboard?.write !== "function" || typeof current.ClipboardItem !== "function") {
     throw new MemeCopyError("browser-unsupported", "当前浏览器不支持图片剪贴板，请使用下载");
   }
@@ -105,14 +101,19 @@ export async function copyImageToClipboard(
     throw new MemeCopyError("fetch-failed", "原图读取失败，请稍后重试或使用下载");
   }
 
-  const output = mime === "image/png" ? blob : await convertToPng(blob, current);
+  const isGif = mime === "image/gif";
+  const output = isGif || mime === "image/png" ? blob : await convertToPng(blob, current);
   try {
-    const item = new current.ClipboardItem({ "image/png": output });
+    const outputMime = isGif ? "image/gif" : "image/png";
+    const item = new current.ClipboardItem({ [outputMime]: output });
     await current.clipboard.write([item]);
   } catch (error) {
     const name = error instanceof DOMException ? error.name : error instanceof Error ? error.name : "";
     if (name === "NotAllowedError" || name === "SecurityError") {
       throw new MemeCopyError("permission-denied", "没有剪贴板权限，请允许访问后重试");
+    }
+    if (isGif) {
+      throw new MemeCopyError("gif-unsupported", "当前浏览器无法直接复制动态 GIF，请使用下载。");
     }
     throw new MemeCopyError("clipboard-failed", "复制失败，请重试或使用下载");
   }
@@ -153,7 +154,7 @@ export async function copySourceWithFeedback(
   }
   try {
     await copyImageToClipboard(source!);
-    showMemeActionFeedback("图片已复制，可直接粘贴到聊天窗口");
+    showMemeActionFeedback(normalizedMime(source!.mime_type) === "image/gif" ? "GIF 已复制，可直接粘贴到聊天窗口" : "图片已复制，可直接粘贴到聊天窗口");
     return true;
   } catch (error) {
     showMemeActionFeedback(error instanceof Error ? error.message : "复制失败，请使用下载", true);

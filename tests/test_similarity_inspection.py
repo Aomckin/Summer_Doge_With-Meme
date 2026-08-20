@@ -135,6 +135,15 @@ def test_inspection_uses_inclusive_scope_and_whole_index_candidates(context) -> 
         assert result["candidate_pair_count"] == 3
         assert missing.id not in {item for pair in pairs for item in (pair.meme_a.id, pair.meme_b.id)}
 
+        whole = SimilarityInspectionService(session, index).inspect(
+            scope="whole_vault",
+            top_k=2,
+            similarity_threshold=0.85,
+        )
+        assert whole["requested_count"] == 6
+        assert whole["ready_count"] == 3
+        assert whole["missing_or_stale_count"] == 3
+
 
 def test_top_k_threshold_pair_dedup_ignore_and_relation_status(context) -> None:
     factory, index, model_id = context

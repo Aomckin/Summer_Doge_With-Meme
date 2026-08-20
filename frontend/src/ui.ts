@@ -1,6 +1,7 @@
 import type { AppState, MemeCardSize, MemeResponse } from "./types";
 import { buildPaginationTokens, clampPage } from "./pagination";
 import { memeCopySource } from "./meme-actions";
+import { bindMemeCardTilts, storedCardMotionPreset } from "./card-tilt";
 
 export interface EditDraft {
   title: string;
@@ -11,6 +12,7 @@ export interface EditDraft {
 }
 
 export interface AppElements {
+  appearanceBackground: HTMLElement;
   searchInput: HTMLInputElement;
   searchMode: HTMLSelectElement;
   semanticSearchButton: HTMLButtonElement;
@@ -19,6 +21,8 @@ export interface AppElements {
   openMemeMakerButton: HTMLButtonElement;
   openDownloadButton: HTMLButtonElement;
   openSettingsButton: HTMLButtonElement;
+  openAppearanceButton: HTMLButtonElement;
+  openImmersiveButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
   openTagsButton: HTMLButtonElement;
   openSemanticIndexButton: HTMLButtonElement;
@@ -44,6 +48,17 @@ export interface AppElements {
   templateSubmit: HTMLButtonElement;
   settingsDialog: HTMLDialogElement;
   settingsContent: HTMLElement;
+  appearanceDialog: HTMLDialogElement;
+  appearanceContent: HTMLElement;
+  immersiveDock: HTMLElement;
+  immersiveSearchInput: HTMLInputElement;
+  immersivePreviousButton: HTMLButtonElement;
+  immersiveNextButton: HTMLButtonElement;
+  immersiveRandomButton: HTMLButtonElement;
+  immersiveAppearanceButton: HTMLButtonElement;
+  immersiveTunerButton: HTMLButtonElement;
+  immersiveTunerPanel: HTMLElement;
+  immersiveExitButton: HTMLButtonElement;
   providerDialog: HTMLDialogElement;
   providerForm: HTMLFormElement;
   providerError: HTMLElement;
@@ -122,6 +137,14 @@ function tagMarkup(names: string[]): string {
 
 export function mountShell(root: HTMLElement): AppElements {
   root.innerHTML = `
+    <div class="appearance-backdrop" aria-hidden="true">
+      <div class="appearance-background" data-appearance-background></div>
+      <div class="appearance-darkness"></div>
+      <div class="appearance-tint"></div>
+      <div class="appearance-glow"></div>
+      <div class="appearance-vignette"></div>
+      <div class="appearance-grain"></div>
+    </div>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
@@ -139,6 +162,8 @@ export function mountShell(root: HTMLElement): AppElements {
           </label>
           <button id="semantic-search-button" class="button button-primary" type="button" hidden>语义搜索</button>
           <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
+          <button id="open-appearance" class="button button-secondary" type="button">外观</button>
+          <button id="open-immersive" class="button button-secondary" type="button" aria-pressed="false">沉浸浏览</button>
           <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
           <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
           <button id="open-semantic-index" class="button button-secondary" type="button">语义索引</button>
@@ -184,6 +209,15 @@ export function mountShell(root: HTMLElement): AppElements {
                 <option value="extra-large">超大</option><option value="large">大</option><option value="medium">中</option><option value="small">小</option>
               </select>
             </label>
+            <label>卡片动态效果
+              <select data-card-motion-preset aria-label="卡片动态效果">
+                <option value="off">关闭</option>
+                <option value="subtle">微弱</option>
+                <option value="normal">普通</option>
+                <option value="strong">强烈</option>
+                <option value="drunk">喝了假酒</option>
+              </select>
+            </label>
           </div>
           <div id="list-status" class="list-status" aria-live="polite"></div>
           <div id="meme-grid" class="meme-grid" data-card-size="medium"></div>
@@ -193,6 +227,21 @@ export function mountShell(root: HTMLElement): AppElements {
         <aside id="detail-panel" class="detail-panel" aria-label="Meme 详情"></aside>
       </main>
     </div>
+
+    <nav id="immersive-dock" class="immersive-dock" aria-label="沉浸浏览工具" aria-hidden="true" data-visible="false" tabindex="-1">
+      <label class="immersive-search" for="immersive-search-input">
+        <span aria-hidden="true">⌕</span>
+        <input id="immersive-search-input" type="search" autocomplete="off" placeholder="搜索 Meme…" aria-label="在沉浸模式中搜索 Meme">
+      </label>
+      <button class="immersive-dock-button" type="button" data-immersive-previous aria-label="上一页">上一页</button>
+      <button class="immersive-dock-button" type="button" data-immersive-next aria-label="下一页">下一页</button>
+      <button class="immersive-dock-button" type="button" data-immersive-random aria-label="随机一个 Meme">随机</button>
+      <button class="immersive-dock-button" type="button" data-immersive-appearance aria-label="打开外观设置">外观</button>
+      <button class="immersive-dock-button" type="button" data-immersive-tuner aria-label="打开 Free Gallery 调参工具" aria-expanded="false">调参</button>
+      <button class="immersive-dock-button immersive-exit" type="button" data-exit-immersive aria-label="退出沉浸浏览">退出</button>
+    </nav>
+
+    <aside class="gallery-tuner" data-gallery-tuner hidden aria-label="Free Gallery 调参工具"></aside>
 
     <dialog id="template-dialog" class="settings-dialog" aria-labelledby="template-dialog-title">
       <div class="settings-shell template-settings-shell">
@@ -244,6 +293,23 @@ export function mountShell(root: HTMLElement): AppElements {
           <button class="icon-button" type="button" data-close-settings aria-label="关闭 API 设置">×</button>
         </header>
         <div id="settings-content" class="settings-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="appearance-dialog" class="settings-dialog appearance-dialog" aria-labelledby="appearance-title">
+      <div class="settings-shell appearance-shell">
+        <header class="settings-header">
+          <div>
+            <p class="eyebrow">APPEARANCE · LOCAL</p>
+            <h2 id="appearance-title">外观</h2>
+            <p>调整背景、面板材质与氛围。所有设置仅保存在当前浏览器。</p>
+          </div>
+          <div class="appearance-header-actions">
+            <button class="button button-ghost" type="button" data-reset-appearance>恢复默认</button>
+            <button class="icon-button" type="button" data-close-appearance aria-label="关闭外观设置">×</button>
+          </div>
+        </header>
+        <div id="appearance-content" class="settings-content appearance-content"></div>
       </div>
     </dialog>
 
@@ -418,6 +484,7 @@ export function mountShell(root: HTMLElement): AppElements {
   `;
 
   return {
+    appearanceBackground: required(root, "[data-appearance-background]"),
     searchInput: required(root, "#meme-search"),
     searchMode: required(root, "#search-mode"),
     semanticSearchButton: required(root, "#semantic-search-button"),
@@ -426,6 +493,8 @@ export function mountShell(root: HTMLElement): AppElements {
     openMemeMakerButton: required(root, "#open-meme-maker"),
     openDownloadButton: required(root, "#open-download"),
     openSettingsButton: required(root, "#open-settings"),
+    openAppearanceButton: required(root, "#open-appearance"),
+    openImmersiveButton: required(root, "#open-immersive"),
     openTemplatesButton: required(root, "#open-templates"),
     openTagsButton: required(root, "#open-tags"),
     openSemanticIndexButton: required(root, "#open-semantic-index"),
@@ -454,6 +523,17 @@ export function mountShell(root: HTMLElement): AppElements {
     templateSubmit: required(document, "#template-submit"),
     settingsDialog: required(document, "#api-settings-dialog"),
     settingsContent: required(document, "#settings-content"),
+    appearanceDialog: required(document, "#appearance-dialog"),
+    appearanceContent: required(document, "#appearance-content"),
+    immersiveDock: required(root, "#immersive-dock"),
+    immersiveSearchInput: required(root, "#immersive-search-input"),
+    immersivePreviousButton: required(root, "[data-immersive-previous]"),
+    immersiveNextButton: required(root, "[data-immersive-next]"),
+    immersiveRandomButton: required(root, "[data-immersive-random]"),
+    immersiveAppearanceButton: required(root, "[data-immersive-appearance]"),
+    immersiveTunerButton: required(root, "[data-immersive-tuner]"),
+    immersiveTunerPanel: required(root, "[data-gallery-tuner]"),
+    immersiveExitButton: required(root, "[data-exit-immersive]"),
     providerDialog: required(document, "#provider-dialog"),
     providerForm: required(document, "#provider-form"),
     providerError: required(document, "#provider-error"),
@@ -626,7 +706,7 @@ export function renderTemplateFilters(elements: AppElements, state: AppState): v
   const toggle = collapsed
     ? `<button class="filter-toggle" type="button" data-expand-templates aria-expanded="${state.templatesExpanded}">${state.templatesExpanded ? "收起模板" : `展开全部模板（+${hiddenCount}）`}</button>`
     : "";
-  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}`;
+  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><input type="search" data-template-filter-search placeholder="搜索模板…" aria-label="搜索资料库模板"><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}`;
 }
 
 export function renderTags(elements: AppElements, state: AppState): void {
@@ -681,24 +761,50 @@ export function memeCardMarkup(
   const image = cardSize === "extra-large" ? meme.image_url : thumbnail;
   const copySource = memeCopySource(meme);
   const isGif = copySource?.mime_type.toLowerCase().startsWith("image/gif") ?? false;
+  const focusImages = meme.images?.length
+    ? meme.images
+    : [{
+        image_url: meme.image_url,
+        thumbnail_url: meme.thumbnail_url,
+        width: meme.width,
+        height: meme.height,
+      }];
+  const focusManifest = focusImages.map((media, index) => `
+    <span
+      data-focus-media
+      data-thumbnail-src="${escapeHtml(media.thumbnail_url ?? media.image_url)}"
+      data-original-src="${escapeHtml(media.image_url)}"
+      data-width="${media.width}"
+      data-height="${media.height}"
+      data-alt="${escapeHtml(`${meme.title} ${index + 1}/${focusImages.length}`)}"
+    ></span>
+  `).join("");
   return `
-    <article
-      class="meme-card${selected ? " is-selected" : ""}"
-      data-meme-id="${meme.id}"
-    >
-      <button class="meme-card-main" type="button" data-open-meme aria-label="查看 ${escapeHtml(meme.title)}">
-        <span class="card-image">
-          <img data-card-image data-thumbnail-src="${escapeHtml(thumbnail)}" data-original-src="${escapeHtml(meme.image_url)}" src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" width="${meme.width}" height="${meme.height}" loading="lazy">
-          <span class="image-fallback" aria-hidden="true">图片不可用</span>
-          ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
-        </span>
-        <span class="card-overlay"><strong>${escapeHtml(meme.title)}</strong>${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}<span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span></span>
-      </button>
-      ${showQuickActions ? `<span class="meme-card-quick-actions" aria-label="快捷操作">
-        ${copySource ? `<button type="button" data-copy-meme="${meme.id}" ${isGif ? 'disabled title="不支持直接复制 GIF，请使用下载"' : ""}>${isGif ? "GIF" : "复制"}</button>` : ""}
-        <a href="/api/memes/${meme.id}/download" data-quick-download="${meme.id}">下载</a>
-      </span>` : ""}
-    </article>
+    <div class="immersive-layout-item gallery-layout-item" data-immersive-layout-id="${meme.id}">
+      <div class="meme-card-physics">
+        <article
+          class="meme-card${selected ? " is-selected" : ""}"
+          data-meme-id="${meme.id}"
+          data-card-width="${meme.width}"
+          data-card-height="${meme.height}"
+          data-card-image-count="${meme.image_count}"
+        >
+          <button class="meme-card-main" type="button" data-open-meme aria-label="查看 ${escapeHtml(meme.title)}">
+            <span class="card-image">
+              <img data-card-image data-thumbnail-src="${escapeHtml(thumbnail)}" data-original-src="${escapeHtml(meme.image_url)}" src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" width="${meme.width}" height="${meme.height}" loading="lazy">
+              <span class="image-fallback" aria-hidden="true">图片不可用</span>
+              ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
+            </span>
+            <span class="card-overlay"><strong>${escapeHtml(meme.title)}</strong>${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}<span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span></span>
+          </button>
+          ${showQuickActions ? `<span class="meme-card-quick-actions" aria-label="快捷操作">
+            ${copySource ? `<button type="button" data-copy-meme="${meme.id}" ${isGif ? 'disabled title="不支持直接复制 GIF，请使用下载"' : ""}>${isGif ? "GIF" : "复制"}</button>` : ""}
+            <a href="/api/memes/${meme.id}/download" data-quick-download="${meme.id}">下载</a>
+          </span>` : ""}
+          <template data-focus-media-manifest>${focusManifest}</template>
+        </article>
+      </div>
+    </div>
   `;
 }
 
@@ -722,6 +828,7 @@ export function renderLibrary(
   const sort = elements.browsingControls.querySelector<HTMLSelectElement>("[data-list-sort]");
   const pageSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-page-size]");
   const cardSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-card-size]");
+  const cardMotionPreset = elements.browsingControls.querySelector<HTMLSelectElement>("[data-card-motion-preset]");
   const reshuffle = elements.browsingControls.querySelector<HTMLButtonElement>("[data-reshuffle]");
   elements.searchMode.value = state.searchMode;
   elements.semanticSearchButton.hidden = state.searchMode !== "semantic";
@@ -734,6 +841,7 @@ export function renderLibrary(
   }
   if (pageSize) { pageSize.value = String(state.pageSize); pageSize.disabled = state.loadingList; }
   if (cardSize) cardSize.value = state.cardSize;
+  if (cardMotionPreset) cardMotionPreset.value = storedCardMotionPreset();
   if (reshuffle) {
     reshuffle.hidden = state.searchMode === "semantic" || state.listSort !== "shuffle";
     reshuffle.disabled = state.loadingList;
@@ -766,6 +874,7 @@ export function renderLibrary(
       ))
       .join("");
     bindImageFallbacks(elements.memeGrid);
+    bindMemeCardTilts(elements.memeGrid);
   }
 
   const disabled = state.loadingList || state.totalPages === 0;
@@ -801,8 +910,13 @@ export function renderMemeCard(
   if (!(replacement instanceof HTMLElement)) {
     return;
   }
-  current.replaceWith(replacement);
+  const currentItem = current.closest<HTMLElement>(".immersive-layout-item") ?? current;
+  if (currentItem.dataset.galleryOrder) {
+    replacement.dataset.galleryOrder = currentItem.dataset.galleryOrder;
+  }
+  currentItem.replaceWith(replacement);
   bindImageFallbacks(replacement);
+  bindMemeCardTilts(elements.memeGrid);
 }
 
 export function applyMemeCardSize(

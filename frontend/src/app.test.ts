@@ -105,6 +105,7 @@ function makeCompositeMeme(id = 1): MemeResponse {
 
 function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
   const api: MemeApi = {
+    getMeme: vi.fn().mockImplementation(async id => makeMeme(id)),
     listMemePage: vi.fn().mockResolvedValue({
       items: [], total: 0, page: 1, page_size: 24, total_pages: 0,
       sort: "default", shuffle_seed: null,
@@ -393,6 +394,33 @@ describe("MemeVaultApp", () => {
     );
   });
 
+  it("opens every exact Meme ID query without falling through to keyword search", async () => {
+    const target = makeMeme(4496, "精确命中");
+    const getMeme = vi.fn().mockResolvedValue(target);
+    const listMemePage = vi.fn().mockResolvedValue(memePage([]));
+    const app = new MemeVaultApp(root(), makeApi({ getMeme, listMemePage }));
+    await app.start();
+    vi.useFakeTimers();
+    const input = document.querySelector<HTMLInputElement>("#meme-search")!;
+
+    for (const query of ["4496", "#4496", "Meme 4496", "meme #4496"]) {
+      input.value = query;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(document.querySelector("[data-detail-title]")?.textContent).toBe("精确命中");
+    }
+    expect(getMeme).toHaveBeenCalledTimes(4);
+    expect(getMeme).toHaveBeenNthCalledWith(1, 4496);
+    expect(listMemePage).toHaveBeenCalledTimes(1);
+
+    input.value = "#4496";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(getMeme).toHaveBeenCalledTimes(5);
+  });
+
   it("requests page one, shows totals, and supports every page jump control", async () => {
     const listMemePage = vi.fn(async ({ page, pageSize, sort, shuffleSeed }) =>
       memePage([makeMeme(page)], 120, page, pageSize, sort, shuffleSeed ?? null),
@@ -451,6 +479,16 @@ describe("MemeVaultApp", () => {
     expect(localStorage.getItem("meme-vault.card-size")).toBe("small");
     expect((app as unknown as { state: AppState }).state.page).toBe(2);
 
+    const motionPreset = document.querySelector<HTMLSelectElement>("[data-card-motion-preset]")!;
+    expect(motionPreset.value).toBe("normal");
+    for (const preset of ["off", "subtle", "normal", "strong", "drunk"] as const) {
+      motionPreset.value = preset;
+      motionPreset.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(document.querySelector("#meme-grid")?.getAttribute("data-card-motion")).toBe(preset);
+      expect(localStorage.getItem("meme-vault.card-motion-preset")).toBe(preset);
+    }
+    expect(listMemePage).toHaveBeenCalledTimes(2);
+
     const pageSize = document.querySelector<HTMLSelectElement>("[data-page-size]")!;
     pageSize.value = "48";
     pageSize.dispatchEvent(new Event("change", { bubbles: true }));
@@ -476,6 +514,20 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector("#meme-grid")?.getAttribute("data-card-size")).toBe("extra-large");
     expect(document.querySelector<HTMLImageElement>("[data-card-image]")?.getAttribute("src"))
       .toBe("/media/images/stored-7.png");
+  });
+
+  it("restores the persisted card motion preset on startup", async () => {
+    localStorage.setItem("meme-vault.card-motion-preset", "strong");
+    const app = new MemeVaultApp(root(), makeApi({
+      listMemePage: vi.fn().mockResolvedValue(memePage([makeMeme(8)])),
+    }));
+
+    await app.start();
+
+    expect(document.querySelector<HTMLSelectElement>("[data-card-motion-preset]")?.value)
+      .toBe("strong");
+    expect(document.querySelector("#meme-grid")?.getAttribute("data-card-motion"))
+      .toBe("strong");
   });
 
   it("paginates templates by six, jumps by Enter, creates on the last page, and backs up after deletion", async () => {
@@ -1912,6 +1964,11 @@ describe("MemeVaultApp", () => {
     expect(card?.querySelector(".image-count-badge")?.textContent).toContain(
       "3 张",
     );
+    const manifest = card?.querySelector<HTMLTemplateElement>("[data-focus-media-manifest]");
+    expect([...manifest!.content.querySelectorAll<HTMLElement>("[data-focus-media]")]
+      .map(image => image.dataset.originalSrc)).toEqual(
+        meme.images.map(image => image.image_url),
+      );
 
     card?.click();
     const detailImages = [
@@ -2225,5 +2282,72 @@ describe("MemeVaultApp", () => {
     download = document.querySelector<HTMLAnchorElement>("[data-viewer-download]");
     expect(download?.getAttribute("href")).toBe(`/api/memes/${composite.id}/images/${composite.images[1].id}/download`);
     expect(document.querySelector<HTMLAnchorElement>("[data-viewer-link]")?.target).toBe("_blank");
+  });
+
+  it("keeps browsing and selection state across immersive mode", async () => {
+    localStorage.setItem("meme-vault.page-size", "96");
+    localStorage.setItem("meme-vault.card-size", "large");
+    localStorage.setItem("meme-vault.card-motion-preset", "drunk");
+    const meme = makeMeme(1, "Miku");
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }),
+    );
+    await app.start();
+    document.querySelector<HTMLButtonElement>('[data-meme-id="1"]')?.click();
+    const state = (app as unknown as { state: AppState }).state;
+    state.query = "Miku";
+    state.selectedTags = ["funny"];
+    state.listSort = "shuffle";
+    const before = {
+      query: state.query,
+      selectedTags: [...state.selectedTags],
+      listSort: state.listSort,
+      pageSize: state.pageSize,
+      cardSize: state.cardSize,
+      selectedMeme: state.selectedMeme,
+    };
+
+    document.querySelector<HTMLButtonElement>("#open-immersive")?.click();
+    expect(document.documentElement.dataset.vaultMode).toBe("immersive");
+    expect(document.querySelector<HTMLElement>("#meme-grid")?.dataset.cardSize).toBe("large");
+    expect(document.querySelector<HTMLElement>("#meme-grid")?.dataset.cardMotion).toBe("drunk");
+    document.querySelector<HTMLButtonElement>("[data-exit-immersive]")?.click();
+
+    expect(document.documentElement.dataset.vaultMode).toBe("normal");
+    expect({
+      query: state.query,
+      selectedTags: state.selectedTags,
+      listSort: state.listSort,
+      pageSize: state.pageSize,
+      cardSize: state.cardSize,
+      selectedMeme: state.selectedMeme,
+    }).toEqual(before);
+  });
+
+  it("uses immersive Random only to navigate the currently loaded cards", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const getRandomMeme = vi.fn().mockResolvedValue(makeMeme(99));
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1), makeMeme(2)]),
+      getRandomMeme,
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    const state = (app as unknown as { state: AppState }).state;
+    const cards = [...document.querySelectorAll<HTMLElement>("[data-meme-id]")];
+    const scrolls = cards.map(card => {
+      const scroll = vi.fn();
+      card.scrollIntoView = scroll;
+      return scroll;
+    });
+
+    document.querySelector<HTMLButtonElement>("#open-immersive")?.click();
+    document.querySelector<HTMLButtonElement>("[data-immersive-random]")?.click();
+
+    expect(getRandomMeme).not.toHaveBeenCalled();
+    expect(state.selectedMeme).toBeNull();
+    expect(scrolls.filter(scroll => scroll.mock.calls.length)).toHaveLength(1);
+    expect(document.querySelectorAll(".is-immersive-random-target")).toHaveLength(1);
   });
 });

@@ -86,11 +86,14 @@ describe("TagManagerController", () => {
     await vi.waitFor(() => expect(onMutation).toHaveBeenCalledWith({ type: "merge", from: "猫", to: "反应" }));
   });
 
-  it("only offers ordinary deletion for empty tags", async () => {
-    const { onMutation } = setup();
+  it("offers explicit deletion for used and empty tags", async () => {
+    const { onMutation, api, confirm } = setup();
     await vi.waitFor(() => expect(document.querySelectorAll("[data-managed-tag]")).toHaveLength(3));
-    expect(document.querySelector("[data-delete-tag='1']")).toBeNull();
-    document.querySelector<HTMLButtonElement>("[data-delete-tag='3']")?.click();
+    document.querySelector<HTMLButtonElement>("[data-delete-tag='1']")?.click();
+    await vi.waitFor(() => expect(api.deleteTag).toHaveBeenCalledWith(1));
+    expect(confirm.mock.calls[0][0]).toContain("3 个 Meme");
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>("[data-delete-tag='3']")?.disabled).toBe(false));
+    document.querySelector<HTMLButtonElement>("[data-delete-tag='3']")!.click();
     await vi.waitFor(() => expect(onMutation).toHaveBeenCalledWith({ type: "delete", name: "孤儿" }));
   });
 

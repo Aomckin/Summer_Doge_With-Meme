@@ -543,8 +543,10 @@ class MemeService:
             )
 
         suggestions = self.ai_analysis_repository.load_suggestions(analysis)
-        confidence_by_name = {
-            str(item["name"]): float(item["confidence"])
+        suggestion_by_identity = {
+            self.tag_repository.normalize_name(str(item["name"])): (
+                str(item["name"]).strip(), float(item["confidence"])
+            )
             for item in suggestions
         }
         selected_names = list(
@@ -554,7 +556,7 @@ class MemeService:
                 if (normalized := self.tag_repository.normalize_name(name))
             )
         )
-        unknown_names = set(selected_names) - set(confidence_by_name)
+        unknown_names = set(selected_names) - set(suggestion_by_identity)
         if unknown_names:
             names = ", ".join(sorted(unknown_names))
             raise ValueError(f"Tags were not suggested by this analysis: {names}")
@@ -569,7 +571,7 @@ class MemeService:
             self.tag_repository.add_ai_tags(
                 meme,
                 [
-                    (name, confidence_by_name[name])
+                    suggestion_by_identity[name]
                     for name in selected_names
                 ],
             )

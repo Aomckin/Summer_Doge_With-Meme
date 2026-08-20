@@ -46,10 +46,24 @@ describe("copyImageToClipboard", () => {
     expect(write).toHaveBeenCalledOnce();
   });
 
-  it("rejects GIF instead of copying its first frame", async () => {
-    await expect(copyImageToClipboard(source("image/gif"), {})).rejects.toMatchObject({
-      code: "gif-unsupported",
+  it("writes original GIF bytes when the clipboard accepts image/gif", async () => {
+    const blob = new Blob(["gif"], { type: "image/gif" });
+    const write = vi.fn().mockResolvedValue(undefined);
+    await copyImageToClipboard(source("image/gif"), {
+      fetch: vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(blob) } as Response),
+      clipboard: { write },
+      ClipboardItem: TestClipboardItem as unknown as typeof ClipboardItem,
     });
+    const item = write.mock.calls[0][0][0] as TestClipboardItem;
+    expect(item.data["image/gif"]).toBe(blob);
+  });
+
+  it("falls back cleanly when image/gif clipboard writing fails", async () => {
+    await expect(copyImageToClipboard(source("image/gif"), {
+      fetch: vi.fn().mockResolvedValue(new Response(new Blob(["gif"], { type: "image/gif" }))),
+      clipboard: { write: vi.fn().mockRejectedValue(new TypeError("unsupported")) },
+      ClipboardItem: TestClipboardItem as unknown as typeof ClipboardItem,
+    })).rejects.toMatchObject({ code: "gif-unsupported" });
   });
 
   it("reports unsupported clipboard browsers", async () => {

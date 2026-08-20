@@ -494,8 +494,9 @@ export interface ChatRecommendationResponse {
 }
 
 export interface SimilarityInspectionInput {
-  start_meme_id: number;
-  end_meme_id: number;
+  scope: "whole_vault" | "id_range";
+  start_meme_id: number | null;
+  end_meme_id: number | null;
   top_k: number;
   similarity_threshold: number;
   signal?: AbortSignal;

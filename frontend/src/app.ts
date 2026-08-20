@@ -123,12 +123,34 @@ import { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
+import { AppearanceController } from "./appearance/appearance-controller";
+import { AppearanceView } from "./appearance/appearance-view";
+import { ImmersiveController } from "./immersive/immersive-controller";
+import { ImmersiveRandomNavigator } from "./immersive/immersive-random";
+import { ImmersiveOccupancyGrid } from "./immersive/occupancy-grid";
+import { FreeGalleryLayoutTuner } from "./immersive/layout-tuner";
+import { ImmersiveMediaLoader } from "./immersive/immersive-media";
+import { ImmersiveFocusViewer } from "./immersive/focus-viewer";
 import { MemeMakerController, type MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
+import { installSearchableTemplateSelectors } from "./searchable-template-select";
+import {
+  applyCardMotionPreset,
+  isCardMotionPresetName,
+  saveCardMotionPreset,
+  storedCardMotionPreset,
+} from "./card-tilt";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
 const SHUFFLE_MODULUS = 2_147_483_647;
+
+export function exactMemeIdFromQuery(query: string): number | null {
+  const match = query.trim().match(/^(?:meme\s*)?#?(\d+)$/i);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 function storedPageSize(): MemePageSize {
   const value = Number(localStorage.getItem(PAGE_SIZE_KEY));
@@ -153,6 +175,7 @@ function shuffleSeed(previous: number | null = null): number {
 }
 
 export interface MemeApi extends AISettingsApi, CaptionLabApi {
+  getMeme(id: number): Promise<MemeResponse>;
   listMemePage(options: ListMemePageOptions): Promise<MemePageResponse>;
   listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
   listTags(options?: ListTagsOptions): Promise<TagResponse[]>;
@@ -229,6 +252,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
 }
 
 const defaultApi: MemeApi = {
+  getMeme,
   listMemePage,
   listMemes,
   listTags,
@@ -374,6 +398,12 @@ export class MemeVaultApp {
   private draggedImageId: number | null = null;
   private relationRemovalToken: symbol | null = null;
   private readonly settings: AISettingsController;
+  private readonly appearance: AppearanceController;
+  private readonly immersive: ImmersiveController;
+  private readonly immersiveRandom: ImmersiveRandomNavigator;
+  private readonly immersiveOccupancyGrid: ImmersiveOccupancyGrid;
+  private readonly immersiveMedia: ImmersiveMediaLoader;
+  private readonly immersiveFocus: ImmersiveFocusViewer;
   private readonly batchUpload: BatchUploadController;
   private readonly batchDownload: BatchDownloadController;
   private readonly captionLab: CaptionLabController;
@@ -391,6 +421,76 @@ export class MemeVaultApp {
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    this.appearance = new AppearanceController({
+      backgroundElement: this.elements.appearanceBackground,
+    });
+    new AppearanceView(
+      this.elements.openAppearanceButton,
+      this.elements.appearanceDialog,
+      this.elements.appearanceContent,
+      this.appearance,
+    );
+    this.immersiveRandom = new ImmersiveRandomNavigator(this.elements.memeGrid);
+    this.immersiveOccupancyGrid = new ImmersiveOccupancyGrid(this.elements.memeGrid);
+    this.immersiveMedia = new ImmersiveMediaLoader(this.elements.memeGrid);
+    this.immersiveFocus = new ImmersiveFocusViewer(
+      this.elements.memeGrid,
+      this.immersiveMedia,
+      {
+        onBeforeDetach: item => this.immersiveOccupancyGrid.beginTemporaryDetach(item),
+        onAfterRestore: item => this.immersiveOccupancyGrid.endTemporaryDetach(item),
+      },
+    );
+    new FreeGalleryLayoutTuner(
+      this.elements.immersiveTunerButton,
+      this.elements.immersiveTunerPanel,
+      tuning => this.immersiveOccupancyGrid.setTuning(tuning),
+    );
+    this.immersive = new ImmersiveController(
+      {
+        entryButton: this.elements.openImmersiveButton,
+        dock: this.elements.immersiveDock,
+        searchInput: this.elements.immersiveSearchInput,
+        previousButton: this.elements.immersivePreviousButton,
+        nextButton: this.elements.immersiveNextButton,
+        randomButton: this.elements.immersiveRandomButton,
+        appearanceButton: this.elements.immersiveAppearanceButton,
+        exitButton: this.elements.immersiveExitButton,
+        appearanceDialog: this.elements.appearanceDialog,
+      },
+      {
+        getSearchValue: () => this.elements.searchInput.value,
+        getPagination: () => ({
+          page: this.state.page,
+          totalPages: this.state.totalPages,
+          loading: this.state.loadingList,
+        }),
+        onSearch: value => this.submitImmersiveSearch(value),
+        onPreviousPage: () => { void this.goToPage(this.state.page - 1); },
+        onNextPage: () => { void this.goToPage(this.state.page + 1); },
+        onRandom: () => {
+          if (this.immersiveFocus.isOpen()) {
+            void this.immersiveFocus.close().then(() => {
+              this.immersiveRandom.visit(this.state.memes);
+            });
+          } else {
+            this.immersiveRandom.visit(this.state.memes);
+          }
+        },
+        onOpenAppearance: () => this.elements.openAppearanceButton.click(),
+        onLayoutChanged: () => {
+          if (document.documentElement.dataset.vaultMode === "immersive") {
+            this.immersiveOccupancyGrid.activate();
+            this.immersiveMedia.activate();
+          } else {
+            this.immersiveFocus.deactivate();
+            this.immersiveMedia.deactivate();
+            this.immersiveOccupancyGrid.deactivate();
+          }
+          window.dispatchEvent(new Event("resize"));
+        },
+      },
+    );
     this.collectionManager = new CollectionManagerController(
       this.elements.openCollectionsButton,
       {
@@ -435,6 +535,7 @@ export class MemeVaultApp {
         ignore: (left, right) => (this.api.ignoreMemeSimilarity ?? ignoreMemeSimilarity)(left, right),
         relate: (id, relatedIds) => this.api.addMemeRelations(id, relatedIds),
         merge: (targetId, sourceId) => (this.api.mergeMemes ?? mergeMemes)(targetId, sourceId),
+        deleteMeme: id => this.api.deleteMeme(id),
       },
       {
         openViewer: meme => {
@@ -451,6 +552,18 @@ export class MemeVaultApp {
           }
           await Promise.all([this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh()]);
           renderLibrary(this.elements, this.state);
+        },
+        onDelete: async memeId => {
+          this.state.memes = this.state.memes.filter(item => item.id !== memeId);
+          this.state.totalMemes = Math.max(0, this.state.totalMemes - 1);
+          if (this.state.selectedMeme?.id === memeId) {
+            this.captionLab.clear();
+            this.state.selectedMeme = null;
+          }
+          await Promise.all([this.refreshTags(), this.semanticIndexManager.refresh()]);
+          if (!this.state.memes.length && this.state.totalMemes > 0) await this.reloadMemes();
+          else renderLibrary(this.elements, this.state);
+          renderDetail(this.elements, this.state, false, null);
         },
       },
     );
@@ -556,11 +669,13 @@ export class MemeVaultApp {
       },
     });
     this.bindEvents();
+    installSearchableTemplateSelectors();
     this.render();
   }
 
   async start(): Promise<void> {
     await Promise.all([
+      this.appearance.load(),
       this.reloadMemes(),
       this.refreshTags(),
       this.refreshTemplates(),
@@ -569,6 +684,7 @@ export class MemeVaultApp {
 
   private bindEvents(): void {
     this.elements.searchInput.addEventListener("input", () => {
+      this.immersive.setSearchValue(this.elements.searchInput.value);
       if (this.state.searchMode === "semantic") {
         if (!this.elements.searchInput.value.trim()) {
           this.state.semanticSubmittedQuery = "";
@@ -585,7 +701,14 @@ export class MemeVaultApp {
         clearTimeout(this.searchTimer);
       }
       this.searchTimer = setTimeout(() => {
-        this.state.query = this.elements.searchInput.value.trim();
+        this.searchTimer = null;
+        const query = this.elements.searchInput.value.trim();
+        const exactId = exactMemeIdFromQuery(query);
+        if (exactId !== null) {
+          void this.openMemeById(exactId);
+          return;
+        }
+        this.state.query = query;
         this.state.page = 1;
         void this.reloadMemes();
       }, 300);
@@ -611,6 +734,16 @@ export class MemeVaultApp {
       if (event.key === "Enter" && this.state.searchMode === "semantic") {
         event.preventDefault();
         void this.submitSemanticSearch();
+      } else if (event.key === "Enter" && this.state.searchMode === "keyword") {
+        const exactId = exactMemeIdFromQuery(this.elements.searchInput.value);
+        if (exactId !== null) {
+          event.preventDefault();
+          if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = null;
+          }
+          void this.openMemeById(exactId);
+        }
       }
     });
     this.elements.semanticSearchButton.addEventListener("click", () => {
@@ -687,7 +820,13 @@ export class MemeVaultApp {
           this.state.cardSize = size;
           localStorage.setItem(CARD_SIZE_KEY, size);
           applyMemeCardSize(this.elements, size);
+          applyCardMotionPreset(this.elements.memeGrid, storedCardMotionPreset(), { cardSize: size });
+          this.immersiveOccupancyGrid.refresh();
+          this.immersiveMedia.refresh();
         }
+      } else if (target.matches("[data-card-motion-preset]") && isCardMotionPresetName(target.value)) {
+        saveCardMotionPreset(target.value);
+        applyCardMotionPreset(this.elements.memeGrid, target.value);
       }
     });
     this.elements.browsingControls.addEventListener("click", (event) => {
@@ -711,6 +850,16 @@ export class MemeVaultApp {
       this.state.page = 1;
       renderTemplateFilters(this.elements, this.state);
       void this.reloadMemes();
+    });
+    this.elements.templateFilters.addEventListener("input", event => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement) || !input.matches("[data-template-filter-search]")) return;
+      const query = input.value.trim().toLocaleLowerCase();
+      for (const button of this.elements.templateFilters.querySelectorAll<HTMLButtonElement>("[data-template-filter]")) {
+        button.hidden = Boolean(query)
+          && button.dataset.templateFilter !== ""
+          && !button.textContent?.toLocaleLowerCase().includes(query);
+      }
     });
     this.elements.pagination.addEventListener("click", (event) => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-page]");
@@ -1060,6 +1209,7 @@ export class MemeVaultApp {
       this.editing,
       this.editDraft,
     );
+    this.immersive.refreshPagination();
     renderRelationDialog(this.elements, this.state);
   }
 
@@ -1304,6 +1454,7 @@ export class MemeVaultApp {
       this.state.totalPages = 0;
       this.state.loadingList = false;
       renderLibrary(this.elements, this.state);
+      this.immersive.refreshPagination();
       return;
     }
     this.listController?.abort();
@@ -1313,6 +1464,7 @@ export class MemeVaultApp {
     this.state.listError = null;
     this.state.memes = [];
     renderLibrary(this.elements, this.state);
+    this.immersive.refreshPagination();
 
     try {
       const response = this.state.searchMode === "semantic"
@@ -1366,8 +1518,30 @@ export class MemeVaultApp {
       if (this.listController === controller) {
         this.state.loadingList = false;
         renderLibrary(this.elements, this.state);
+        this.immersive.refreshPagination();
       }
     }
+  }
+
+  private submitImmersiveSearch(value: string): void {
+    this.elements.searchInput.value = value;
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    if (this.state.searchMode === "semantic") {
+      void this.submitSemanticSearch();
+      return;
+    }
+    const query = value.trim();
+    const exactId = exactMemeIdFromQuery(query);
+    if (exactId !== null) {
+      void this.openMemeById(exactId);
+      return;
+    }
+    this.state.query = query;
+    this.state.page = 1;
+    void this.reloadMemes();
   }
 
   private async submitSemanticSearch(): Promise<void> {
@@ -1384,6 +1558,17 @@ export class MemeVaultApp {
     this.state.semanticSubmittedQuery = query;
     this.state.page = 1;
     await this.reloadMemes();
+  }
+
+  private async openMemeById(id: number): Promise<void> {
+    if (!Number.isSafeInteger(id) || id < 1) return;
+    this.state.listError = null;
+    try {
+      this.selectMeme(await this.api.getMeme(id));
+    } catch {
+      this.state.listError = `Meme #${id} 不存在`;
+      renderLibrary(this.elements, this.state);
+    }
   }
 
   private async goToPage(page: number): Promise<void> {

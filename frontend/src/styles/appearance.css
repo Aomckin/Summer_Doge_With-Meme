@@ -15,7 +15,7 @@
 }
 
 body {
-  background: #090b10;
+  background: var(--surface-0);
 }
 
 .appearance-backdrop {
@@ -42,7 +42,7 @@ body {
   background:
     radial-gradient(circle at 15% -10%, rgb(var(--accent-rgb) / 9%), transparent 34rem),
     radial-gradient(circle at 88% 12%, rgb(112 133 255 / 8%), transparent 42rem),
-    #090b10;
+    var(--surface-0);
   background-position: center;
   background-size: cover;
   filter: blur(var(--appearance-background-blur)) saturate(var(--appearance-background-saturation));
@@ -51,7 +51,7 @@ body {
 }
 
 .appearance-background[data-has-custom-background] {
-  background-color: #090b10;
+  background-color: var(--surface-0);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;

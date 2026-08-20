@@ -13,6 +13,8 @@ export interface EditDraft {
 }
 
 export interface AppElements {
+  appRoot: HTMLElement;
+  topbar: HTMLElement;
   appearanceBackground: HTMLElement;
   searchInput: HTMLInputElement;
   searchMode: HTMLSelectElement;
@@ -40,6 +42,7 @@ export interface AppElements {
   memeGrid: HTMLElement;
   immersiveFeedStatus: HTMLElement;
   immersiveFeedSentinel: HTMLElement;
+  managementMenu: HTMLDetailsElement;
   pagination: HTMLElement;
   detailPanel: HTMLElement;
   templateDialog: HTMLDialogElement;
@@ -152,30 +155,52 @@ export function mountShell(root: HTMLElement): AppElements {
           <span class="brand-mark" aria-hidden="true">MV</span>
           <div>
             <strong>Meme Vault</strong>
-            <span>个人 Meme 创作台</span>
+            <span>PRIVATE COLLECTION</span>
           </div>
         </div>
         <div class="toolbar">
-          <select id="search-mode" aria-label="搜索模式"><option value="keyword">关键词</option><option value="semantic">语义</option></select>
-          <label class="search-box" for="meme-search">
-            <span aria-hidden="true">⌕</span>
-            <input id="meme-search" type="search" placeholder="搜索标题或描述…" aria-label="搜索 Meme" autocomplete="off">
-          </label>
-          <button id="semantic-search-button" class="button button-primary" type="button" hidden>语义搜索</button>
-          <button id="open-settings" class="button button-secondary" type="button">API 设置</button>
-          <button id="open-appearance" class="button button-secondary" type="button">外观</button>
-          <button id="open-immersive" class="button button-secondary" type="button" aria-pressed="false">沉浸浏览</button>
-          <button id="open-templates" class="button button-secondary" type="button">模板管理</button>
-          <button id="open-tags" class="button button-secondary" type="button">标签管理</button>
-          <button id="open-semantic-index" class="button button-secondary" type="button">语义索引</button>
-          <button id="open-enrichment" class="button button-secondary" type="button">元数据整理</button>
-          <button id="open-chat-recommendation" class="button button-primary" type="button">场景召唤</button>
-          <button id="open-vault-inspector" class="button button-secondary" type="button">宝库巡检</button>
-          <button id="open-collections" class="button button-secondary" type="button">牌组</button>
-          <button id="random-button" class="button button-secondary" type="button">随机一个</button>
-          <button id="open-meme-maker" class="button button-primary" type="button">Meme 制作器</button>
-          <button id="open-upload" class="button button-primary" type="button">图片上传</button>
-          <button id="open-download" class="button button-secondary" type="button">批量下载</button>
+          <div class="search-stage">
+            <select id="search-mode" aria-label="搜索模式"><option value="keyword">关键词</option><option value="semantic">语义</option></select>
+            <label class="search-box" for="meme-search">
+              <span class="search-icon" aria-hidden="true">⌕</span>
+              <input id="meme-search" type="search" placeholder="搜索你的 Vault…" aria-label="搜索 Meme" autocomplete="off">
+              <kbd aria-hidden="true">Ctrl K</kbd>
+            </label>
+            <button id="semantic-search-button" class="button button-primary semantic-submit" type="button" hidden>语义搜索</button>
+          </div>
+          <div class="header-actions" aria-label="主要操作">
+            <button id="random-button" class="button header-action header-action-secondary" type="button">随机一个</button>
+            <button id="open-download" class="button header-action header-action-secondary" type="button">批量下载</button>
+            <button id="open-appearance" class="button header-action header-action-secondary" type="button">外观</button>
+            <button id="open-upload" class="button button-primary header-add" type="button">+ 图片上传</button>
+            <button id="open-immersive" class="button immersive-entry" type="button" aria-pressed="false">沉浸浏览</button>
+            <details id="management-menu" class="management-menu">
+              <summary class="management-trigger" aria-label="打开更多功能" title="更多功能">
+                <span aria-hidden="true">•••</span>
+                <span class="visually-hidden">更多功能</span>
+              </summary>
+              <div class="management-popover" role="menu" aria-label="更多功能">
+                <section>
+                  <span class="management-group-label">创作与组织</span>
+                  <button id="open-meme-maker" type="button" role="menuitem"><span>Meme 制作器</span><small>组合图片与文字</small></button>
+                  <button id="open-collections" type="button" role="menuitem"><span>牌组</span><small>整理常用收藏</small></button>
+                  <button id="open-chat-recommendation" type="button" role="menuitem"><span>场景召唤</span><small>按聊天语境找 Meme</small></button>
+                </section>
+                <section>
+                  <span class="management-group-label">资料库管理</span>
+                  <button id="open-templates" type="button" role="menuitem"><span>模板管理</span><small>维护视觉模板</small></button>
+                  <button id="open-tags" type="button" role="menuitem"><span>标签管理</span><small>整理标签体系</small></button>
+                  <button id="open-enrichment" type="button" role="menuitem"><span>元数据整理</span><small>审核分析建议</small></button>
+                  <button id="open-vault-inspector" type="button" role="menuitem"><span>宝库巡检</span><small>检查相似与重复内容</small></button>
+                </section>
+                <section>
+                  <span class="management-group-label">系统</span>
+                  <button id="open-semantic-index" type="button" role="menuitem"><span>语义索引</span><small>索引状态与任务</small></button>
+                  <button id="open-settings" type="button" role="menuitem"><span>API 设置</span><small>厂商、模型与密钥</small></button>
+                </section>
+              </div>
+            </details>
+          </div>
         </div>
       </header>
 
@@ -187,12 +212,18 @@ export function mountShell(root: HTMLElement): AppElements {
             <div>
               <p class="eyebrow">LIBRARY</p>
               <h1>我的 Meme</h1>
+              <p class="library-summary">
+                <span data-meme-total>0 个 Meme</span>
+                <span data-filter-summary hidden></span>
+              </p>
             </div>
           </div>
-          <div id="template-filters" class="tag-filters template-filters" aria-label="模板筛选"></div>
-          <div id="tag-filters" class="tag-filters" aria-label="标签筛选"></div>
-          <div id="browsing-controls" class="browsing-controls" aria-label="资料库浏览设置">
-            <strong data-meme-total>共 0 个 Meme</strong>
+          <div class="library-filter-toolbar" aria-label="资料库筛选">
+            <div id="template-filters" class="tag-filters template-filters" aria-label="模板筛选"></div>
+            <div id="tag-filters" class="tag-filters" aria-label="标签筛选"></div>
+          </div>
+          <div id="browsing-controls" class="browsing-controls" aria-label="资料库视图设置">
+            <span class="browsing-controls-label">视图</span>
             <label>顺序
               <select data-list-sort aria-label="资料库顺序">
                 <option value="default">默认顺序</option>
@@ -485,6 +516,8 @@ export function mountShell(root: HTMLElement): AppElements {
   `;
 
   return {
+    appRoot: root,
+    topbar: required(root, ".topbar"),
     appearanceBackground: required(root, "[data-appearance-background]"),
     searchInput: required(root, "#meme-search"),
     searchMode: required(root, "#search-mode"),
@@ -512,6 +545,7 @@ export function mountShell(root: HTMLElement): AppElements {
     memeGrid: required(root, "#meme-grid"),
     immersiveFeedStatus: required(root, "[data-infinite-feed-status]"),
     immersiveFeedSentinel: required(root, "[data-infinite-feed-sentinel]"),
+    managementMenu: required(root, "#management-menu"),
     pagination: required(root, "#library-pagination"),
     detailPanel: required(root, "#detail-panel"),
     templateDialog: required(document, "#template-dialog"),
@@ -707,7 +741,8 @@ export function renderTemplateFilters(elements: AppElements, state: AppState): v
   const toggle = collapsed
     ? `<button class="filter-toggle" type="button" data-expand-templates aria-expanded="${state.templatesExpanded}">${state.templatesExpanded ? "收起模板" : `展开全部模板（+${hiddenCount}）`}</button>`
     : "";
-  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><input type="search" data-template-filter-search placeholder="搜索模板…" aria-label="搜索资料库模板"><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}`;
+  elements.templateFilters.toggleAttribute("data-expanded", state.templatesExpanded);
+  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><div class="filter-chip-track"><input type="search" data-template-filter-search placeholder="搜索模板…" aria-label="搜索资料库模板"><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}</div>`;
 }
 
 export function renderTags(elements: AppElements, state: AppState): void {
@@ -734,7 +769,7 @@ export function renderTags(elements: AppElements, state: AppState): void {
           type="button"
           data-tag="${escapeHtml(tag.name)}"
           aria-pressed="${selected}"
-        >${escapeHtml(tag.name)}</button>
+        ><span>${escapeHtml(tag.name)}</span><small>${tag.usage_count}</small></button>
       `;
     })
     .join("");
@@ -748,7 +783,8 @@ export function renderTags(elements: AppElements, state: AppState): void {
       >${state.tagsExpanded ? "收起标签" : `展开全部标签（+${hiddenCount}）`}</button>
     `
     : "";
-  elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span>${tags}${toggle}`;
+  elements.tagFilters.toggleAttribute("data-expanded", state.tagsExpanded);
+  elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span><div class="filter-chip-track">${tags}${toggle}</div>`;
 }
 
 export function memeCardMarkup(
@@ -791,6 +827,7 @@ export function memeCardMarkup(
           data-card-height="${meme.height}"
           data-card-image-count="${meme.image_count}"
         >
+          ${selected ? '<span class="card-selected-indicator" aria-hidden="true">✓</span>' : ""}
           <button class="meme-card-main" type="button" data-open-meme aria-label="查看 ${escapeHtml(meme.title)}">
             <span class="card-image">
               <img data-card-image data-thumbnail-src="${escapeHtml(thumbnail)}" data-original-src="${escapeHtml(meme.image_url)}" src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" width="${meme.width}" height="${meme.height}" loading="lazy">
@@ -824,9 +861,19 @@ export function renderLibrary(
   state: AppState,
 ): void {
   applyMemeCardSize(elements, state.cardSize);
+  elements.memeGrid.setAttribute("aria-busy", String(state.loadingList));
   const total = new Intl.NumberFormat("zh-CN").format(state.totalMemes);
-  const totalNode = elements.browsingControls.querySelector<HTMLElement>("[data-meme-total]");
-  if (totalNode) totalNode.textContent = `共 ${total} 个 Meme`;
+  const totalNode = elements.libraryHeading.querySelector<HTMLElement>("[data-meme-total]");
+  if (totalNode) totalNode.textContent = `${total} 个 Meme`;
+  const filterSummary = elements.libraryHeading.querySelector<HTMLElement>("[data-filter-summary]");
+  if (filterSummary) {
+    const parts = [
+      state.selectedTemplateId === null ? "" : "1 个模板",
+      state.selectedTags.length ? `${state.selectedTags.length} 个标签` : "",
+    ].filter(Boolean);
+    filterSummary.hidden = parts.length === 0;
+    filterSummary.textContent = parts.length ? `· ${parts.join(" · ")}` : "";
+  }
   const sort = elements.browsingControls.querySelector<HTMLSelectElement>("[data-list-sort]");
   const pageSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-page-size]");
   const cardSize = elements.browsingControls.querySelector<HTMLSelectElement>("[data-card-size]");
@@ -834,7 +881,9 @@ export function renderLibrary(
   const reshuffle = elements.browsingControls.querySelector<HTMLButtonElement>("[data-reshuffle]");
   elements.searchMode.value = state.searchMode;
   elements.semanticSearchButton.hidden = state.searchMode !== "semantic";
-  elements.searchInput.placeholder = state.searchMode === "semantic" ? "描述想找的场景、情绪或用途" : "搜索标题或描述…";
+  elements.searchInput.placeholder = state.searchMode === "semantic"
+    ? "描述想找的场景、情绪或用途…"
+    : "搜索你的 Vault…";
   if (sort) {
     sort.value = state.listSort;
     sort.disabled = state.loadingList || state.searchMode === "semantic";
@@ -864,9 +913,30 @@ export function renderLibrary(
     `;
     elements.memeGrid.innerHTML = "";
   } else {
-    elements.listStatus.textContent = state.memes.length
-      ? `第 ${state.page} / ${state.totalPages} 页`
-      : "还没有符合条件的 Meme";
+    const hasActiveFilter = Boolean(
+      state.query
+      || state.selectedTags.length
+      || state.selectedTemplateId !== null,
+    );
+    if (state.memes.length) {
+      elements.listStatus.textContent = `第 ${state.page} / ${state.totalPages} 页`;
+    } else if (hasActiveFilter) {
+      elements.listStatus.innerHTML = `
+        <div class="library-empty-state">
+          <strong>没有找到 Meme</strong>
+          <span>换个关键词，或者清除当前筛选后再看看。</span>
+          <button class="button button-secondary" type="button" data-clear-library-filters>清除筛选</button>
+        </div>
+      `;
+    } else {
+      elements.listStatus.innerHTML = `
+        <div class="library-empty-state">
+          <strong>Vault 还是空的</strong>
+          <span>上传第一张 Meme，开始建立你的私人收藏。</span>
+          <button class="button button-primary" type="button" data-empty-upload>上传第一张 Meme</button>
+        </div>
+      `;
+    }
     elements.memeGrid.innerHTML = state.memes
       .map((meme) => memeCardMarkup(
         meme,
@@ -948,12 +1018,12 @@ export function renderInfiniteFeedState(
     `;
   } else if (state.loading) {
     elements.immersiveFeedStatus.innerHTML = state.offset
-      ? '<span class="status-line"><span class="spinner"></span>正在继续翻找 Meme…</span>'
-      : '<span class="status-line"><span class="spinner"></span>正在打开沉浸宝库…</span>';
+      ? '<span class="status-line"><span class="infinite-feed-pulse" aria-hidden="true"></span>继续翻找 Meme…</span>'
+      : '<span class="status-line"><span class="infinite-feed-pulse" aria-hidden="true"></span>正在打开沉浸宝库…</span>';
   } else if (state.offset === 0 && !state.hasMore) {
     elements.immersiveFeedStatus.textContent = "这里暂时没有 Meme。";
   } else if (!state.hasMore) {
-    elements.immersiveFeedStatus.textContent = "已经翻到底了";
+    elements.immersiveFeedStatus.textContent = "已经翻到 Vault 最深处了。";
   } else {
     elements.immersiveFeedStatus.textContent = "";
   }
@@ -1347,37 +1417,52 @@ export function renderDetail(
       <div class="detail-scroll">
         ${detailImage(meme, state)}
         <div class="detail-content">
-          <div class="detail-heading">
-            <div>
-              <p class="eyebrow">MEME #${meme.id}</p>
-              <h2 data-detail-title>${escapeHtml(meme.title)}</h2>
+          <section class="detail-primary">
+            <div class="detail-heading">
+              <div>
+                <p class="eyebrow">MEME <span class="detail-id">#${meme.id}</span></p>
+                <h2 data-detail-title>${escapeHtml(meme.title)}</h2>
+                <p class="detail-filename">${escapeHtml(meme.original_filename)}</p>
+              </div>
             </div>
-          </div>
-          <div class="detail-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</div>
-          <p class="detail-description">${escapeHtml(meme.description || "暂无描述")}</p>
-          <dl class="metadata">
-            <div><dt>来源</dt><dd>${escapeHtml(meme.source || "未填写")}</dd></div>
-            <div><dt>模板</dt><dd>${escapeHtml(meme.template?.name || "未归类")}</dd></div>
-            <div><dt>尺寸</dt><dd>${meme.width} × ${meme.height}</dd></div>
-            <div><dt>文件</dt><dd>${formatFileSize(meme.file_size)} · ${escapeHtml(meme.mime_type)}</dd></div>
-            <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>
-            <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
-          </dl>
+            <div class="detail-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</div>
+            <p class="detail-description">${escapeHtml(meme.description || "暂无描述")}</p>
+          </section>
+          <section class="detail-section detail-metadata">
+            <p class="detail-section-label">信息</p>
+            <dl class="metadata">
+              <div><dt>来源</dt><dd>${escapeHtml(meme.source || "未填写")}</dd></div>
+              <div><dt>模板</dt><dd>${escapeHtml(meme.template?.name || "未归类")}</dd></div>
+              <div><dt>尺寸</dt><dd>${meme.width} × ${meme.height}</dd></div>
+              <div><dt>文件</dt><dd>${formatFileSize(meme.file_size)} · ${escapeHtml(meme.mime_type)}</dd></div>
+              <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>
+              <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
+            </dl>
+          </section>
+          <section class="detail-section detail-action-section">
+            <p class="detail-section-label">操作</p>
+            <div class="detail-actions">
+              ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-copy-detail>复制图片</button>' : '<button class="button button-secondary" type="button" data-open-viewer data-image-index="0">选择图片复制</button>'}
+              <a class="button button-secondary" href="${escapeHtml(meme.image_url)}" target="_blank" rel="noopener noreferrer">打开原图</a>
+              <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
+              <button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button>
+              <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
+            </div>
+          </section>
           ${relatedMemesMarkup(state)}
           ${similarMemesMarkup(state)}
           ${aiAnalysisMarkup(state)}
           <div data-caption-lab-host></div>
           ${detailError(state.actionError)}
-          <div class="detail-actions">
-            ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-copy-detail>复制图片</button>' : '<button class="button button-secondary" type="button" data-open-viewer data-image-index="0">选择图片复制</button>'}
-            <a class="button button-secondary" href="${escapeHtml(meme.image_url)}" target="_blank" rel="noopener noreferrer">打开原图</a>
-            <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
-            <button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button>
-            <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
+          <section class="detail-danger-zone">
+            <div>
+              <strong>删除 Meme</strong>
+              <span>此操作会同时删除资料记录与本地图片。</span>
+            </div>
             <button class="button button-danger" type="button" data-delete-meme ${state.deleting ? "disabled" : ""}>
               ${state.deleting ? "正在删除…" : "删除"}
             </button>
-          </div>
+          </section>
         </div>
       </div>
     `;

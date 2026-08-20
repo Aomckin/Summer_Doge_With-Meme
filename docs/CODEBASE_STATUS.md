@@ -1,9 +1,10 @@
 # Meme Vault 代码现状速览
 
-> 提交基线：`c949834`；当前工作树为 v1.0.0 Phase 2（2026-08-20）。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
+> 提交基线：v1.0.0 Phase 2 完成提交（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
 
 ## 当前能力
 
+- v1.0 Phase 2 整体视觉重构已完成：App Shell 建立 Primary / Secondary / Management 信息层级；统一 Design Tokens、Typography、Radius、Surface、Button、Input、Border、Shadow 和 Motion；Library / Card、Inspector / Dialog、Immersive、系统状态、响应式与可访问性使用同一套安静、内容优先的视觉语言。
 - Tag 使用显示名 + `normalized_name` 双字段；大小写不敏感去重但保留 UI 大小写，使用中的 Tag 可事务性强制删除并令受影响语义数据过期。
 - 主资料库支持 `#4496`、`Meme 4496` 等 ID 精确跳转和 24/48/96 分页。
 - 动态 Template Selector 共享实时子串搜索；主资料库模板筛选也可即时搜索。
@@ -70,8 +71,10 @@ app/
   ai/              Responses、兼容 Chat、图像向量、预设与密钥处理
 frontend/
   src/app.ts       页面状态与交互编排
+  src/app-shell.ts App Shell 操作分级、二级管理菜单与快捷搜索行为
   src/appearance/  Appearance 预设、状态、持久化和设置 UI
   src/immersive/   Immersive 模式、Random、媒体加载、Focus、Free Gallery 与调参
+  src/styles/      Tokens、Shell、Library、Inspector/Dialog、Immersive 与系统状态样式
   src/card-tilt.ts Card Motion Preset、Lift/Tilt/Magnetic Follow 与绑定生命周期
   src/drunk-physics.ts drunk 档单 rAF 环境物理
   src/card-motion-config.ts Card Size translation / rotation multiplier
@@ -453,6 +456,15 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - `ImmersiveMediaLoader` 通过 `IntersectionObserver` 升级 viewport 附近图片；静态图和 GIF 都使用原始资源，失败继续显示 thumbnail。
 - `ImmersiveFocusViewer` 移动真实卡片节点到 Focus Layer，保证空间连续性和封面 GIF 连续播放；多图其余媒体只在 Focus 期间创建。
 - Focus 打开前通过 `ImmersiveOccupancyGrid.beginTemporaryDetach()` 保留 placement，恢复 DOM 后调用 `endTemporaryDetach()`；禁止删掉这层协议，否则 MutationObserver 会把临时移动误判为删除并触发全局重排。
+
+## v1.0.0 Phase 2 整体视觉重构
+
+- `app-shell.ts` 将 Search、Upload 与 Immersive 作为主要入口，Random、Download、Appearance 作为次级入口，低频管理能力收纳到二级菜单；快捷键与既有业务事件保持兼容。
+- `styles/tokens.css` 提供 Typography、Spacing、Radius、Surface、Border、Shadow、Motion 与 Easing Tokens；`shell.css`、`library.css`、`inspector-dialog.css` 和 `states.css` 按职责消费这些变量，Appearance 仍是动态背景和材质的上游。
+- Library Header、Template / Tag Toolbar、Tag Usage Count、视图控制与 Card Selected / Hover 状态完成统一；Card Motion transform 合成没有新增竞争层。
+- Inspector 使用内容详情层级呈现 Preview、标题、描述、Tag、Metadata、Actions 与 Danger Zone；Dialog、Popover、Backdrop、Icon Button 和危险操作获得统一样式。
+- Immersive Dock、Focus Dim / Outline / Shadow、Infinite Loading 与 Feed End State 完成 Polish；Infinite Feed、Occupancy Grid、Focus 临时脱离协议、原图/GIF 生命周期均未改写。
+- Loading、Empty、Error、Toast、Disabled、`focus-visible`、`prefers-reduced-motion`、forced colors、动态背景对比度和主要响应式断点集中在系统状态层。
 
 ## v1.0.0 Free Gallery 布局边界
 

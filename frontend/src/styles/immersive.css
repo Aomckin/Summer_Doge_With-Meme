@@ -1,5 +1,5 @@
 :root {
-  --immersive-transition: 240ms cubic-bezier(.2, .75, .25, 1);
+  --immersive-transition: var(--motion-slow) var(--ease-standard);
 }
 
 [data-vault-mode="immersive"] {
@@ -29,23 +29,23 @@
   left: 50%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: min(860px, calc(100vw - 28px));
-  padding: 9px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 18px;
-  background: rgb(17 20 27 / var(--appearance-panel-opacity));
+  gap: var(--space-2);
+  width: min(800px, calc(100vw - 28px));
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: rgb(17 20 27 / calc(var(--appearance-panel-opacity) * .94));
   box-shadow:
-    0 24px 70px rgb(0 0 0 / 42%),
-    inset 0 1px rgb(255 255 255 / 5%);
+    var(--shadow-md),
+    inset 0 1px rgb(255 255 255 / 4%);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translate(-50%, 18px) scale(.98);
+  transform: translate(-50%, 12px);
   transition:
-    opacity 180ms ease,
-    transform 220ms ease,
-    visibility 180ms linear;
+    opacity var(--motion-normal) var(--ease-standard),
+    transform var(--motion-normal) var(--ease-standard),
+    visibility var(--motion-normal) linear;
   -webkit-backdrop-filter: blur(var(--appearance-panel-blur)) saturate(var(--appearance-panel-saturation));
   backdrop-filter: blur(var(--appearance-panel-blur)) saturate(var(--appearance-panel-saturation));
 }
@@ -57,7 +57,7 @@
 [data-vault-mode="immersive"] .immersive-dock[data-visible="true"] {
   opacity: 1;
   pointer-events: auto;
-  transform: translate(-50%, 0) scale(1);
+  transform: translate(-50%, 0);
 }
 
 .gallery-tuner {
@@ -66,12 +66,12 @@
   right: max(18px, env(safe-area-inset-right));
   bottom: 88px;
   width: min(330px, calc(100vw - 28px));
-  padding: 14px;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 16px;
-  color: var(--text);
-  background: rgb(14 18 25 / 92%);
-  box-shadow: 0 24px 70px rgb(0 0 0 / 48%);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  background: rgb(17 20 27 / 94%);
+  box-shadow: var(--shadow-lg);
   -webkit-backdrop-filter: blur(20px) saturate(1.15);
   backdrop-filter: blur(20px) saturate(1.15);
 }
@@ -106,16 +106,16 @@
 }
 
 .gallery-tuner-header span {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: var(--text-meta);
 }
 
 .gallery-tuner-header button,
 .gallery-tuner-actions button {
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   color: inherit;
-  background: var(--surface-raised);
+  background: var(--surface-2);
   cursor: pointer;
 }
 
@@ -138,9 +138,9 @@
 .gallery-tuner-field > span {
   justify-content: space-between;
   gap: 12px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--text-muted);
+  font-size: var(--text-secondary-size);
+  font-weight: var(--weight-medium);
 }
 
 .gallery-tuner-field output {
@@ -163,8 +163,8 @@
 .gallery-tuner-actions button {
   min-height: 32px;
   padding: 0 11px;
-  font-size: 12px;
-  font-weight: 750;
+  font-size: var(--text-secondary-size);
+  font-weight: var(--weight-medium);
 }
 
 .gallery-tuner-actions button:hover,
@@ -176,18 +176,19 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
   height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  color: var(--muted);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
   background: rgb(7 10 15 / 58%);
 }
 
 .immersive-search:focus-within {
-  border-color: rgb(var(--accent-rgb) / 62%);
+  border-color: rgb(var(--accent-rgb) / 52%);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 7%);
 }
 
 .immersive-search input {
@@ -195,24 +196,29 @@
   min-width: 0;
   border: 0;
   outline: 0;
-  color: #fff;
+  color: var(--text-primary);
   background: transparent;
 }
 
 .immersive-dock-button {
   min-height: 42px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  color: inherit;
-  background: var(--surface-raised);
-  font-weight: 750;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: transparent;
+  font-weight: var(--weight-medium);
   cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .immersive-dock-button:hover,
 .immersive-dock-button:focus-visible {
-  border-color: rgb(var(--accent-rgb) / 55%);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
   background: var(--surface-hover);
 }
 
@@ -222,9 +228,9 @@
 }
 
 .immersive-dock-button.immersive-exit {
-  border-color: rgb(var(--accent-rgb) / 42%);
-  color: var(--accent-ink);
-  background: var(--accent);
+  border-color: rgb(var(--accent-rgb) / 26%);
+  color: var(--accent);
+  background: rgb(var(--accent-rgb) / 7%);
 }
 
 [data-vault-mode="immersive"] .topbar {
@@ -282,10 +288,28 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 42px;
-  color: var(--muted);
-  font-size: 13px;
+  gap: var(--space-2);
+  min-height: 2.625rem;
+  margin: var(--space-5) auto 0;
+  color: var(--text-muted);
+  font-size: var(--text-secondary-size);
+  letter-spacing: .01em;
+}
+
+.infinite-feed-pulse {
+  width: .375rem;
+  height: .375rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  box-shadow: 0 0 12px rgb(var(--accent-rgb) / 48%);
+  animation: infinite-feed-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes infinite-feed-pulse {
+  to {
+    opacity: .35;
+    transform: scale(.72);
+  }
 }
 
 [data-vault-mode="immersive"] .infinite-feed-sentinel:not([hidden]) {
@@ -341,8 +365,19 @@
   position: fixed;
   z-index: 80;
   inset: 0;
-  background: rgb(0 0 0 / 18%);
+  background: rgb(3 5 9 / 52%);
   cursor: zoom-out;
+  -webkit-backdrop-filter: blur(3px) saturate(82%);
+  backdrop-filter: blur(3px) saturate(82%);
+  animation: immersive-focus-dim-in var(--motion-normal) var(--ease-standard) both;
+}
+
+@keyframes immersive-focus-dim-in {
+  from {
+    background: rgb(3 5 9 / 0%);
+    -webkit-backdrop-filter: blur(0) saturate(100%);
+    backdrop-filter: blur(0) saturate(100%);
+  }
 }
 
 .immersive-focus-layer .is-immersive-focused {
@@ -399,14 +434,21 @@
 .immersive-focus-layer .is-immersive-focused .meme-card:hover,
 .immersive-focus-layer .is-immersive-focused .meme-card[data-card-tilt="ready"] {
   z-index: 1;
+  border-color: rgb(255 255 255 / 18%);
+  border-radius: var(--radius-lg);
   transform: none !important;
-  transition: border-color 160ms ease, box-shadow 180ms ease !important;
+  box-shadow:
+    0 0 0 1px rgb(var(--accent-rgb) / 22%),
+    0 32px 90px rgb(0 0 0 / 58%);
+  transition:
+    border-color var(--motion-normal) var(--ease-standard),
+    box-shadow var(--motion-normal) var(--ease-standard) !important;
 }
 
 [data-immersive-focus="open"] .meme-grid[data-free-gallery="active"]
   > .gallery-layout-item {
-  opacity: .34;
-  transition: opacity 180ms ease;
+  opacity: .2;
+  transition: opacity var(--motion-normal) var(--ease-standard);
 }
 
 [data-immersive-focus="open"] .immersive-dock,
@@ -440,7 +482,7 @@
     opacity: .72;
     visibility: visible;
     pointer-events: auto;
-    transform: translate(-50%, 0) scale(1);
+    transform: translate(-50%, 0);
   }
 
   [data-vault-mode="immersive"] .immersive-dock:focus-within {

@@ -1,0 +1,70 @@
+:root {
+  color-scheme: dark;
+
+  /* Typography */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Microsoft YaHei", sans-serif;
+  --text-display: clamp(1.625rem, 3vw, 2.375rem);
+  --text-heading: clamp(1.375rem, 2.2vw, 1.875rem);
+  --text-body: 0.875rem;
+  --text-secondary-size: 0.75rem;
+  --text-meta: 0.6875rem;
+  --weight-regular: 450;
+  --weight-medium: 600;
+  --weight-strong: 750;
+
+  /* Color and surface hierarchy */
+  --text-primary: #f7f8fb;
+  --text-secondary: #c7cdd8;
+  --text-muted: #8f98aa;
+  --text-faint: rgb(247 248 251 / 42%);
+  --surface-0: #090b10;
+  --surface-1: #11141b;
+  --surface-2: #171b24;
+  --surface-3: #1d2330;
+  --surface-hover: #1d2330;
+  --surface-active: #242b39;
+  --border-subtle: rgb(255 255 255 / 9%);
+  --border-strong: #414a5d;
+  --accent: #e6ff4a;
+  --accent-ink: #111500;
+  --danger: #ff6174;
+  --focus: #b9d126;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Shape and elevation */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-pill: 999px;
+  --shadow-sm: 0 8px 24px rgb(0 0 0 / 14%);
+  --shadow-md: 0 20px 60px rgb(0 0 0 / 24%);
+  --shadow-lg: 0 34px 100px rgb(0 0 0 / 55%);
+
+  /* Quiet UI motion */
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-slow: 280ms;
+  --ease-standard: cubic-bezier(0.2, 0.72, 0.25, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Compatibility aliases for established feature styles. */
+  --surface: var(--surface-1);
+  --surface-raised: var(--surface-2);
+  --surface-soft: var(--surface-2);
+  --surface-strong: var(--surface-3);
+  --border: var(--border-subtle);
+  --line: var(--border-subtle);
+  --muted: var(--text-muted);
+  --radius: var(--radius-xl);
+}

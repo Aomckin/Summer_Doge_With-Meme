@@ -329,6 +329,24 @@ afterEach(() => {
 });
 
 describe("MemeVaultApp", () => {
+  it("keeps primary actions visible and moves low-frequency tools into one menu", async () => {
+    const app = new MemeVaultApp(root(), makeApi());
+    await app.start();
+
+    const header = document.querySelector<HTMLElement>(".topbar")!;
+    const menu = document.querySelector<HTMLDetailsElement>("#management-menu")!;
+    expect(header.querySelector("#meme-search")).not.toBeNull();
+    expect(header.querySelector("#open-upload")).not.toBeNull();
+    expect(header.querySelector("#open-immersive")).not.toBeNull();
+    expect(menu.querySelector("#open-settings")).not.toBeNull();
+    expect(menu.querySelector("#open-templates")).not.toBeNull();
+    expect(menu.querySelector("#open-tags")).not.toBeNull();
+    expect(menu.querySelector("#open-semantic-index")).not.toBeNull();
+    expect(menu.querySelector("#open-enrichment")).not.toBeNull();
+    expect(menu.querySelector("#open-vault-inspector")).not.toBeNull();
+    expect(header.querySelectorAll(":scope > .toolbar > .header-actions > button")).toHaveLength(5);
+  });
+
   it("renders natural-ratio cards with overlay metadata", async () => {
     const portrait = {
       ...makeMeme(1, "纵向 Meme"),
@@ -374,6 +392,11 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
       "Meme 1",
     );
+    expect(document.querySelector('[data-meme-id="1"].is-selected .card-selected-indicator')).not.toBeNull();
+    expect(document.querySelector(".detail-primary .detail-filename")?.textContent).toBe("1.png");
+    expect(document.querySelector(".detail-metadata .metadata")).not.toBeNull();
+    expect(document.querySelector(".detail-action-section [data-delete-meme]")).toBeNull();
+    expect(document.querySelector(".detail-danger-zone [data-delete-meme]")).not.toBeNull();
 
     button("下一页").click();
     await vi.waitFor(() => {
@@ -430,6 +453,9 @@ describe("MemeVaultApp", () => {
 
     expect(listMemePage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 24 }));
     expect(document.querySelector("[data-meme-total]")?.textContent).toContain("120");
+    expect(document.querySelector("#library-heading [data-meme-total]")).not.toBeNull();
+    expect(document.querySelector(".library-filter-toolbar .filter-chip-track")).not.toBeNull();
+    expect(document.querySelector('[data-tag="funny"] small')?.textContent).toBe("1");
     expect(document.querySelector("#list-status")?.textContent).toContain("第 1 / 5 页");
     expect(document.body.textContent).not.toContain("加载更多");
 
@@ -2017,6 +2043,37 @@ describe("MemeVaultApp", () => {
     expect(viewer?.hasAttribute("src")).toBe(false);
   });
 
+  it("renders an actionable empty Vault state", async () => {
+    const app = new MemeVaultApp(root(), makeApi());
+    await app.start();
+
+    expect(document.querySelector(".library-empty-state")?.textContent)
+      .toContain("Vault 还是空的");
+    document.querySelector<HTMLButtonElement>("[data-empty-upload]")?.click();
+    expect(document.querySelector<HTMLDialogElement>(".batch-upload-dialog")?.open)
+      .toBe(true);
+  });
+
+  it("clears active filters from the no-results state", async () => {
+    const listMemes = vi.fn()
+      .mockResolvedValueOnce([makeMeme(1)])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makeMeme(1)]);
+    const app = new MemeVaultApp(root(), makeApi({ listMemes }));
+    await app.start();
+
+    button("funny").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-clear-library-filters]")).not.toBeNull();
+    });
+    document.querySelector<HTMLButtonElement>("[data-clear-library-filters]")?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll("[data-meme-id]")).toHaveLength(1);
+    });
+    expect(document.querySelector<HTMLButtonElement>('[data-tag="funny"]')?.ariaPressed)
+      .toBe("false");
+  });
+
   it("connects the current Viewer image to Meme Forge", async () => {
     const meme = makeCompositeMeme(31);
     const app = new MemeVaultApp(root(), makeApi({ listMemes: vi.fn().mockResolvedValue([meme]) }));
@@ -2350,6 +2407,8 @@ describe("MemeVaultApp", () => {
     expect(document.querySelector<HTMLImageElement>('[data-meme-id="4"] [data-card-image]')?.src)
       .toContain("/media/thumbnails/stored-4.png");
     expect(state.memes.map(meme => meme.id)).toEqual([1, 2]);
+    expect(document.querySelector("[data-infinite-feed-status]")?.textContent)
+      .toContain("Vault 最深处");
     expect(document.querySelector("[data-immersive-previous]")).toBeNull();
     expect(document.querySelector("[data-immersive-next]")).toBeNull();
 

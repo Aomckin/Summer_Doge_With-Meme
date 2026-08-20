@@ -156,7 +156,7 @@ export class CollectionManagerController {
     if (this.detail) {
       const detail = this.detail;
       this.dialog.innerHTML = `<div class="settings-shell collection-shell">
-        <header class="settings-header"><div><p class="eyebrow">DECK CONTENTS</p><h2>${escapeHtml(detail.name)}</h2><p>${escapeHtml(detail.description || "暂无描述")}</p></div><button class="icon-button" type="button" data-close-collections>×</button></header>
+        <header class="settings-header"><div><p class="eyebrow">DECK CONTENTS</p><h2>${escapeHtml(detail.name)}</h2><p>${escapeHtml(detail.description || "暂无描述")}</p></div><button class="icon-button" type="button" data-close-collections aria-label="关闭牌组详情">×</button></header>
         <div class="collection-detail-toolbar"><button class="button button-ghost" type="button" data-back-collections>← 返回牌组</button><strong>${detail.meme_count} 个 Meme</strong></div>
         ${error}
         <div class="collection-grid">${detail.items.length ? detail.items.map(item => `<div class="collection-card">${memeCardMarkup(item.meme, false, "medium", undefined, false)}<div class="collection-card-actions">${item.meme.image_count === 1 ? `<button class="button button-secondary" type="button" data-collection-copy="${item.meme.id}">复制</button>` : ""}<button class="button button-secondary" type="button" data-collection-viewer="${item.meme.id}">原图</button><a class="button button-secondary" href="/api/memes/${item.meme.id}/download">下载</a><button class="button button-danger" type="button" data-remove-collection-meme="${item.meme.id}">从牌组移除</button></div></div>`).join("") : '<div class="collection-empty"><h3>这个牌组还是空的。</h3><p>从 Meme 详情页选择“加入牌组”即可添加。</p></div>'}</div>
@@ -165,7 +165,7 @@ export class CollectionManagerController {
     }
     const editing = this.editingId === null ? null : this.collections.find(item => item.id === this.editingId);
     this.dialog.innerHTML = `<div class="settings-shell collection-shell">
-      <header class="settings-header"><div><p class="eyebrow">DECKS</p><h2>Meme 牌组</h2><p>按自己的使用习惯整理常用 Meme，不影响标签和语义索引。</p></div><button class="icon-button" type="button" data-close-collections>×</button></header>
+      <header class="settings-header"><div><p class="eyebrow">DECKS</p><h2>Meme 牌组</h2><p>按自己的使用习惯整理常用 Meme，不影响标签和语义索引。</p></div><button class="icon-button" type="button" data-close-collections aria-label="关闭牌组管理">×</button></header>
       ${error}
       ${this.busy ? '<p class="status-line"><span class="spinner"></span>正在加载牌组…</p>' : ""}
       <div class="collection-list">${!this.busy && !this.collections.length ? '<div class="collection-empty"><h3>还没有牌组。</h3><p>把常用 Meme 收进自己的快捷武器栏吧。</p></div>' : this.collections.map(item => `<article class="collection-row"><button type="button" data-open-collection="${item.id}"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.description || "暂无描述")}</span><b>${item.meme_count}</b></button><div><button class="button button-ghost" type="button" data-edit-collection="${item.id}">编辑</button><button class="button button-danger" type="button" data-delete-collection="${item.id}">删除</button></div></article>`).join("")}</div>
@@ -177,7 +177,7 @@ export class CollectionManagerController {
     const meme = this.membershipMeme;
     const error = this.error ? `<p class="form-error" role="alert">${escapeHtml(this.error)}</p>` : "";
     this.membershipDialog.innerHTML = `<form class="settings-shell membership-shell" data-membership-form>
-      <header class="settings-header"><div><p class="eyebrow">MEME COLLECTIONS</p><h2>加入牌组</h2><p>${meme ? escapeHtml(meme.title) : ""}</p></div><button class="icon-button" type="button" data-close-memberships>×</button></header>
+      <header class="settings-header"><div><p class="eyebrow">MEME COLLECTIONS</p><h2>加入牌组</h2><p>${meme ? escapeHtml(meme.title) : ""}</p></div><button class="icon-button" type="button" data-close-memberships aria-label="关闭牌组选择">×</button></header>
       ${error}${this.busy ? '<p class="status-line"><span class="spinner"></span>正在加载当前归属…</p>' : ""}
       <div class="membership-list">${!this.busy && !this.collections.length ? '<p class="collection-empty">还没有牌组，请先从顶部“牌组”入口创建。</p>' : this.collections.map(item => `<label><input type="checkbox" value="${item.id}" ${this.memberships.has(item.id) ? "checked" : ""}><span><strong>${escapeHtml(item.name)}</strong><small>${item.meme_count} 个 Meme</small></span></label>`).join("")}</div>
       <div class="form-actions"><button class="button button-ghost" type="button" data-close-memberships>取消</button><button class="button button-primary" type="submit" ${this.busy ? "disabled" : ""}>保存</button></div>

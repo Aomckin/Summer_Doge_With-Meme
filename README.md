@@ -2,9 +2,18 @@
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v1.0.0 Phase 2：普通管理模式继续使用 24/48/96 正式分页；Immersive Vault 已改为独立 Infinite Feed，通过 Sentinel 预加载后续批次并增量扩展 Free Gallery。Appearance、原图/GIF Focus Viewer 与正式冻结的 Meme Card Motion 系统继续保持原有边界。桌面端仍是主要管理终端。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0 Phase 2 已完成：在保留普通管理模式 24/48/96 正式分页和 Immersive Infinite Feed 的基础上，完成 App Shell、Design System、Library / Card、Inspector / Dialog、Immersive Polish，以及 States / Motion / Responsive 的六阶段整体视觉重构。Appearance、原图/GIF Focus Viewer 与正式冻结的 Meme Card Motion 系统继续保持原有边界；本轮没有重写业务 API、数据模型、Infinite Feed 或 Occupancy Grid 算法。桌面端仍是主要管理终端。
 
 继续开发前请依次阅读 [`docs/NEXT_CONVERSATION_HANDOFF.md`](docs/NEXT_CONVERSATION_HANDOFF.md)、[`docs/CODEBASE_STATUS.md`](docs/CODEBASE_STATUS.md) 和 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。前者是当前交接入口，后两者分别描述已落地代码和长期路线。
+
+## v1.0 Phase 2 视觉重构
+
+- App Shell 将 Search、Add / Upload 和 Immersive 设为主要入口；Random、Download、Appearance 降为次级操作，API、模板、标签与高级管理工具集中到二级菜单。
+- 全站统一 Typography、Spacing、Radius、Surface、Border、Shadow、Button、Input、Motion 与 Easing Tokens，并继续由 Appearance Variables 提供动态背景材质。
+- Library 使用轻量筛选工具栏、可横向溢出的 Template / Tag Chips、使用数量和统一视图控制；Meme Card 保持 Content-first，并复用既有 Physics。
+- Inspector 改为 Preview、内容、Metadata、Actions 和 Danger Zone 的详情层级；Dialog、Popover、Backdrop 与危险操作使用统一视觉语言。
+- Immersive Dock、Focus Viewer、Infinite Loading / End State 完成视觉统一，Free Gallery、GIF、原图与 Infinite Feed 行为保持不变。
+- Loading、Empty、Error、Toast、Disabled、Keyboard Focus、Reduced Motion、动态背景对比度及主要响应式断点获得统一处理。
 
 ## External Meme API
 
@@ -174,7 +183,7 @@ Luna 导入不再区分 dry-run 与 apply，也不会直接修改 Meme；所有�
 
 ## TypeScript 前端
 
-- 顶部工具栏提供标题/描述搜索、API 设置、模板管理、标签管理、元数据整理、场景召唤、宝库巡检、随机抽取和统一的“图片上传”入口。
+- App Shell 直接提供 Search、图片上传和 Immersive 核心入口；Random、批量下载与 Appearance 保留低权重直达入口，API 设置、模板、标签、元数据整理、场景召唤、宝库巡检等低频管理能力集中在二级菜单，原功能仍可访问。
 - 左侧资料库使用服务端正式分页，显示筛选后的总数和总页数，并支持首页、末页、上一页、下一页、数字页码与输入页码跳转。
 - 每页可显示 24、48 或 96 个 Meme，默认 24；卡片可切换超大、大、中、小四档响应式瀑布流密度。超大卡片直接显示原图，其余档使用缩略图。两项偏好保存在浏览器本地，卡片大小变化不会重新请求列表数据。
 - 资料库可在默认顺序与稳定随机顺序间切换；同一乱序种子可连续翻页，点击“重新洗牌”会生成新排列。顶部“随机一个”仍只抽取单个 Meme。

@@ -43,7 +43,7 @@ export class BatchDownloadController {
     this.dialog.dataset.batchDownloadDialog = "";
     this.dialog.innerHTML = `
       <form class="modal-card batch-download-card" data-export-form>
-        <div class="modal-heading"><div><p class="eyebrow">BATCH EXPORT</p><h2>批量下载</h2></div><button class="icon-button" type="button" data-close-export>×</button></div>
+        <div class="modal-heading"><div><p class="eyebrow">BATCH EXPORT</p><h2>批量下载</h2></div><button class="icon-button" type="button" data-close-export aria-label="关闭批量下载">×</button></div>
         <fieldset data-export-settings>
           <legend>导出范围</legend>
           <label><input type="radio" name="scope" value="all" checked> 全部 Meme</label>

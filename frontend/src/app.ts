@@ -141,6 +141,7 @@ import {
 import { MemeMakerController, type MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 import { installSearchableTemplateSelectors } from "./searchable-template-select";
+import { AppShellController } from "./app-shell";
 import {
   applyCardMotionPreset,
   isCardMotionPresetName,
@@ -437,6 +438,11 @@ export class MemeVaultApp {
     private readonly api: MemeApi = defaultApi,
   ) {
     this.elements = mountShell(root);
+    new AppShellController({
+      root: this.elements.appRoot,
+      searchInput: this.elements.searchInput,
+      managementMenu: this.elements.managementMenu,
+    });
     this.appearance = new AppearanceController({
       backgroundElement: this.elements.appearanceBackground,
     });
@@ -844,6 +850,17 @@ export class MemeVaultApp {
     this.elements.listStatus.addEventListener("click", (event) => {
       const target = event.target as Element;
       if (target.closest("[data-retry-list]")) {
+        void this.reloadMemes();
+      } else if (target.closest("[data-empty-upload]")) {
+        this.elements.openUploadButton.click();
+      } else if (target.closest("[data-clear-library-filters]")) {
+        this.state.query = "";
+        this.state.selectedTags = [];
+        this.state.selectedTemplateId = null;
+        this.state.page = 1;
+        this.elements.searchInput.value = "";
+        renderTags(this.elements, this.state);
+        renderTemplateFilters(this.elements, this.state);
         void this.reloadMemes();
       }
     });

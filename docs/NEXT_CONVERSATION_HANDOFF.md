@@ -1,10 +1,10 @@
 # Meme Vault v1.0.0 Phase 2 交接说明
 
-> 当前交接基线：`c949834 feat: release Meme Vault v1.0 Phase 1`
+> 当前交接基线：v1.0 Phase 2 完成提交（当前 `HEAD`）
 >
-> 最后更新：2026-08-20
+> 最后更新：2026-08-21
 >
-> 目的：让新的开发对话不依赖旧聊天记录，也能安全地从 Phase 1 接入 Phase 2。
+> 目的：让新的开发对话不依赖旧聊天记录，也能从已完成的 Phase 2 安全接手。
 
 ## 1. 开始工作前的阅读顺序
 
@@ -20,15 +20,15 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 产品版本 | `v1.0.0 Phase 2` |
-| 基线提交 | `c949834` |
-| 当前分支 | `codex/v0.9.1-external-meme-api`（分支名早于实际产品版本） |
+| 基线提交 | v1.0 Phase 2 完成提交（当前 `HEAD`） |
+| 当前分支 | `codex/v1.0-phase2` |
 | 后端 | Python + FastAPI + SQLAlchemy + SQLite + Pillow |
 | 前端 | Vite + 原生 TypeScript + Vitest/jsdom |
 | 前端包版本 | `1.0.0` |
 | 主要部署形态 | 本地单进程、桌面管理端优先、可信局域网可访问 |
 | 文件存储 | 本地 `data/images`、`data/thumbnails` 等目录 |
 
-Phase 1 提交后没有创建 Git Tag，也没有推送远端。本轮按用户指令将当前成果提交到 `codex/v1.0-phase1`；仍未创建 Tag 或远端推送，正式发布前应由用户决定这些 Git 操作。
+Phase 2 完成提交没有创建 Git Tag，也没有推送远端。正式发布前应由用户决定这些 Git 操作。
 
 ## 3. Phase 1 最终交付面
 
@@ -88,11 +88,21 @@ Motion Preset
 
 Card Motion 自 Phase 1 起 Feature Freeze。Phase 2 只允许缺陷修复、性能优化和可访问性修复，不再增加新特效、新物理层或新的 transform 竞争者。
 
+### 3.6 Phase 2 整体视觉重构
+
+- App Shell 已完成 Primary / Secondary / Management 分级：Search、Upload、Immersive 是核心入口，Random、Download、Appearance 保留低权重直达，低频管理功能进入二级菜单。
+- Design System 已集中 Typography、Spacing、Radius、Surface、Border、Shadow、Button、Input、Motion 与 Easing Tokens，并继续兼容 Appearance 动态材质。
+- Library Header、Template / Tag Toolbar、Tag Count、视图控制和 Card 视觉状态已统一；Card Physics 没有重写或叠加新的 transform 系统。
+- Inspector 已按 Preview、内容、Metadata、Actions、Danger Zone 分组；Dialog、Popover、Backdrop 与危险操作使用统一层级。
+- Immersive Dock、Focus Viewer、Infinite Loading / End State 完成视觉 Polish，Free Gallery、Infinite Feed、GIF 与原图行为保持原边界。
+- Loading、Empty、Error、Toast、Disabled、Keyboard Focus、Reduced Motion、动态背景对比度和主要响应式断点集中处理。
+
 ## 4. 前端关键代码地图
 
 | 责任 | 文件 |
 | --- | --- |
 | App State、页面业务编排 | `frontend/src/app.ts` |
+| App Shell 操作分级与二级菜单 | `frontend/src/app-shell.ts` |
 | Shell 与 Meme Card Markup | `frontend/src/ui.ts` |
 | Card Preset / Lift / Tilt / Follow | `frontend/src/card-tilt.ts` |
 | Card Size Motion Multiplier | `frontend/src/card-motion-config.ts` |
@@ -108,6 +118,11 @@ Card Motion 自 Phase 1 起 Feature Freeze。Phase 2 只允许缺陷修复、性
 | Free Gallery 算法与 placement | `frontend/src/immersive/occupancy-grid.ts` |
 | Free Gallery 调参 UI | `frontend/src/immersive/layout-tuner.ts` |
 | Appearance 样式 | `frontend/src/styles/appearance.css` |
+| Design Tokens | `frontend/src/styles/tokens.css` |
+| App Shell 样式 | `frontend/src/styles/shell.css` |
+| Library / Card 样式 | `frontend/src/styles/library.css` |
+| Inspector / Dialog 样式 | `frontend/src/styles/inspector-dialog.css` |
+| System States / Responsive / Accessibility | `frontend/src/styles/states.css` |
 | Immersive / Focus / Free Gallery 样式 | `frontend/src/styles/immersive.css` |
 | 卡片基础样式与 Motion Variables | `frontend/src/styles/main.css` |
 
@@ -176,17 +191,18 @@ Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默
 
 更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
 
-## 8. Phase 2 当前主目标
+## 8. Phase 2 完成状态
 
-用户已明确选择 `Immersive Infinite Feed` 作为本轮唯一主目标，并已完成前端 MVP：
+Phase 2 的 Immersive Infinite Feed 与六阶段整体视觉重构均已完成并通过人工验收：
 
 - 普通 Vault 继续正式分页，Immersive 使用独立 Feed Collection。
 - Sentinel 以 `1000px` root margin 预加载下一批；loading guard、AbortController、generation、Error/Retry、Empty/End State 已落地。
 - 新 Card 只 append；旧 DOM、Occupancy placement 与 Reserved Empty Booth 不重建。
 - 新 Card 自动接入 Card Motion、Drunk Physics viewport registry、Original/GIF Media、Focus 和 Random。
 - Dock 已移除上一页/下一页；退出后恢复普通页数据。
+- App Shell、Design System、Library / Card、Inspector / Dialog、Immersive Polish 和 System States / Responsive 已依次完成。
 
-当前验证：TypeScript、Vite build、34 个 Vitest 文件 / 311 项测试通过；用户已手工完成 2000+ Meme 连续滚动性能测试并确认通过。
+Infinite Feed 性能验证：用户已手工完成 2000+ Meme 连续滚动并确认通过。Phase 2 最终门禁以本次完成提交记录为准。
 
 以下仍只是后续候选方向，不属于本轮 Scope：
 
@@ -211,12 +227,14 @@ Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默
 
 ## 10. 验证基线
 
-Phase 1 最后一次前端门禁：
+Phase 2 完成门禁：
 
 ```text
 TypeScript typecheck：通过
-Vitest：33 files / 307 tests passed
+Vitest：36 files / 334 tests passed
 Vite production build：通过
+Pytest：259 tests passed
+git diff --check：通过
 ```
 
 标准完整验证命令：
@@ -231,16 +249,16 @@ git diff --check
 
 生产页面由 FastAPI 托管 `frontend/dist`。前端源码变化后必须重新构建，单纯刷新浏览器不会更新旧产物。
 
-## 11. Phase 2 新对话建议起手式
+## 11. Phase 2 完成后的新对话建议起手式
 
 ```text
 请先阅读 README.md、docs/NEXT_CONVERSATION_HANDOFF.md、
 docs/CODEBASE_STATUS.md 和 docs/PROJECT_PLAN.md。
 
-当前基线是 c949834 / Meme Vault v1.0.0 Phase 1。
+当前基线是 Meme Vault v1.0.0 Phase 2 完成提交（当前 HEAD）。
 Card Motion 已 Feature Freeze；Immersive Focus 必须保留 Occupancy Grid
 临时脱离协议和多图/GIF 媒体生命周期。
 
-当前 Phase 2 只处理 Immersive Infinite Feed；MVP 已落地。
-2000+ 真实数据连续滚动性能验收已通过；下一轮先由用户确定新的唯一主目标，不顺手展开其他候选方向。
+Immersive Infinite Feed 与六阶段整体视觉重构均已完成；2000+ 真实数据连续滚动性能验收已通过。
+下一轮先由用户确定新的唯一主目标，不顺手展开其他候选方向。
 ```

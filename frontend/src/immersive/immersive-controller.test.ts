@@ -10,8 +10,6 @@ function fixture() {
     <button id="entry">沉浸浏览</button>
     <nav id="dock" data-visible="false">
       <input id="search">
-      <button id="previous">上一页</button>
-      <button id="next">下一页</button>
       <button id="random">随机</button>
       <button id="appearance">外观</button>
       <button id="exit">退出</button>
@@ -21,8 +19,6 @@ function fixture() {
     entryButton: document.querySelector<HTMLButtonElement>("#entry")!,
     dock: document.querySelector<HTMLElement>("#dock")!,
     searchInput: document.querySelector<HTMLInputElement>("#search")!,
-    previousButton: document.querySelector<HTMLButtonElement>("#previous")!,
-    nextButton: document.querySelector<HTMLButtonElement>("#next")!,
     randomButton: document.querySelector<HTMLButtonElement>("#random")!,
     appearanceButton: document.querySelector<HTMLButtonElement>("#appearance")!,
     exitButton: document.querySelector<HTMLButtonElement>("#exit")!,
@@ -30,12 +26,11 @@ function fixture() {
   };
   const callbacks: ImmersiveCallbacks = {
     getSearchValue: vi.fn(() => "Miku"),
-    getPagination: vi.fn(() => ({ page: 2, totalPages: 4, loading: false })),
     onSearch: vi.fn(),
-    onPreviousPage: vi.fn(),
-    onNextPage: vi.fn(),
     onRandom: vi.fn(),
     onOpenAppearance: vi.fn(() => elements.appearanceDialog.showModal()),
+    onEnter: vi.fn(),
+    onExit: vi.fn(),
     onLayoutChanged: vi.fn(),
   };
   const controller = new ImmersiveController(elements, callbacks, {
@@ -79,6 +74,8 @@ describe("ImmersiveController mode", () => {
     expect(elements.dock.inert).toBe(true);
     expect(callbacks.onSearch).not.toHaveBeenCalled();
     expect(callbacks.onRandom).not.toHaveBeenCalled();
+    expect(callbacks.onEnter).toHaveBeenCalledTimes(1);
+    expect(callbacks.onExit).toHaveBeenCalledTimes(1);
     expect(callbacks.onLayoutChanged).toHaveBeenCalledTimes(2);
   });
 
@@ -134,22 +131,6 @@ describe("ImmersiveController dock", () => {
     expect(callbacks.onRandom).toHaveBeenCalledTimes(1);
     expect(callbacks.onOpenAppearance).toHaveBeenCalledTimes(1);
     expect(elements.appearanceDialog.open).toBe(true);
-  });
-
-  it("provides minimal previous and next paging with boundary states", () => {
-    const { controller, elements, callbacks } = fixture();
-    controller.enter();
-    expect(elements.previousButton.disabled).toBe(false);
-    expect(elements.nextButton.disabled).toBe(false);
-    elements.previousButton.click();
-    elements.nextButton.click();
-    expect(callbacks.onPreviousPage).toHaveBeenCalledTimes(1);
-    expect(callbacks.onNextPage).toHaveBeenCalledTimes(1);
-
-    vi.mocked(callbacks.getPagination).mockReturnValue({ page: 1, totalPages: 1, loading: false });
-    controller.refreshPagination();
-    expect(elements.previousButton.disabled).toBe(true);
-    expect(elements.nextButton.disabled).toBe(true);
   });
 
   it("keeps a discoverable low-opacity dock on coarse pointers", async () => {

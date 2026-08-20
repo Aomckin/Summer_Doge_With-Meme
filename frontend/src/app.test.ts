@@ -2325,6 +2325,47 @@ describe("MemeVaultApp", () => {
     }).toEqual(before);
   });
 
+  it("appends immersive pages without replacing old cards or polluting the normal page", async () => {
+    localStorage.setItem("meme-vault.card-size", "extra-large");
+    const listMemePage = vi.fn(async ({ page }) => page === 1
+      ? memePage([makeMeme(1), makeMeme(2)], 48, 1)
+      : memePage([makeMeme(3), makeMeme(4)], 48, 2));
+    const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
+    await app.start();
+    const state = (app as unknown as { state: AppState }).state;
+    document.querySelector<HTMLButtonElement>("#open-immersive")?.click();
+    await Promise.resolve();
+
+    const firstItem = document.querySelector<HTMLElement>('[data-immersive-layout-id="1"]')!;
+    const firstPosition = firstItem.dataset.galleryCell;
+    const feed = (app as unknown as {
+      immersiveFeed: { loadNext(): Promise<void> };
+    }).immersiveFeed;
+    await feed.loadNext();
+    await Promise.resolve();
+
+    expect(document.querySelector('[data-immersive-layout-id="1"]')).toBe(firstItem);
+    expect(firstItem.dataset.galleryCell).toBe(firstPosition);
+    expect(document.querySelectorAll("[data-immersive-layout-id]")).toHaveLength(4);
+    expect(document.querySelector<HTMLImageElement>('[data-meme-id="4"] [data-card-image]')?.src)
+      .toContain("/media/thumbnails/stored-4.png");
+    expect(state.memes.map(meme => meme.id)).toEqual([1, 2]);
+    expect(document.querySelector("[data-immersive-previous]")).toBeNull();
+    expect(document.querySelector("[data-immersive-next]")).toBeNull();
+
+    document.querySelector<HTMLButtonElement>('[data-meme-id="4"] [data-open-meme]')?.click();
+    await Promise.resolve();
+    expect(document.documentElement.dataset.immersiveFocus).toBe("open");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    document.querySelector<HTMLButtonElement>("[data-exit-immersive]")?.click();
+    await Promise.resolve();
+    expect([...document.querySelectorAll<HTMLElement>("[data-meme-id]")].map(card => Number(card.dataset.memeId)))
+      .toEqual([1, 2]);
+  });
+
   it("uses immersive Random only to navigate the currently loaded cards", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const getRandomMeme = vi.fn().mockResolvedValue(makeMeme(99));
@@ -2335,14 +2376,13 @@ describe("MemeVaultApp", () => {
     const app = new MemeVaultApp(root(), api);
     await app.start();
     const state = (app as unknown as { state: AppState }).state;
+    document.querySelector<HTMLButtonElement>("#open-immersive")?.click();
     const cards = [...document.querySelectorAll<HTMLElement>("[data-meme-id]")];
     const scrolls = cards.map(card => {
       const scroll = vi.fn();
       card.scrollIntoView = scroll;
       return scroll;
     });
-
-    document.querySelector<HTMLButtonElement>("#open-immersive")?.click();
     document.querySelector<HTMLButtonElement>("[data-immersive-random]")?.click();
 
     expect(getRandomMeme).not.toHaveBeenCalled();

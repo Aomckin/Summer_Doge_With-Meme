@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 更新基线：v1.0.0 Phase 1 UX Debt Cleanup 与 Vault Inspector Upgrade（2026-08-18）。本文描述已经落地的代码，不是下一阶段需求。
+> 提交基线：`c949834`；当前工作树为 v1.0.0 Phase 2（2026-08-20）。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
 
 ## 当前能力
 
@@ -9,6 +9,10 @@
 - 动态 Template Selector 共享实时子串搜索；主资料库模板筛选也可即时搜索。
 - 宝库巡检支持全库或 ID Range Source Set、全局 SemanticIndex 候选、左右直接删除、Ignore、弱关联和 Merge。
 - GIF 复制会尝试将原始 `image/gif` 写入剪贴板；浏览器不支持时明确提示下载，不会转 PNG 冒充动画。
+- Appearance 提供五套预设、细粒度背景/面板参数和自定义背景图；设置写入 localStorage，背景资源写入 IndexedDB，切换后即时生效。
+- Immersive Vault 使用独立 Infinite Feed：Sentinel 在布局尾部提前请求下一批，新增 Card 只 append 到持续存在的 Free Gallery；Dock 不再提供前后翻页。Random 只在当前已加载集合漫游，原图/GIF 仍按视口升级，普通管理分页不受沉浸累计数据污染。
+- Immersive Focus Viewer 从原卡片位置连续放大；多图 Meme 在同一 Focus 卡片内按顺序滚动展示全部原图，关闭后恢复原 DOM 和原 Occupancy Grid 展位，不触发布局重载。
+- Meme Card Motion 支持关闭/微弱/普通/强烈/喝了假酒五档，组合 Card Size Multiplier、长宽比衰减、Lift、Tilt、Magnetic Follow 和单 rAF 假酒环境物理；多图卡片使用封面尺寸参与同一系统。
 
 - 本地 Meme 库：原图/复合图片组下载、持久化批量 ZIP 导出、单图 API、普通串行批量上传、持久化 ZIP 批量导入、缩略图、全局重复图片检测、搜索、标签筛选、随机查看、编辑、删除与正式分页浏览。
 - 复合 Meme：一个 Meme 包含一张或多张按零基 `position` 排序的图片；第一张是封面。
@@ -66,6 +70,11 @@ app/
   ai/              Responses、兼容 Chat、图像向量、预设与密钥处理
 frontend/
   src/app.ts       页面状态与交互编排
+  src/appearance/  Appearance 预设、状态、持久化和设置 UI
+  src/immersive/   Immersive 模式、Random、媒体加载、Focus、Free Gallery 与调参
+  src/card-tilt.ts Card Motion Preset、Lift/Tilt/Magnetic Follow 与绑定生命周期
+  src/drunk-physics.ts drunk 档单 rAF 环境物理
+  src/card-motion-config.ts Card Size translation / rotation multiplier
   src/meme-actions.ts 图片复制能力检测、读取、转换、剪贴板写入与轻反馈
   src/meme-maker.ts 模板加载、编辑状态、Preview 调度、PNG 导出与上传编排
   src/meme-maker-interaction.ts 坐标换算、顶层命中、pointer 拖动与左右 resize 状态机
@@ -434,3 +443,21 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - 主库 Meme Card 的最终动态层由 Motion Preset、Card Size Multiplier、Aspect Ratio 衰减、Lift/Tilt/Magnetic Follow，以及仅在“喝了假酒”档启用的 `DrunkPhysicsController` 组成。
 - 假酒物理使用单一 `requestAnimationFrame`、`IntersectionObserver` viewport-near 集合和每卡独立随机 phase/speed/amplitude；Hover 卡片降低环境层强度，触屏与 reduced-motion 不启用。
 - Card Motion 系统自此 Feature Freeze：后续只接受缺陷修复、性能优化和可访问性修复，不再增加新特效或新动态层。
+
+## v1.0.0 Appearance 与 Immersive Vault
+
+- Appearance 使用 `meme-vault:appearance:v1` 保存经过 sanitize 的设置；自定义背景资源存入 IndexedDB `meme-vault-appearance/assets`，Controller 负责 Object URL 生命周期。
+- Immersive 仍由 `data-vault-mode` 控制界面，但浏览集合已与普通分页隔离：普通模式保留 `state.memes` 当前页，`InfiniteFeedController` 独立维护 offset、loading、hasMore、error 与 generation，并通过 AbortController 丢弃旧筛选请求。
+- Infinite Feed 进入第一页时可复用已加载普通页；后续调用同一分页 API。新增 Card 统一追加到现有 DOM，Occupancy Grid 保留旧 placement 与 Reserved Empty Booth，媒体观察、Focus 事件委托、Card Motion/Drunk Physics 注册和 Random Pool 随新增 DOM 自动扩展。
+- Immersive Random 只从当前已加载 Meme 中定位 DOM，平滑滚动并短暂高亮；不请求后端 Random API，也不修改查询、筛选、排序或页码。
+- `ImmersiveMediaLoader` 通过 `IntersectionObserver` 升级 viewport 附近图片；静态图和 GIF 都使用原始资源，失败继续显示 thumbnail。
+- `ImmersiveFocusViewer` 移动真实卡片节点到 Focus Layer，保证空间连续性和封面 GIF 连续播放；多图其余媒体只在 Focus 期间创建。
+- Focus 打开前通过 `ImmersiveOccupancyGrid.beginTemporaryDetach()` 保留 placement，恢复 DOM 后调用 `endTemporaryDetach()`；禁止删掉这层协议，否则 MutationObserver 会把临时移动误判为删除并触发全局重排。
+
+## v1.0.0 Free Gallery 布局边界
+
+- Occupancy Grid 只负责 `.gallery-layout-item` 的位置、宽度和网格高度，不直接修改 `.meme-card` transform。
+- Density 影响候选搜索距离、安全间距和 Reserved Empty Region 概率；Card Size 仍是独立用户设置。
+- Free Gallery 调参保存在 `meme-vault.immersive-gallery-tuning`，六个维度分别为 density、whitespaceSize、horizontalFreedom、topContour、edgePadding、backgroundParticipation。
+- 新卡片使用增量 append，既有 placement 保持不变；卡片尺寸、调参或 viewport 宽度明确变化时才允许 rebuild。
+- 普通管理模式不读取 Free Gallery placement，Immersive 退出时会清除专属布局样式。

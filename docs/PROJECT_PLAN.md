@@ -510,7 +510,19 @@ Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供
 - [x] Preview、Export、Save 继续共用 Renderer；不新增后端模型/API/存储服务，不新增 npm/Python 依赖。
 - [x] 当前仍不支持旋转、滤镜、Sticker、GIF 编辑、自由蒙版、专业图层系统或可编辑工程保存。
 
-### v1.0：可公开访问版本
+### v1.0.0 Phase 2：Immersive Infinite Feed（已完成 MVP）
+
+- [x] 使用现有分页 API 和独立 Feed Collection，保持普通管理模式 24/48/96 分页不变。
+- [x] Sentinel 提前加载、loading guard、AbortController、generation、Error/Retry、Empty/End State。
+- [x] 新 Card 增量 append，保留旧 DOM、Occupancy placement 与 Reserved Empty Booth。
+- [x] 新 Card 自动接入 Card Motion、Drunk Physics、Original/GIF Media、Focus 与 Random。
+- [x] 移除 Immersive Dock 前后翻页；退出后恢复普通页且不受累计 Feed 污染。
+- [x] TypeScript、生产构建和 34 个 Vitest 文件 / 311 项测试通过。
+- [x] 用户手工完成 2000+ Meme 连续滚动性能验收并确认通过。
+
+### Phase 2 后续候选：可公开访问与部署能力（尚未排期）
+
+> v1.0.0 Phase 1 已作为本地桌面优先版本完成，Phase 2 Infinite Feed MVP 已落地。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
 
 - [ ] 用户系统、权限控制与分享链接
 - [ ] 网络上传入口和上传收件箱
@@ -560,7 +572,6 @@ data/thumbnails/*
 
 ## 11. 当前状态
 
-```text
 ### v0.6.4：Meme 牌组 / 收藏夹（已完成）
 
 - 新增 Collection / CollectionItem 多对多数据模型、CRUD、membership 同步和加入顺序。
@@ -617,8 +628,13 @@ data/thumbnails/*
 - [x] Vault Inspector 支持左右直接删除、Whole Vault / ID Range Source Set、全局索引候选、Pair 去重与既有 Ignore/弱关联语义。
 - [x] GIF Clipboard 仅在原始 `image/gif` 实际写入成功时报告成功，不支持时保留下载降级。
 - [x] 保持 Mobile Ingest、External Meme API 与现有语义调用链兼容。
+- [x] 完成可持久化 Appearance 预设、自定义背景和视觉参数系统。
+- [x] 完成 Immersive Vault、当前页随机漫游、前后翻页、原图/GIF 懒加载与 Focus Viewer。
+- [x] 完成 Free Gallery Occupancy Grid、六项可持久化调参及 Focus 临时脱离时的 placement 保持。
+- [x] 完成多图 Meme 沉浸式顺序浏览；封面节点复用，关闭后恢复原 DOM 且不重载布局。
+- [x] 完成五档 Card Motion、Card Size / Aspect Ratio 系数、Magnetic Follow 和 drunk 环境物理，并进入 Feature Freeze。
 
-当前状态：v1.0.0 Phase 1 已完成
+当前状态：v1.0.0 Phase 2 Infinite Feed MVP 已落地；最近提交基线仍为 Phase 1 commit `c949834`
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -627,5 +643,4 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：v0.9.2 Meme + Caption；本版本不提前实现 Caption 返回、MaiBot Plugin、登录、公网穿透或社交平台对接
-```
+下一步：由用户确定新的唯一主目标。当前不默认实现用户系统、公网部署、社交平台接入、虚拟化或新的卡片特效。

@@ -2,6 +2,7 @@ import type { AppState, MemeCardSize, MemeResponse } from "./types";
 import { buildPaginationTokens, clampPage } from "./pagination";
 import { memeCopySource } from "./meme-actions";
 import { bindMemeCardTilts, storedCardMotionPreset } from "./card-tilt";
+import type { InfiniteFeedState } from "./immersive/immersive-feed";
 
 export interface EditDraft {
   title: string;
@@ -37,6 +38,8 @@ export interface AppElements {
   browsingControls: HTMLElement;
   listStatus: HTMLElement;
   memeGrid: HTMLElement;
+  immersiveFeedStatus: HTMLElement;
+  immersiveFeedSentinel: HTMLElement;
   pagination: HTMLElement;
   detailPanel: HTMLElement;
   templateDialog: HTMLDialogElement;
@@ -52,8 +55,6 @@ export interface AppElements {
   appearanceContent: HTMLElement;
   immersiveDock: HTMLElement;
   immersiveSearchInput: HTMLInputElement;
-  immersivePreviousButton: HTMLButtonElement;
-  immersiveNextButton: HTMLButtonElement;
   immersiveRandomButton: HTMLButtonElement;
   immersiveAppearanceButton: HTMLButtonElement;
   immersiveTunerButton: HTMLButtonElement;
@@ -221,6 +222,8 @@ export function mountShell(root: HTMLElement): AppElements {
           </div>
           <div id="list-status" class="list-status" aria-live="polite"></div>
           <div id="meme-grid" class="meme-grid" data-card-size="medium"></div>
+          <div class="infinite-feed-status" data-infinite-feed-status aria-live="polite"></div>
+          <div class="infinite-feed-sentinel" data-infinite-feed-sentinel aria-hidden="true"></div>
           <nav id="library-pagination" class="pagination" aria-label="资料库分页"></nav>
         </section>
 
@@ -233,8 +236,6 @@ export function mountShell(root: HTMLElement): AppElements {
         <span aria-hidden="true">⌕</span>
         <input id="immersive-search-input" type="search" autocomplete="off" placeholder="搜索 Meme…" aria-label="在沉浸模式中搜索 Meme">
       </label>
-      <button class="immersive-dock-button" type="button" data-immersive-previous aria-label="上一页">上一页</button>
-      <button class="immersive-dock-button" type="button" data-immersive-next aria-label="下一页">下一页</button>
       <button class="immersive-dock-button" type="button" data-immersive-random aria-label="随机一个 Meme">随机</button>
       <button class="immersive-dock-button" type="button" data-immersive-appearance aria-label="打开外观设置">外观</button>
       <button class="immersive-dock-button" type="button" data-immersive-tuner aria-label="打开 Free Gallery 调参工具" aria-expanded="false">调参</button>
@@ -509,6 +510,8 @@ export function mountShell(root: HTMLElement): AppElements {
     browsingControls: required(root, "#browsing-controls"),
     listStatus: required(root, "#list-status"),
     memeGrid: required(root, "#meme-grid"),
+    immersiveFeedStatus: required(root, "[data-infinite-feed-status]"),
+    immersiveFeedSentinel: required(root, "[data-infinite-feed-sentinel]"),
     pagination: required(root, "#library-pagination"),
     detailPanel: required(root, "#detail-panel"),
     templateDialog: required(document, "#template-dialog"),
@@ -527,8 +530,6 @@ export function mountShell(root: HTMLElement): AppElements {
     appearanceContent: required(document, "#appearance-content"),
     immersiveDock: required(root, "#immersive-dock"),
     immersiveSearchInput: required(root, "#immersive-search-input"),
-    immersivePreviousButton: required(root, "[data-immersive-previous]"),
-    immersiveNextButton: required(root, "[data-immersive-next]"),
     immersiveRandomButton: required(root, "[data-immersive-random]"),
     immersiveAppearanceButton: required(root, "[data-immersive-appearance]"),
     immersiveTunerButton: required(root, "[data-immersive-tuner]"),
@@ -756,9 +757,10 @@ export function memeCardMarkup(
   cardSize: MemeCardSize,
   score?: number,
   showQuickActions = true,
+  preferThumbnail = false,
 ): string {
   const thumbnail = meme.thumbnail_url ?? meme.image_url;
-  const image = cardSize === "extra-large" ? meme.image_url : thumbnail;
+  const image = !preferThumbnail && cardSize === "extra-large" ? meme.image_url : thumbnail;
   const copySource = memeCopySource(meme);
   const isGif = copySource?.mime_type.toLowerCase().startsWith("image/gif") ?? false;
   const focusImages = meme.images?.length
@@ -890,6 +892,71 @@ export function renderLibrary(
     <button type="button" class="button button-ghost" data-page="${state.page + 1}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>下一页</button>
     <button type="button" class="button button-ghost" data-page="${state.totalPages}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>最后一页</button>
     <label>跳至页码 <input type="number" min="1" max="${Math.max(1, state.totalPages)}" inputmode="numeric" data-page-input ${disabled ? "disabled" : ""}></label>`;
+}
+
+export function renderImmersiveFeed(
+  elements: AppElements,
+  memes: readonly MemeResponse[],
+  selectedMemeId: number | null,
+  scores: Readonly<Record<number, number>> = {},
+): void {
+  const cardSize = (elements.memeGrid.dataset.cardSize as MemeCardSize | undefined) ?? "medium";
+  elements.memeGrid.innerHTML = memes.map(meme => memeCardMarkup(
+    meme,
+    meme.id === selectedMemeId,
+    cardSize,
+    scores[meme.id],
+    true,
+    true,
+  )).join("");
+  bindImageFallbacks(elements.memeGrid);
+  bindMemeCardTilts(elements.memeGrid);
+}
+
+export function appendImmersiveFeed(
+  elements: AppElements,
+  memes: readonly MemeResponse[],
+  selectedMemeId: number | null,
+  scores: Readonly<Record<number, number>> = {},
+): void {
+  if (!memes.length) return;
+  const cardSize = (elements.memeGrid.dataset.cardSize as MemeCardSize | undefined) ?? "medium";
+  const template = document.createElement("template");
+  template.innerHTML = memes.map(meme => memeCardMarkup(
+    meme,
+    meme.id === selectedMemeId,
+    cardSize,
+    scores[meme.id],
+    true,
+    true,
+  )).join("");
+  bindImageFallbacks(template.content);
+  elements.memeGrid.append(template.content);
+  bindMemeCardTilts(elements.memeGrid);
+}
+
+export function renderInfiniteFeedState(
+  elements: AppElements,
+  state: Readonly<InfiniteFeedState>,
+): void {
+  elements.immersiveFeedSentinel.hidden = !state.hasMore || Boolean(state.error)
+    || (state.offset === 0 && state.loading);
+  if (state.error) {
+    elements.immersiveFeedStatus.innerHTML = `
+      <span>${escapeHtml(state.error)}</span>
+      <button class="button button-secondary" type="button" data-retry-infinite-feed>重试</button>
+    `;
+  } else if (state.loading) {
+    elements.immersiveFeedStatus.innerHTML = state.offset
+      ? '<span class="status-line"><span class="spinner"></span>正在继续翻找 Meme…</span>'
+      : '<span class="status-line"><span class="spinner"></span>正在打开沉浸宝库…</span>';
+  } else if (state.offset === 0 && !state.hasMore) {
+    elements.immersiveFeedStatus.textContent = "这里暂时没有 Meme。";
+  } else if (!state.hasMore) {
+    elements.immersiveFeedStatus.textContent = "已经翻到底了";
+  } else {
+    elements.immersiveFeedStatus.textContent = "";
+  }
 }
 
 export function renderMemeCard(

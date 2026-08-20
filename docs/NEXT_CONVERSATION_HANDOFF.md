@@ -1,141 +1,246 @@
-# Meme Vault v0.3.3：下个对话交接说明
+# Meme Vault v1.0.0 Phase 2 交接说明
 
-> 历史说明：本文保留 v0.3.3 发布上下文。当前 v0.4.0 状态请以
-> [`V0.4_HANDOFF.md`](V0.4_HANDOFF.md) 和
-> [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
-
-> 目的：让新的 Codex 对话在不重读完整历史的情况下，快速恢复当前项目状态。
+> 当前交接基线：`c949834 feat: release Meme Vault v1.0 Phase 1`
 >
-> 最后更新：2026-07-29。本文以当前 `main` 为准；旧的 `docs/CODEBASE_STATUS.md` 有部分 v0.3.3 前的过期描述，不应作为模板视觉检索功能的依据。
+> 最后更新：2026-08-20
+>
+> 目的：让新的开发对话不依赖旧聊天记录，也能安全地从 Phase 1 接入 Phase 2。
 
-## 1. 当前交付状态
+## 1. 开始工作前的阅读顺序
 
-- 当前分支：`main`，工作区干净。
-- v0.3.3 功能的最新提交：`1af3ae5 fix: configure template visual retrieval models`。
-- 已推送 GitHub，并已发布正式版本 [v0.3.3](https://github.com/Aomckin/Summer_Doge_With-Meme/releases/tag/v0.3.3)。
-- v0.3.3 的核心目标已经落地：每个模板可选绑定 **一张** 原始参考图；AI 分析 Meme 时，应以参考图的视觉结构为主判断模板，而不是仅依赖自然语言描述。
+1. 本文：恢复版本基线、冻结边界、关键状态和接手步骤。
+2. [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md)：确认当前代码已经具备什么，以及主要调用链。
+3. [`PROJECT_PLAN.md`](PROJECT_PLAN.md)：了解长期路线；其中未勾选内容只是候选，不是自动授权的 Phase 2 Scope。
+4. 与具体任务直接相关的模块和测试。
 
-## 2. 已实现的模板视觉检索链路
+不要再使用旧的 v0.3.3 / v0.4 handoff 作为当前事实来源。它们只保留历史设计上下文。
+
+## 2. 当前版本基线
+
+| 项目 | 当前值 |
+| --- | --- |
+| 产品版本 | `v1.0.0 Phase 2` |
+| 基线提交 | `c949834` |
+| 当前分支 | `codex/v0.9.1-external-meme-api`（分支名早于实际产品版本） |
+| 后端 | Python + FastAPI + SQLAlchemy + SQLite + Pillow |
+| 前端 | Vite + 原生 TypeScript + Vitest/jsdom |
+| 前端包版本 | `1.0.0` |
+| 主要部署形态 | 本地单进程、桌面管理端优先、可信局域网可访问 |
+| 文件存储 | 本地 `data/images`、`data/thumbnails` 等目录 |
+
+Phase 1 提交后没有创建 Git Tag，也没有推送远端。本轮按用户指令将当前成果提交到 `codex/v1.0-phase1`；仍未创建 Tag 或远端推送，正式发布前应由用户决定这些 Git 操作。
+
+## 3. Phase 1 最终交付面
+
+### 3.1 管理与检索
+
+- 正式服务端分页固定为 24 / 48 / 96，默认 24。
+- 关键词框支持 `4496`、`#4496`、`Meme 4496`、`meme #4496` 精确打开 Meme 详情。
+- Tag 显示名与 `normalized_name` 规范身份分离；使用中 Tag 可事务性删除并触发派生数据失效。
+- Template Selector 和主库 Template Filter 支持实时大小写不敏感子串搜索。
+- Vault Inspector 支持 Whole Vault / ID Range Source Set、全局索引候选、Pair 去重、左右直接删除、Ignore、弱关联和 Merge。
+- GIF 剪贴板只在浏览器真实支持原始 GIF 写入时成功，否则明确降级到下载。
+
+### 3.2 Appearance
+
+- `frontend/src/appearance/` 独立维护预设、设置校验、持久化、背景资源和设置 UI。
+- 预设包括清爽、玻璃、亚克力、沉浸等既定风格；用户调节即时写入 CSS Variables。
+- 普通设置存入 localStorage；自定义背景 Blob 存入 IndexedDB，Object URL 由 Controller 管理和释放。
+- Appearance 只控制视觉变量，不改变 Meme 数据、筛选、分页或 Card Size。
+
+### 3.3 Immersive Vault
+
+- `ImmersiveController` 只切换 `document.documentElement.dataset.vaultMode`，不复制主资料库业务状态。
+- Dock 支持搜索、上一页、下一页、当前已加载集合随机漫游、Appearance、Free Gallery 调参和退出。
+- Immersive Random 不调用后端随机 API、不修改 selected Meme；它从当前已加载 Meme 中选取目标，平滑滚动并用非 transform 高亮。
+- Immersive Media Loader 通过 `IntersectionObserver` 只升级 viewport 附近的原图/GIF，失败保留缩略图。
+- Focus Viewer 移动真实 `.gallery-layout-item` 到独立高层，保留 GIF 播放连续性；Esc、点击自身或背景只关闭 Focus，不退出 Immersive。
+- 多图 Focus 使用卡片内的 inert `<template data-focus-media-manifest>`，打开后按顺序生成纵向原图序列，关闭时删除临时节点并恢复原封面节点。
+
+### 3.4 Free Gallery / Occupancy Grid
+
+- Immersive 使用确定性的 Occupancy Grid，而不是随机 `margin` / `translate` 撒卡片。
+- Density 改变候选位置偏好、安全间距和 Reserved Empty Region 概率，不通过偷偷修改卡片大小改变密度。
+- 调参项集中为：密度、留白大小、横向自由度、顶部轮廓、边缘留白、背景参与感。
+- 调参结果持久化；新增卡片走增量 append，已挂载卡片不应无故换位。
+- Focus Viewer 临时移出卡片前调用 `beginTemporaryDetach()`，恢复后调用 `endTemporaryDetach()`；该协议保证原 placement 不被误判为删除。
+
+### 3.5 Card Motion Feature Freeze
+
+最终动态层：
 
 ```text
-模板参考图上传
-  -> 本地保存原图和缩略图
-  -> 调用云端图像向量 API
-  -> 在 templates 保存向量 JSON 与向量模型标识
-
-分析 Meme
-  -> 用同一激活向量模型为待分析 Meme 生成向量
-  -> 只在模型标识相同的模板向量中计算余弦相似度
-  -> 取相似度最高的 Top-10（常量为 10）参考图
-  -> 将这 10 张模板缩略图连同文本候选传给图片分析模型
-  -> AI 仅从提供的模板候选中返回 template_id 或 null
-  -> 用户确认后才实际写入 Meme 模板归属
+Motion Preset
+× Card Size Multiplier
+× Aspect Ratio Multiplier
++ Lift / Tilt / Magnetic Follow
++ drunk 档环境物理
 ```
 
-关键原则：
+- 五档：关闭、微弱、普通、强烈、喝了假酒；默认普通并由 localStorage 持久化。
+- Card Size 的 translation multiplier：small `0.75`、medium `1`、large `1.5`、extra-large `2`。
+- Card Size 的 rotation multiplier：small `0.85`、medium `1`、large `1.2`、extra-large `1.35`。
+- 长宽比根据原始 width / height 连续衰减；极端长图保留 Lift，仅显著减弱 Tilt / Follow。
+- Magnetic Follow 使用目标值 + rAF lerp，回到静止后停止帧循环。
+- `DrunkPhysicsController` 只在 drunk 档启用，使用单一 rAF、viewport-near 集合和每卡独立 phase / speed / amplitude。
+- 多图 Meme 使用封面原始尺寸参与完整动态系统。
+- 触屏、coarse pointer 和 `prefers-reduced-motion: reduce` 继续禁用动态效果。
 
-- SHA-256 仅用于文件标识/缓存失效，不用于语义相似度。
-- 无参考图模板仍是合法的“描述分类模板”，例如“纯社交软件聊天截图”；它们以名称和描述作为候选，不被视觉相似度伪装成特定原图模板。
-- 本地不跑 CLIP 或其他向量模型；向量计算走远端 API，适合无 CUDA/AMD 显卡的环境。
-- 当前只支持每模板一张参考图。
+Card Motion 自 Phase 1 起 Feature Freeze。Phase 2 只允许缺陷修复、性能优化和可访问性修复，不再增加新特效、新物理层或新的 transform 竞争者。
 
-## 3. 用户实际配置步骤
+## 4. 前端关键代码地图
 
-1. 在前端点击 **API 设置** → **模型厂商** → **添加厂商**。
-2. 选择预设“阿里云百炼图像向量”，填入百炼 API Key，保持启用。
-3. 切到 **模型列表**，找到 `Multimodal Embedding V1`，点击 **用于模板视觉检索**。
-4. 原有 Qwen / OpenAI 视觉模型仍点击 **用于图片分析**；它与向量模型是两套独立的激活状态，不能互相替代。
-5. 打开模板管理，创建或编辑模板时选择“参考原图”并保存。上传成功会生成并持久化向量。
-
-常见误解：截图里标为“当前分析模型”的 Qwen3.6 Plus 不是向量模型；它负责最终看 Meme 和候选参考图。`multimodal-embedding-v1` 只负责把图片转换为向量、筛选 Top-10。
-
-## 4. 关键代码地图
-
-| 责任 | 位置 |
+| 责任 | 文件 |
 | --- | --- |
-| 模板参考图字段 | `app/models/template.py` |
-| 向量模型能力与激活状态 | `app/models/ai_settings.py` |
-| 旧 SQLite 自动补列 | `app/database.py` |
-| 参考图本地存储 | `app/storage/template_image_storage.py` |
-| 图像向量客户端（百炼） | `app/ai/embedding_client.py` |
-| 百炼向量预设 | `app/ai/presets.py` |
-| API 设置服务/独立激活逻辑 | `app/services/ai_settings_service.py` |
-| 模板图上传、删除和持久化 | `app/services/template_service.py`、`app/api/templates.py` |
-| 余弦排序与 Top-10 | `app/services/template_matching.py` |
-| 分析时组合视觉/文字模板候选 | `app/services/meme_service.py` |
-| 向视觉 LLM 发送参考缩略图 | `app/ai/client.py` |
-| 前端 API 设置 | `frontend/src/settings.ts`、`frontend/src/ui.ts`、`frontend/src/types.ts` |
-| 前端模板参考图上传 | `frontend/src/app.ts`、`frontend/src/api.ts`、`frontend/src/ui.ts` |
+| App State、页面业务编排 | `frontend/src/app.ts` |
+| Shell 与 Meme Card Markup | `frontend/src/ui.ts` |
+| Card Preset / Lift / Tilt / Follow | `frontend/src/card-tilt.ts` |
+| Card Size Motion Multiplier | `frontend/src/card-motion-config.ts` |
+| drunk 环境物理 | `frontend/src/drunk-physics.ts` |
+| Appearance 状态与 CSS 变量 | `frontend/src/appearance/appearance-controller.ts` |
+| Appearance 持久化 | `frontend/src/appearance/appearance-storage.ts` |
+| Appearance 预设 | `frontend/src/appearance/appearance-presets.ts` |
+| Immersive 模式与 Dock | `frontend/src/immersive/immersive-controller.ts` |
+| Immersive Infinite Feed 请求状态机 | `frontend/src/immersive/immersive-feed.ts` |
+| Immersive Random | `frontend/src/immersive/immersive-random.ts` |
+| 原图/GIF 懒加载 | `frontend/src/immersive/immersive-media.ts` |
+| Focus Viewer / 多图 Focus | `frontend/src/immersive/focus-viewer.ts` |
+| Free Gallery 算法与 placement | `frontend/src/immersive/occupancy-grid.ts` |
+| Free Gallery 调参 UI | `frontend/src/immersive/layout-tuner.ts` |
+| Appearance 样式 | `frontend/src/styles/appearance.css` |
+| Immersive / Focus / Free Gallery 样式 | `frontend/src/styles/immersive.css` |
+| 卡片基础样式与 Motion Variables | `frontend/src/styles/main.css` |
 
-重要配置和存储位置：
+每个上述核心模块都已有同目录或同名 `.test.ts`。修改前先读测试，新增行为要保持模块边界，不要把逻辑重新散回 `app.ts`。
 
-- 原始参考图：`data/template_images/`
-- 参考缩略图：`data/template_thumbnails/`
-- 静态访问前缀：`/media/template-images/`、`/media/template-thumbnails/`
-- API Key 加密密钥：`data/.ai_settings.key`（被 Git 忽略）
-- 数据库：默认 `data/meme_vault.db`（被 Git 忽略）
+## 5. 不得破坏的架构约束
 
-## 5. 最近修复（必须保留）
+### 5.1 Transform 分层
 
-提交 `1af3ae5` 修复了一个前后端契约遗漏：后端早已支持 `supports_image_embedding` 和 `is_embedding_active`，前端却没有显示/配置入口。
+- Occupancy Grid 只设置 wrapper 的绝对位置和 `--gallery-*`，不得写 Meme Card transform。
+- Lift / Tilt / Magnetic Follow 通过卡片 Motion Variables 合成。
+- drunk 环境层使用自己的变量，不直接覆盖 Hover transform。
+- Random Highlight 使用 outline / shadow / pseudo-element，不争夺 transform。
+- Focused Card 暂停卡片物理并由 Focus Layer 控制位置与尺寸。
 
-目前模型卡片会：
+### 5.2 Focus 临时脱离协议
 
-- 以“支持视觉”标识图片分析能力；
-- 以“模板视觉检索”标识图像向量能力；
-- 分别提供“用于图片分析”和“用于模板视觉检索”；
-- 支持 `DashScope 多模态向量`协议；
-- 在手动添加模型时可勾选“支持模板视觉检索向量”。
+Focus 打开时移动真实卡片节点，这一点用于保持 GIF 和空间连续性。任何重构都必须保留以下顺序：
 
-同时，禁用一个模型厂商会清除该厂商所有模型的 `is_active` 和 `is_embedding_active`，防止禁用的向量模型仍被误认为可用。
+```text
+记录原 rect / parent / sibling
+→ OccupancyGrid.beginTemporaryDetach(item)
+→ 移入 Focus Layer
+→ 查看
+→ 放回原 parent / sibling
+→ OccupancyGrid.endTemporaryDetach(item)
+```
 
-## 6. 已知缺口与后续优先项
+不能删除这套协议并依赖 MutationObserver 猜测，否则关闭 Focus 会重新生成整张 Free Gallery。
 
-以下是已经设计过、但当前实现仍未完整覆盖的事项；后续工作应先确认用户是否要做：
+### 5.3 多图与媒体生命周期
 
-1. **分析可用性反馈不完整**：向量模型未配置或调用失败时，`/api/memes/{id}/analyze` 会降级为文字候选，但前端没有明确显示“视觉模板匹配暂不可用”。
-2. **提示词缓存未真正实现**：设计文档提到稳定缓存键/响应缓存；当前客户端只按固定顺序传图，没有实际发送缓存键或记录缓存 token 用量。
-3. **模板参考图删除入口缺失**：后端已有 `DELETE /api/templates/{id}/reference-image` 和前端 API 函数，但模板管理界面没有明确的“移除参考图”按钮。再次选择文件并保存可覆盖参考图。
-4. **上传失败的文件清理**：`TemplateService.set_reference_image()` 中，图片写入后若向量 API 在事务保护之前失败，可能遗留新文件；应补原子性测试并在异常路径清理。
-5. **坏向量容错**：分析时若数据库已有损坏的 `reference_embedding_json`，目前可能使分析失败；更稳妥的行为是忽略坏向量，继续文字降级。
-6. **向量连通性测试入口**：API 设置目前的“测试”仍是提供商 `/models` 测试，不是实际 embedding endpoint 测试；如需更可靠的配置体验，应添加模型级 `test-embedding`。
+- 主库卡片仍只展示首图封面，不得把整组图片常驻到每张卡片 DOM。
+- 完整图片组来自 `MemeResponse.images`，顺序以 `position` 为准。
+- Focus manifest 必须保持 inert，不能在进入 Immersive 时一次性下载所有原图。
+- 封面 `<img>` 在 Focus 中复用；其余图片只在 Focus 期间创建并由 `ensureOriginal()` 升级。
+- 关闭 Focus 后必须回收临时图片节点；原图失败继续保留 thumbnail。
 
-不要把以上缺口误说成 v0.3.3 已完全具备的能力。
+### 5.4 状态与布局
 
-## 7. 验证基线与常用命令
+- 普通管理模式布局不得被 Immersive 专属参数污染。
+- Card Size 是用户明确状态；Density 不能通过间接修改 Card Size 实现。
+- Immersive Random 不修改搜索、标签、排序、页码或 selected Meme。
+- Free Gallery append 新 Meme 时不得移动已有 placement；只有明确的尺寸、调参或 viewport 宽度变化才允许 rebuild。
 
-v0.3.3 发布前已运行并通过：
+## 6. 浏览器持久化键
+
+| Key / Store | 内容 |
+| --- | --- |
+| `meme-vault.page-size` | 24 / 48 / 96 |
+| `meme-vault.card-size` | small / medium / large / extra-large |
+| `meme-vault.card-motion-preset` | off / subtle / normal / strong / drunk |
+| `meme-vault:appearance:v1` | Appearance JSON 设置 |
+| IndexedDB `meme-vault-appearance` / `assets` | 自定义背景资源 |
+| `meme-vault.immersive-gallery-tuning` | Free Gallery 六项调参 |
+
+Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默认值回退；不要直接复用旧 key 存入不兼容结构。
+
+## 7. 后端与数据边界
+
+- `MemeResponse.images` 是完整有序图片组；兼容字段 `image_url`、`thumbnail_url`、width / height 等继续投影自首图。
+- 图片二进制保存在本地文件系统，不进入 SQLite。
+- Meme / Tag / Template / 图片变化通过现有 Derived Data Invalidation 令语义派生数据失效；不要在普通写事务里直接调用外部 Provider。
+- External Meme API 面向可信局域网，不代表已有公网鉴权、速率限制或分享权限。
+- 当前没有用户系统、租户、对象存储、云数据库或多进程状态同步。
+
+更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
+
+## 8. Phase 2 当前主目标
+
+用户已明确选择 `Immersive Infinite Feed` 作为本轮唯一主目标，并已完成前端 MVP：
+
+- 普通 Vault 继续正式分页，Immersive 使用独立 Feed Collection。
+- Sentinel 以 `1000px` root margin 预加载下一批；loading guard、AbortController、generation、Error/Retry、Empty/End State 已落地。
+- 新 Card 只 append；旧 DOM、Occupancy placement 与 Reserved Empty Booth 不重建。
+- 新 Card 自动接入 Card Motion、Drunk Physics viewport registry、Original/GIF Media、Focus 和 Random。
+- Dock 已移除上一页/下一页；退出后恢复普通页数据。
+
+当前验证：TypeScript、Vite build、34 个 Vitest 文件 / 311 项测试通过；用户已手工完成 2000+ Meme 连续滚动性能测试并确认通过。
+
+以下仍只是后续候选方向，不属于本轮 Scope：
+
+- 用户系统、权限和分享链接。
+- 对象存储、数据库迁移、备份与部署。
+- 社交平台或聊天上下文接入。
+- Inspector 后台任务化、聚类或治理工具。
+- Forge 新一阶段，但不得默认扩张为专业图像编辑器。
+
+开始某个方向前必须先写清：目标、现有调用链、数据迁移、性能预算、可访问性、测试矩阵、Non-Goals 和回滚方式。不要因为长期计划中存在某个未勾选项就同时展开多个方向。
+
+## 9. 明确不应顺手扩大的 Scope
+
+- 不新增 Card Motion 特效。
+- 不把原生 TypeScript 前端顺手迁移到 React / Vue。
+- 不把 SQLite、本地文件系统或单进程 Job 系统静默替换为云服务。
+- 不把 Immersive Focus 改回普通 Modal。
+- 不让所有 Immersive 原图/GIF 一次性加载。
+- 不把多图 Meme 拆成多个独立 Meme，或把 ZIP Import 自动解释为复合 Meme。
+- 不把语义相似度解释为重复概率。
+- 不在没有迁移与备份方案时修改持久化 Schema。
+
+## 10. 验证基线
+
+Phase 1 最后一次前端门禁：
+
+```text
+TypeScript typecheck：通过
+Vitest：33 files / 307 tests passed
+Vite production build：通过
+```
+
+标准完整验证命令：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-# 88 passed
-
-npm.cmd --prefix frontend test
-# 35 passed
-
 npm.cmd --prefix frontend run typecheck
+npm.cmd --prefix frontend test
 npm.cmd --prefix frontend run build
+.\.venv\Scripts\python.exe -m pytest -q
 git diff --check
 ```
 
-开发启动时：
+生产页面由 FastAPI 托管 `frontend/dist`。前端源码变化后必须重新构建，单纯刷新浏览器不会更新旧产物。
 
-```powershell
-# 后端
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8002
-
-# 前端
-npm.cmd --prefix frontend run dev
-```
-
-注意 Vite 默认的 `BACKEND_TARGET` 可能是 `http://127.0.0.1:8000`；如果后端使用 8002，请在 `frontend/.env` 设定：
+## 11. Phase 2 新对话建议起手式
 
 ```text
-BACKEND_TARGET=http://127.0.0.1:8002
+请先阅读 README.md、docs/NEXT_CONVERSATION_HANDOFF.md、
+docs/CODEBASE_STATUS.md 和 docs/PROJECT_PLAN.md。
+
+当前基线是 c949834 / Meme Vault v1.0.0 Phase 1。
+Card Motion 已 Feature Freeze；Immersive Focus 必须保留 Occupancy Grid
+临时脱离协议和多图/GIF 媒体生命周期。
+
+当前 Phase 2 只处理 Immersive Infinite Feed；MVP 已落地。
+2000+ 真实数据连续滚动性能验收已通过；下一轮先由用户确定新的唯一主目标，不顺手展开其他候选方向。
 ```
-
-前端源码改动后要执行 `npm.cmd --prefix frontend run build`，FastAPI 托管的生产页面才会更新。
-
-## 8. 新对话建议起手式
-
-> 请先阅读 `docs/NEXT_CONVERSATION_HANDOFF.md`。项目当前在 `main`，已发布 v0.3.3。模板支持单张参考图和百炼图像向量 Top-10 检索；请先确认 API 设置中已分别配置图片分析模型与模板视觉检索模型。若继续开发，请优先处理本文“已知缺口与后续优先项”，并遵循测试先行。

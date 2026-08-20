@@ -4,8 +4,6 @@ export interface ImmersiveElements {
   entryButton: HTMLButtonElement;
   dock: HTMLElement;
   searchInput: HTMLInputElement;
-  previousButton: HTMLButtonElement;
-  nextButton: HTMLButtonElement;
   randomButton: HTMLButtonElement;
   appearanceButton: HTMLButtonElement;
   exitButton: HTMLButtonElement;
@@ -14,11 +12,10 @@ export interface ImmersiveElements {
 
 export interface ImmersiveCallbacks {
   getSearchValue(): string;
-  getPagination(): { page: number; totalPages: number; loading: boolean };
   onSearch(value: string): void;
-  onPreviousPage(): void;
-  onNextPage(): void;
   onRandom(): void;
   onOpenAppearance(): void;
+  onEnter?(): void;
+  onExit?(): void;
   onLayoutChanged?(): void;
 }

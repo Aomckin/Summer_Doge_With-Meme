@@ -64,10 +64,10 @@ export class ImmersiveController {
     this.elements.dock.setAttribute("aria-hidden", "false");
     this.elements.dock.inert = false;
     this.setSearchValue(this.callbacks.getSearchValue());
-    this.refreshPagination();
     this.showDock();
     this.elements.dock.focus({ preventScroll: true });
     this.elements.dock.blur();
+    this.callbacks.onEnter?.();
     this.callbacks.onLayoutChanged?.();
   }
 
@@ -81,6 +81,7 @@ export class ImmersiveController {
     this.elements.dock.dataset.visible = "false";
     this.elements.dock.setAttribute("aria-hidden", "true");
     this.elements.dock.inert = true;
+    this.callbacks.onExit?.();
     this.callbacks.onLayoutChanged?.();
     const restoreTarget = this.previousFocus?.isConnected
       ? this.previousFocus
@@ -124,12 +125,6 @@ export class ImmersiveController {
     }
   }
 
-  refreshPagination(): void {
-    const { page, totalPages, loading } = this.callbacks.getPagination();
-    this.elements.previousButton.disabled = loading || totalPages === 0 || page <= 1;
-    this.elements.nextButton.disabled = loading || totalPages === 0 || page >= totalPages;
-  }
-
   destroy(): void {
     this.abortController.abort();
     this.clearDockTimer();
@@ -147,16 +142,6 @@ export class ImmersiveController {
       this.showDock();
       this.callbacks.onRandom();
     }, { signal });
-    this.elements.previousButton.addEventListener("click", () => {
-      this.showDock();
-      this.callbacks.onPreviousPage();
-      this.refreshPagination();
-    }, { signal });
-    this.elements.nextButton.addEventListener("click", () => {
-      this.showDock();
-      this.callbacks.onNextPage();
-      this.refreshPagination();
-    }, { signal });
     this.elements.appearanceButton.addEventListener("click", () => {
       this.dockLocked = true;
       this.showDock();
@@ -173,7 +158,6 @@ export class ImmersiveController {
       this.searchTimer = setTimeout(() => {
         this.searchTimer = null;
         this.callbacks.onSearch(this.elements.searchInput.value);
-        this.refreshPagination();
       }, this.searchDelay);
     }, { signal });
     this.elements.searchInput.addEventListener("keydown", event => {
@@ -182,7 +166,6 @@ export class ImmersiveController {
       if (this.searchTimer) clearTimeout(this.searchTimer);
       this.searchTimer = null;
       this.callbacks.onSearch(this.elements.searchInput.value);
-      this.refreshPagination();
     }, { signal });
     this.elements.dock.addEventListener("pointerenter", () => {
       this.dockLocked = true;

@@ -1,8 +1,10 @@
-# Meme Vault v1.0.0 Phase 1
+# Meme Vault v1.0.0 Phase 2
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v1.0.0 Phase 1，集中清理日常维护 UX：Tag 展示名与规范身份分离、使用中 Tag 可安全删除、浏览上下文保持、模板搜索、Meme ID 精确跳转、24/48/96 分页、全库巡检与巡检内直接删除，以及 GIF 剪贴板能力探测。桌面端仍是主要管理终端。开发路线和进度见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。当前版本为 v1.0.0 Phase 2：普通管理模式继续使用 24/48/96 正式分页；Immersive Vault 已改为独立 Infinite Feed，通过 Sentinel 预加载后续批次并增量扩展 Free Gallery。Appearance、原图/GIF Focus Viewer 与正式冻结的 Meme Card Motion 系统继续保持原有边界。桌面端仍是主要管理终端。
+
+继续开发前请依次阅读 [`docs/NEXT_CONVERSATION_HANDOFF.md`](docs/NEXT_CONVERSATION_HANDOFF.md)、[`docs/CODEBASE_STATUS.md`](docs/CODEBASE_STATUS.md) 和 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。前者是当前交接入口，后两者分别描述已落地代码和长期路线。
 
 ## External Meme API
 

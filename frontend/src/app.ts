@@ -106,6 +106,9 @@ import {
   mountShell,
   openImageViewer,
   renderDetail,
+  appendImmersiveFeed,
+  renderImmersiveFeed,
+  renderInfiniteFeedState,
   renderLibrary,
   renderMemeCard,
   renderOperationError,
@@ -131,6 +134,10 @@ import { ImmersiveOccupancyGrid } from "./immersive/occupancy-grid";
 import { FreeGalleryLayoutTuner } from "./immersive/layout-tuner";
 import { ImmersiveMediaLoader } from "./immersive/immersive-media";
 import { ImmersiveFocusViewer } from "./immersive/focus-viewer";
+import {
+  InfiniteFeedController,
+  type InfiniteFeedPage,
+} from "./immersive/immersive-feed";
 import { MemeMakerController, type MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 import { installSearchableTemplateSelectors } from "./searchable-template-select";
@@ -371,6 +378,11 @@ function readableError(error: unknown): string {
   return "网络请求失败，请稍后重试。";
 }
 
+interface ImmersiveFeedEntry {
+  meme: MemeResponse;
+  score?: number;
+}
+
 function value(form: HTMLFormElement, name: string): string {
   const field = form.elements.namedItem(name);
   if (
@@ -404,6 +416,10 @@ export class MemeVaultApp {
   private readonly immersiveOccupancyGrid: ImmersiveOccupancyGrid;
   private readonly immersiveMedia: ImmersiveMediaLoader;
   private readonly immersiveFocus: ImmersiveFocusViewer;
+  private readonly immersiveFeed: InfiniteFeedController<ImmersiveFeedEntry>;
+  private immersiveFeedMemes: MemeResponse[] = [];
+  private immersiveFeedScores: Record<number, number> = {};
+  private normalPageNeedsReload = false;
   private readonly batchUpload: BatchUploadController;
   private readonly batchDownload: BatchDownloadController;
   private readonly captionLab: CaptionLabController;
@@ -441,6 +457,39 @@ export class MemeVaultApp {
         onAfterRestore: item => this.immersiveOccupancyGrid.endTemporaryDetach(item),
       },
     );
+    this.immersiveFeed = new InfiniteFeedController<ImmersiveFeedEntry>({
+      sentinel: this.elements.immersiveFeedSentinel,
+      pageSize: this.state.pageSize,
+      itemKey: entry => entry.meme.id,
+      loadPage: (page, pageSize, signal) => this.loadImmersivePage(page, pageSize, signal),
+      onReset: entries => {
+        this.immersiveFeedMemes = entries.map(entry => entry.meme);
+        this.immersiveFeedScores = Object.fromEntries(
+          entries.flatMap(entry => entry.score === undefined ? [] : [[entry.meme.id, entry.score]]),
+        );
+        renderImmersiveFeed(
+          this.elements,
+          this.immersiveFeedMemes,
+          this.state.selectedMeme?.id ?? null,
+          this.immersiveFeedScores,
+        );
+      },
+      onAppend: entries => {
+        const memes = entries.map(entry => entry.meme);
+        this.immersiveFeedMemes.push(...memes);
+        for (const entry of entries) {
+          if (entry.score !== undefined) this.immersiveFeedScores[entry.meme.id] = entry.score;
+        }
+        appendImmersiveFeed(
+          this.elements,
+          memes,
+          this.state.selectedMeme?.id ?? null,
+          this.immersiveFeedScores,
+        );
+      },
+      onStateChange: state => renderInfiniteFeedState(this.elements, state),
+      errorMessage: readableError,
+    });
     new FreeGalleryLayoutTuner(
       this.elements.immersiveTunerButton,
       this.elements.immersiveTunerPanel,
@@ -451,8 +500,6 @@ export class MemeVaultApp {
         entryButton: this.elements.openImmersiveButton,
         dock: this.elements.immersiveDock,
         searchInput: this.elements.immersiveSearchInput,
-        previousButton: this.elements.immersivePreviousButton,
-        nextButton: this.elements.immersiveNextButton,
         randomButton: this.elements.immersiveRandomButton,
         appearanceButton: this.elements.immersiveAppearanceButton,
         exitButton: this.elements.immersiveExitButton,
@@ -460,24 +507,19 @@ export class MemeVaultApp {
       },
       {
         getSearchValue: () => this.elements.searchInput.value,
-        getPagination: () => ({
-          page: this.state.page,
-          totalPages: this.state.totalPages,
-          loading: this.state.loadingList,
-        }),
         onSearch: value => this.submitImmersiveSearch(value),
-        onPreviousPage: () => { void this.goToPage(this.state.page - 1); },
-        onNextPage: () => { void this.goToPage(this.state.page + 1); },
         onRandom: () => {
           if (this.immersiveFocus.isOpen()) {
             void this.immersiveFocus.close().then(() => {
-              this.immersiveRandom.visit(this.state.memes);
+              this.immersiveRandom.visit(this.immersiveFeedMemes);
             });
           } else {
-            this.immersiveRandom.visit(this.state.memes);
+            this.immersiveRandom.visit(this.immersiveFeedMemes);
           }
         },
         onOpenAppearance: () => this.elements.openAppearanceButton.click(),
+        onEnter: () => this.startImmersiveFeed(),
+        onExit: () => this.immersiveFeed.stop(),
         onLayoutChanged: () => {
           if (document.documentElement.dataset.vaultMode === "immersive") {
             this.immersiveOccupancyGrid.activate();
@@ -486,6 +528,12 @@ export class MemeVaultApp {
             this.immersiveFocus.deactivate();
             this.immersiveMedia.deactivate();
             this.immersiveOccupancyGrid.deactivate();
+            if (this.normalPageNeedsReload) {
+              this.normalPageNeedsReload = false;
+              void this.reloadMemes();
+            } else {
+              renderLibrary(this.elements, this.state);
+            }
           }
           window.dispatchEvent(new Event("resize"));
         },
@@ -781,7 +829,8 @@ export class MemeVaultApp {
       if (download) return;
       const card = element.closest<HTMLElement>("[data-meme-id]");
       const id = Number(copy?.dataset.copyMeme ?? card?.dataset.memeId);
-      const meme = this.state.memes.find((item) => item.id === id);
+      const collection = this.immersive.isActive() ? this.immersiveFeedMemes : this.state.memes;
+      const meme = collection.find((item) => item.id === id);
       if (copy && meme) {
         event.stopPropagation();
         void copySourceWithFeedback(memeCopySource(meme), copy);
@@ -797,6 +846,11 @@ export class MemeVaultApp {
       if (target.closest("[data-retry-list]")) {
         void this.reloadMemes();
       }
+    });
+
+    this.elements.immersiveFeedStatus.addEventListener("click", event => {
+      if (!(event.target as Element).closest("[data-retry-infinite-feed]")) return;
+      void this.immersiveFeed.retry();
     });
     this.elements.browsingControls.addEventListener("change", (event) => {
       const target = event.target;
@@ -1209,7 +1263,6 @@ export class MemeVaultApp {
       this.editing,
       this.editDraft,
     );
-    this.immersive.refreshPagination();
     renderRelationDialog(this.elements, this.state);
   }
 
@@ -1447,6 +1500,11 @@ export class MemeVaultApp {
   }
 
   private async reloadMemes(scrollAfter = false): Promise<void> {
+    if (this.immersive.isActive()) {
+      this.normalPageNeedsReload = true;
+      await this.immersiveFeed.reset();
+      return;
+    }
     if (this.state.searchMode === "semantic" && !this.state.semanticSubmittedQuery) {
       this.state.memes = [];
       this.state.semanticScores = {};
@@ -1454,7 +1512,6 @@ export class MemeVaultApp {
       this.state.totalPages = 0;
       this.state.loadingList = false;
       renderLibrary(this.elements, this.state);
-      this.immersive.refreshPagination();
       return;
     }
     this.listController?.abort();
@@ -1464,7 +1521,6 @@ export class MemeVaultApp {
     this.state.listError = null;
     this.state.memes = [];
     renderLibrary(this.elements, this.state);
-    this.immersive.refreshPagination();
 
     try {
       const response = this.state.searchMode === "semantic"
@@ -1518,9 +1574,72 @@ export class MemeVaultApp {
       if (this.listController === controller) {
         this.state.loadingList = false;
         renderLibrary(this.elements, this.state);
-        this.immersive.refreshPagination();
       }
     }
+  }
+
+  private startImmersiveFeed(): void {
+    this.immersiveFeed.setPageSize(this.state.pageSize);
+    const canReuseFirstPage = this.state.page === 1
+      && !this.state.loadingList
+      && !this.state.listError;
+    const initial = canReuseFirstPage ? {
+      items: this.state.memes.map(meme => ({
+        meme,
+        score: this.state.searchMode === "semantic"
+          ? this.state.semanticScores[meme.id]
+          : undefined,
+      })),
+      total: this.state.totalMemes,
+      page: 1,
+      pageSize: this.state.pageSize,
+      totalPages: this.state.totalPages,
+    } satisfies InfiniteFeedPage<ImmersiveFeedEntry> : undefined;
+    this.immersiveFeed.start(initial);
+  }
+
+  private async loadImmersivePage(
+    page: number,
+    pageSize: number,
+    signal: AbortSignal,
+  ): Promise<InfiniteFeedPage<ImmersiveFeedEntry>> {
+    if (this.state.searchMode === "semantic") {
+      if (!this.state.semanticSubmittedQuery) {
+        return { items: [], total: 0, page: 1, pageSize, totalPages: 0 };
+      }
+      const response = await (this.api.semanticSearch ?? semanticSearch)({
+        query: this.state.semanticSubmittedQuery,
+        tags: this.state.selectedTags,
+        template_id: this.state.selectedTemplateId,
+        page,
+        page_size: pageSize as MemePageSize,
+        signal,
+      });
+      return {
+        items: response.items.map(item => ({ meme: item.meme, score: item.score })),
+        total: response.total,
+        page: response.page,
+        pageSize: response.page_size,
+        totalPages: response.total_pages,
+      };
+    }
+    const response = await this.api.listMemePage({
+      page,
+      pageSize: pageSize as MemePageSize,
+      q: this.state.query,
+      tags: this.state.selectedTags,
+      templateId: this.state.selectedTemplateId,
+      sort: this.state.listSort,
+      shuffleSeed: this.state.shuffleSeed,
+      signal,
+    });
+    return {
+      items: response.items.map(meme => ({ meme })),
+      total: response.total,
+      page: response.page,
+      pageSize: response.page_size,
+      totalPages: response.total_pages,
+    };
   }
 
   private submitImmersiveSearch(value: string): void {
@@ -1530,7 +1649,10 @@ export class MemeVaultApp {
       this.searchTimer = null;
     }
     if (this.state.searchMode === "semantic") {
-      void this.submitSemanticSearch();
+      this.state.semanticSubmittedQuery = value.trim();
+      this.state.page = 1;
+      this.normalPageNeedsReload = true;
+      void this.immersiveFeed.reset();
       return;
     }
     const query = value.trim();
@@ -1541,7 +1663,8 @@ export class MemeVaultApp {
     }
     this.state.query = query;
     this.state.page = 1;
-    void this.reloadMemes();
+    this.normalPageNeedsReload = true;
+    void this.immersiveFeed.reset();
   }
 
   private async submitSemanticSearch(): Promise<void> {

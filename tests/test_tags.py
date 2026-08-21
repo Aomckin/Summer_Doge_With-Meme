@@ -158,6 +158,86 @@ def test_filter_and_update_meme_tags(tag_context) -> None:
     assert [tag["name"] for tag in updated.json()["tags"]] == ["reaction"]
 
 
+def test_tag_mutation_updates_detail_counts_and_filters_immediately(
+    tag_context,
+) -> None:
+    app, _, _ = tag_context
+    meme = request(
+        app,
+        "POST",
+        "/api/memes",
+        files={"file": ("mixed-case.png", make_image_bytes("purple"), "image/png")},
+        data={"title": "Mixed-case tags"},
+    ).json()
+
+    added = request(
+        app,
+        "PATCH",
+        f"/api/memes/{meme['id']}",
+        json={"tags": ["Miku", "VoiceBank"]},
+    )
+    detail_after_add = request(app, "GET", f"/api/memes/{meme['id']}")
+    counts_after_add = request(app, "GET", "/api/tags")
+    filtered_after_add = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params=[("tags", "Miku"), ("tags", "VoiceBank")],
+    )
+
+    assert added.status_code == 200
+    assert [tag["name"] for tag in detail_after_add.json()["tags"]] == [
+        "Miku",
+        "VoiceBank",
+    ]
+    assert {
+        tag["name"]: tag["usage_count"] for tag in counts_after_add.json()
+    } == {"Miku": 1, "VoiceBank": 1}
+    assert filtered_after_add.json()["total"] == 1
+    assert [item["id"] for item in filtered_after_add.json()["items"]] == [
+        meme["id"]
+    ]
+
+    removed = request(
+        app,
+        "PATCH",
+        f"/api/memes/{meme['id']}",
+        json={"tags": ["VoiceBank"]},
+    )
+    detail_after_remove = request(app, "GET", f"/api/memes/{meme['id']}")
+    counts_after_remove = request(
+        app,
+        "GET",
+        "/api/tags",
+        params={"include_empty": "true"},
+    )
+    removed_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "Miku"},
+    )
+    retained_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "VoiceBank"},
+    )
+
+    assert removed.status_code == 200
+    assert [tag["name"] for tag in detail_after_remove.json()["tags"]] == [
+        "VoiceBank"
+    ]
+    assert {
+        tag["name"]: tag["usage_count"] for tag in counts_after_remove.json()
+    } == {"Miku": 0, "VoiceBank": 1}
+    assert removed_filter.json()["total"] == 0
+    assert retained_filter.json()["total"] == 1
+    assert [item["id"] for item in retained_filter.json()["items"]] == [
+        meme["id"]
+    ]
+
+
 def test_list_tags_usage_search_sort_and_empty_visibility(tag_context) -> None:
     app, session, _ = tag_context
     for index, (tags, color) in enumerate(
@@ -232,6 +312,21 @@ def test_rename_updates_every_meme_and_rejects_invalid_names(tag_context) -> Non
     assert conflict.status_code == 409
     assert "merge" in conflict.json()["detail"]
     assert too_long.status_code == 422
+    renamed_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "New Name"},
+    )
+    old_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "old"},
+    )
+    assert renamed_filter.json()["total"] == 2
+    assert {item["id"] for item in renamed_filter.json()["items"]} == set(meme_ids)
+    assert old_filter.json()["total"] == 0
     for meme_id in meme_ids:
         detail = request(app, "GET", f"/api/memes/{meme_id}").json()
         assert "New Name" in [tag["name"] for tag in detail["tags"]]
@@ -332,6 +427,24 @@ def test_merge_transfers_all_memes_and_validates_ids(tag_context) -> None:
     assert missing.status_code == 404
     assert merged.status_code == 200
     assert merged.json()["usage_count"] == 2
+    source_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "source"},
+    )
+    target_filter = request(
+        app,
+        "GET",
+        "/api/memes/page",
+        params={"tags": "target"},
+    )
+    assert source_filter.json()["total"] == 0
+    assert target_filter.json()["total"] == 2
+    assert {item["id"] for item in target_filter.json()["items"]} == {
+        first["id"],
+        second["id"],
+    }
     for meme_id in (first["id"], second["id"]):
         detail = request(app, "GET", f"/api/memes/{meme_id}").json()
         assert [tag["name"] for tag in detail["tags"]] == ["target"]

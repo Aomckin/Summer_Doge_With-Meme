@@ -861,6 +861,9 @@ describe("MemeVaultApp", () => {
       expect(state.selectedTags).toEqual(["reaction"]);
     });
     expect(api.mergeTag).toHaveBeenCalledWith(2, 3);
+    await vi.waitFor(() => expect(api.listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tags: ["reaction"] }),
+    ));
   });
 
   it("synchronizes selected filters after tag rename and empty-tag deletion", async () => {
@@ -883,6 +886,9 @@ describe("MemeVaultApp", () => {
       const state = (app as unknown as { state: AppState }).state;
       expect(state.selectedTags).toEqual(["kitty"]);
     });
+    await vi.waitFor(() => expect(api.listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tags: ["kitty"] }),
+    ));
 
     const state = (app as unknown as { state: AppState }).state;
     state.selectedTags = ["orphan"];
@@ -1005,6 +1011,8 @@ describe("MemeVaultApp", () => {
       tags: ["reaction"],
       template_id: null,
     });
+    expect(api.listTags).toHaveBeenCalledTimes(3);
+    expect(api.listMemes).toHaveBeenCalledTimes(3);
 
     button("删除").click();
     await vi.waitFor(() => {

@@ -1,8 +1,16 @@
-# Meme Vault v0.9.1 External Meme API
+# Meme Vault v1.0.0 External Meme API / 外部 Meme API
 
 该 API 面向可信局域网中的通用消费者，不绑定 MaiBot、QQ 或任何消息平台。以下
 URL 都是相对路径；消费者应把它们与 Meme Vault 的 Base URL（例如
 `http://192.168.1.20:8002`）拼接。接口不返回服务器磁盘路径。
+
+## Authentication / 认证
+
+External API（外部 API）是只读接口。开发兼容模式未启用 Access Gate（访问门禁）时，
+下方示例可以直接调用；配置 Visitor / Admin Access Gate（访客 / 管理员访问门禁）后，
+API 与私有媒体会沿用同源 Web Session（网页会话）认证边界。v1.0.0 尚未提供独立的
+Machine Access Key（机器访问密钥），因此不要把 Visitor Key（访客密钥）写入 URL、
+查询参数或长期运行的客户端脚本。
 
 ## Random Meme
 

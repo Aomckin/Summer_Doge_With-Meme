@@ -65,7 +65,7 @@ class MemeRepository:
             statement = (
                 statement.join(MemeTag)
                 .join(Tag)
-                .where(Tag.name.in_(normalized_tags))
+                .where(Tag.normalized_name.in_(normalized_tags))
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
@@ -103,7 +103,7 @@ class MemeRepository:
             statement = (
                 statement.join(MemeTag)
                 .join(Tag)
-                .where(Tag.name.in_(normalized_tags))
+                .where(Tag.normalized_name.in_(normalized_tags))
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
@@ -181,7 +181,7 @@ class MemeRepository:
         if normalized_tags:
             statement = (
                 statement.join(MemeTag).join(Tag)
-                .where(Tag.name.in_(normalized_tags))
+                .where(Tag.normalized_name.in_(normalized_tags))
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )
@@ -215,7 +215,7 @@ class MemeRepository:
             statement = (
                 statement.join(MemeTag)
                 .join(Tag)
-                .where(Tag.name.in_(normalized_tags))
+                .where(Tag.normalized_name.in_(normalized_tags))
                 .group_by(Meme.id)
                 .having(func.count(func.distinct(Tag.id)) == len(normalized_tags))
             )

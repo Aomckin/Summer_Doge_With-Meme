@@ -527,11 +527,24 @@ Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供
 - [x] Phase 6：统一 Loading / Empty / Error / Toast / Disabled，补齐 focus-visible、reduced motion、动态背景对比度和主要响应式断点。
 - [x] 六个阶段均经过人工视觉验收；最终 TypeScript、36 个 Vitest 文件 / 334 项测试、259 项 Pytest、生产构建与 `git diff --check` 全部通过。
 
-### Phase 2 后续候选：可公开访问与部署能力（尚未排期）
+### v1.0.0 Phase 3：Visitor / Admin Access Gate（已完成）
 
-> v1.0.0 Phase 2 已作为本地桌面优先版本完成，Infinite Feed 与六阶段整体视觉重构均已落地。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
+- [x] 使用独立 Visitor/Admin Key 换取 HttpOnly、SameSite Session，Key 不进入浏览器持久化或后续业务请求。
+- [x] 未认证只渲染 Access Gate，认证成功后才启动 Vault 数据加载；登录、退出与 Session 恢复无需刷新。
+- [x] 全量 API 分为 AUTH、READ、ADMIN_WRITE、ADMIN_SENSITIVE；401/403 语义统一。
+- [x] 私有原图、缩略图与模板媒体不能通过静态 URL 绕过认证；Swagger 与 Mobile Ingest 为 Admin Only。
+- [x] Visitor 保留正常浏览、搜索、Semantic、Similar、Random、Immersive、Infinite Feed、原图/GIF 与单图下载。
+- [x] Upload/Edit/Delete、Tag/Template/AI 管理、Batch/ZIP/Export 等前端隐藏且后端 Admin Only。
+- [x] 完成 CORS、Static Media、External API、错误信息与日志安全审计；端点矩阵独立落档。
+- [x] TypeScript、37 个 Vitest 文件 / 338 项测试、264 项 Pytest、生产构建与 `git diff --check` 通过。
 
-- [ ] 用户系统、权限控制与分享链接
+Phase 3 使用单进程内存 Session，服务重启会注销现有会话；没有引入用户数据库、OAuth、JWT、Redis、RBAC 权限树、复杂限流或 CAPTCHA。External API 当前使用 Web Session，机器客户端独立凭据仍待单独设计。
+
+### Phase 3 后续候选：公开访问与部署增强（尚未排期）
+
+> v1.0.0 Phase 3 已提供私人/小范围受邀访问边界。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
+
+- [ ] 用户账户系统、分享链接与机器客户端独立凭据
 - [ ] 网络上传入口和上传收件箱
 - [ ] 内容审核
 - [ ] 对象存储与数据库迁移
@@ -641,7 +654,7 @@ data/thumbnails/*
 - [x] 完成多图 Meme 沉浸式顺序浏览；封面节点复用，关闭后恢复原 DOM 且不重载布局。
 - [x] 完成五档 Card Motion、Card Size / Aspect Ratio 系数、Magnetic Follow 和 drunk 环境物理，并进入 Feature Freeze。
 
-当前状态：v1.0.0 Phase 2 Infinite Feed 与六阶段整体视觉重构均已完成；提交基线为当前 `HEAD`
+当前状态：v1.0.0 Phase 3 Visitor/Admin Access Gate、Session、全量 API/媒体权限审计与 Visitor 只读 UI 均已完成；提交基线为当前 `HEAD`
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -650,4 +663,4 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：由用户确定新的唯一主目标。当前不默认实现用户系统、公网部署、社交平台接入、虚拟化或新的卡片特效。
+下一步：由用户确定新的唯一主目标。当前不默认实现用户账户、分享 Token、机器 API 独立凭据、多进程 Session、公网部署、社交平台接入、虚拟化或新的卡片特效。

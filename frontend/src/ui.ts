@@ -3,6 +3,7 @@ import { buildPaginationTokens, clampPage } from "./pagination";
 import { memeCopySource } from "./meme-actions";
 import { bindMemeCardTilts, storedCardMotionPreset } from "./card-tilt";
 import type { InfiniteFeedState } from "./immersive/immersive-feed";
+import { probeAuthAfterMediaError } from "./api";
 
 export interface EditDraft {
   title: string;
@@ -852,6 +853,9 @@ function bindImageFallbacks(container: ParentNode): void {
     image.addEventListener("error", () => {
       image.hidden = true;
       image.parentElement?.classList.add("is-broken");
+      if (image.currentSrc.includes("/media/") || image.src.includes("/media/")) {
+        probeAuthAfterMediaError();
+      }
     });
   }
 }
@@ -1359,6 +1363,7 @@ export function renderDetail(
   draft: EditDraft | null,
 ): void {
   const meme = state.selectedMeme;
+  const isVisitor = document.documentElement.dataset.authRole === "visitor";
   if (!meme) {
     elements.detailPanel.innerHTML = `
       <div class="detail-empty">
@@ -1444,17 +1449,16 @@ export function renderDetail(
             <div class="detail-actions">
               ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-copy-detail>复制图片</button>' : '<button class="button button-secondary" type="button" data-open-viewer data-image-index="0">选择图片复制</button>'}
               <a class="button button-secondary" href="${escapeHtml(meme.image_url)}" target="_blank" rel="noopener noreferrer">打开原图</a>
-              <a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>
-              <button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button>
-              <button class="button button-secondary" type="button" data-edit-meme>编辑</button>
+              ${meme.image_count === 1 || !isVisitor ? `<a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>` : ""}
+              ${isVisitor ? "" : '<button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button><button class="button button-secondary" type="button" data-edit-meme>编辑</button>'}
             </div>
           </section>
           ${relatedMemesMarkup(state)}
           ${similarMemesMarkup(state)}
-          ${aiAnalysisMarkup(state)}
+          ${isVisitor ? "" : aiAnalysisMarkup(state)}
           <div data-caption-lab-host></div>
           ${detailError(state.actionError)}
-          <section class="detail-danger-zone">
+          ${isVisitor ? "" : `<section class="detail-danger-zone">
             <div>
               <strong>删除 Meme</strong>
               <span>此操作会同时删除资料记录与本地图片。</span>
@@ -1462,7 +1466,7 @@ export function renderDetail(
             <button class="button button-danger" type="button" data-delete-meme ${state.deleting ? "disabled" : ""}>
               ${state.deleting ? "正在删除…" : "删除"}
             </button>
-          </section>
+          </section>`}
         </div>
       </div>
     `;

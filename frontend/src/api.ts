@@ -390,6 +390,9 @@ async function requestJson<T>(
   init?: RequestInit,
 ): Promise<T> {
   const response = await fetch(path, init);
+  if (response.status === 401 && !path.startsWith("/api/auth/")) {
+    window.dispatchEvent(new CustomEvent("meme-vault:unauthorized"));
+  }
   if (!response.ok) {
     throw new ApiError(response.status, await errorMessage(response));
   }
@@ -428,6 +431,24 @@ export function listTags(options: ListTagsOptions = {}): Promise<TagResponse[]> 
   return requestJson<TagResponse[]>(`/api/tags${suffix}`, {
     signal: options.signal,
   });
+}
+
+let mediaAuthProbe: Promise<void> | null = null;
+
+export function probeAuthAfterMediaError(): void {
+  if (mediaAuthProbe) return;
+  mediaAuthProbe = fetch("/api/auth/me")
+    .then(async response => {
+      if (!response.ok) return;
+      const state = await response.json() as { authenticated?: boolean };
+      if (state.authenticated === false) {
+        window.dispatchEvent(new CustomEvent("meme-vault:unauthorized"));
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      mediaAuthProbe = null;
+    });
 }
 
 export function listMemePage(

@@ -1,8 +1,28 @@
-# Meme Vault v1.0.0 Phase 2
+# Meme Vault v1.0.0 Phase 3
+
+## Visitor / Admin Access
+
+Phase 3 增加统一 Access Gate。未认证用户只能看到钥匙输入页；Visitor 可以浏览、搜索、语义检索、沉浸浏览、查看原图/GIF 与下载单图；Admin 保留上传、编辑、删除、标签/模板/AI 设置、批量下载和导出等完整管理能力。前端隐藏只负责体验，后端会对未认证请求返回 `401`、对 Visitor 越权写操作返回 `403`。
+
+参考 [`.env.example`](.env.example)，在根目录 `.env`、shell 或部署环境中设置变量，并分别生成三个互不相关的长随机值。使用根目录 `.env` 时，通过 `uvicorn --env-file .env ...` 显式加载：
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+```env
+VISITOR_ACCESS_KEY=
+ADMIN_ACCESS_KEY=
+SESSION_SECRET=
+```
+
+三项必须同时配置，Visitor/Admin Key 不得相同。生产环境还应设置 `MEME_VAULT_ENV=production`：服务会在缺少密钥时 fail-fast，并为 Session Cookie 启用 `Secure`；公网入口必须使用 HTTPS。Access Key 只用于换取 HttpOnly、SameSite=Strict Session Cookie，不会存入 URL、localStorage 或 sessionStorage。不要提交 `.env` 或任何真实 Secret。
+
+未配置三项变量时，开发环境会明确警告并使用兼容模式，以便本机维护和既有测试；这不是公网部署配置。该权限模型面向私人/小范围受邀访问，不是大型 SaaS IAM、反爬或 DDoS 系统。完整端点审计见 [`docs/PHASE3_PERMISSION_AUDIT.md`](docs/PHASE3_PERMISSION_AUDIT.md)。
 
 Meme Vault 支持单图或按顺序组成的复合 Meme：首图作为瀑布流封面，详情页按顺序展示所有图片。完整 Meme 之间可手动建立双向、直接且不传递的弱关联；AI 分析会在一次请求中按顺序读取完整图片组。
 
-Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0 Phase 2 已完成：在保留普通管理模式 24/48/96 正式分页和 Immersive Infinite Feed 的基础上，完成 App Shell、Design System、Library / Card、Inspector / Dialog、Immersive Polish，以及 States / Motion / Responsive 的六阶段整体视觉重构。Appearance、原图/GIF Focus Viewer 与正式冻结的 Meme Card Motion 系统继续保持原有边界；本轮没有重写业务 API、数据模型、Infinite Feed 或 Occupancy Grid 算法。桌面端仍是主要管理终端。
+Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0 Phase 3 已完成：在 Phase 2 的 Infinite Feed 与整体视觉重构基础上，增加 Visitor / Admin Access Gate、不透明服务端 Session、全量 API 与静态媒体权限边界，以及 Visitor 只读 UI。Appearance、原图/GIF Focus Viewer、Infinite Feed、Occupancy Grid 与正式冻结的 Meme Card Motion 系统继续保持原有边界；本轮没有引入用户数据库、OAuth、JWT、Redis、复杂 RBAC 或限流系统。
 
 继续开发前请依次阅读 [`docs/NEXT_CONVERSATION_HANDOFF.md`](docs/NEXT_CONVERSATION_HANDOFF.md)、[`docs/CODEBASE_STATUS.md`](docs/CODEBASE_STATUS.md) 和 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)。前者是当前交接入口，后两者分别描述已落地代码和长期路线。
 
@@ -14,6 +34,16 @@ Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0
 - Inspector 改为 Preview、内容、Metadata、Actions 和 Danger Zone 的详情层级；Dialog、Popover、Backdrop 与危险操作使用统一视觉语言。
 - Immersive Dock、Focus Viewer、Infinite Loading / End State 完成视觉统一，Free Gallery、GIF、原图与 Infinite Feed 行为保持不变。
 - Loading、Empty、Error、Toast、Disabled、Keyboard Focus、Reduced Motion、动态背景对比度及主要响应式断点获得统一处理。
+
+## v1.0 Phase 3 Visitor / Admin Access Gate
+
+- 未认证状态只渲染 Access Gate；前端先调用 `GET /api/auth/me`，认证成功后才启动 Vault 数据加载。
+- `POST /api/auth/login` 使用 Visitor/Admin Key 换取不透明 Session Cookie；Key 不进入 URL、localStorage、sessionStorage 或后续请求头。
+- Session 只保存 `visitor` / `admin` Role，Cookie 使用 HttpOnly 与 SameSite=Strict；生产模式启用 Secure。
+- Visitor 可浏览、搜索、Semantic、Similar、Random、Immersive、Infinite Feed、原图/GIF、Focus Viewer及单图下载。
+- Upload、Edit、Delete、Tag/Template/AI 管理、批量 ZIP/Export、Mobile Ingest 与 Swagger 为 Admin Only。
+- `/media/images`、`/media/thumbnails` 和模板媒体均经过认证中间件，不能通过已知裸 URL 绕过权限。
+- 完整端点矩阵、CORS、Static Media、Swagger 与 External API 审计见 [`docs/PHASE3_PERMISSION_AUDIT.md`](docs/PHASE3_PERMISSION_AUDIT.md)。
 
 ## External Meme API
 
@@ -32,7 +62,7 @@ Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0
 
 ```powershell
 npm.cmd --prefix frontend run build
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8000
 ```
 
 手机与电脑接入同一可信局域网后，在手机浏览器访问 `http://电脑的局域网IPv4:8000/mobile`。页面支持从系统相册多选 JPG/JPEG、PNG、WebP 和 GIF，按顺序逐张调用现有 `POST /api/memes` 入库；上传期间显示处理进度，完成后分别汇总成功数、失败数和失败文件名。“继续投喂”会清空本轮状态并开始下一轮。
@@ -115,7 +145,7 @@ npm.cmd --prefix frontend install
 分别在两个终端启动后端与 Vite 开发服务器：
 
 ```powershell
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --reload --host 0.0.0.0 --port 8000
 ```
 
 ```powershell
@@ -138,7 +168,7 @@ BACKEND_TARGET=http://127.0.0.1:8000
 
 ```powershell
 npm.cmd --prefix frontend run build
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8000
 ```
 
 `build` 会先执行 `tsc --noEmit` 类型检查，再执行 Vite 构建。只有 `frontend/dist/index.html` 存在时，FastAPI 才会在根路径托管网页；没有构建产物时，后端 API 仍可独立启动。
@@ -253,7 +283,7 @@ $env:OPENAI_BASE_URL = "https://api.openai.com/v1"
 $env:AI_TIMEOUT_SECONDS = "30"
 ```
 
-默认回退模型面向低成本图片整理任务，可通过 `OPENAI_MODEL` 替换。应用不会自动读取 `.env`，可复制 [`.env.example`](.env.example) 后由终端或部署环境注入；真实密钥不得提交到 Git。
+默认回退模型面向低成本图片整理任务，可通过 `OPENAI_MODEL` 替换。应用不会隐式读取 `.env`，请使用 `uvicorn --env-file .env` 或由终端/部署环境注入；真实密钥不得提交到 Git。
 
 内置预设参考厂商官方文档，并可通过在线刷新获取账号当前可用的模型：
 
@@ -410,7 +440,7 @@ Meme 响应使用有序 `images` 和 `image_count` 表示完整图片组；兼�
 $env:DATABASE_URL = "sqlite:///data/custom.db"
 ```
 
-项目提供了 [`.env.example`](.env.example) 作为变量示例，但应用不会自动读取 `.env`；请通过终端或部署环境设置变量。
+项目提供了 [`.env.example`](.env.example) 作为变量示例；根目录 `.env` 通过 `uvicorn --env-file .env` 加载，也可以由终端或部署环境设置变量。
 
 ## 项目结构
 

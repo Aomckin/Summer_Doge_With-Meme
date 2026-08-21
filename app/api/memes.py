@@ -307,6 +307,8 @@ def download_meme(meme_id: int, request: Request, service: ServiceDependency):
     except MemeFileMissingError as error:
         raise HTTPException(410, str(error)) from error
     images = list(meme.images)
+    if len(images) > 1 and getattr(request.state, "auth_role", "admin") != "admin":
+        raise HTTPException(403, "Admin access required for multi-image downloads")
     if len(images) == 1:
         image = images[0]
         filename = safe_download_filename(

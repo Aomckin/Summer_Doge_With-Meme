@@ -1,10 +1,11 @@
 # Meme Vault 代码现状速览
 
-> 提交基线：v1.0.0 Phase 2 完成提交（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
+> 提交基线：v1.0.0 Phase 3 完成提交（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
 
 ## 当前能力
 
 - v1.0 Phase 2 整体视觉重构已完成：App Shell 建立 Primary / Secondary / Management 信息层级；统一 Design Tokens、Typography、Radius、Surface、Button、Input、Border、Shadow 和 Motion；Library / Card、Inspector / Dialog、Immersive、系统状态、响应式与可访问性使用同一套安静、内容优先的视觉语言。
+- v1.0 Phase 3 Visitor/Admin Access Gate 已完成：Access Key 只换取不透明 Session；业务 API、私有媒体和 Swagger 统一鉴权；Visitor 保留完整浏览与单图下载，mutation、批量导出和管理能力仅限 Admin。
 - Tag 使用显示名 + `normalized_name` 双字段；大小写不敏感去重但保留 UI 大小写，使用中的 Tag 可事务性强制删除并令受影响语义数据过期。
 - 主资料库支持 `#4496`、`Meme 4496` 等 ID 精确跳转和 24/48/96 分页。
 - 动态 Template Selector 共享实时子串搜索；主资料库模板筛选也可即时搜索。
@@ -43,7 +44,7 @@
 
 ## 明确尚未实现
 
-- 尚未实现自动聊天记录解析、聊天平台接入、统一自由图层、图片与文字交叉排序、旋转/蒙版/滤镜、GIF 制作、用户系统、分享权限或云端对象存储。
+- 尚未实现自动聊天记录解析、聊天平台接入、统一自由图层、图片与文字交叉排序、旋转/蒙版/滤镜、GIF 制作、用户账户系统、分享 Token、机器 API 独立凭据或云端对象存储。
 - 弱关联没有方向、原因、分组、强弱类型、传递推断或 AI 自动创建。
 - ZIP 导入逐项创建独立 Meme，不组成复合 Meme；批量导出查询后端完整范围，不依赖前端分页。
 - 巡检不提供自动判断、全库后台 Job、聚类、像素差异、Merge Undo 或 Ignore 管理器；语义相似度不等于重复概率。
@@ -408,7 +409,7 @@ v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补�
 - Collection 与 Tag 职责独立：Tag 描述内容语义/分类，Collection 表达用户的私有组织与快捷取用。
 - Collection membership 不参与 Meme `source_hash`，不会触发 Embedding stale，也不属于 Enrichment Suggestion。
 - Meme Merge 在同一事务内迁移 Source membership：Target 已在牌组时保留 Target 原位置并删除重复项；仅 Source 在牌组时把原 Item 改指向 Target，尽量保留原 position。
-- v0.6.4 未实现拖拽排序、智能牌组、AI 推荐、权限、分享或云同步。
+- v0.6.4 未实现拖拽排序、智能牌组、AI 推荐、分享或云同步；Phase 3 的 Vault 级 Visitor/Admin 权限不改变 Collection 数据模型。
 
 Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
 
@@ -465,6 +466,17 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前
 - Inspector 使用内容详情层级呈现 Preview、标题、描述、Tag、Metadata、Actions 与 Danger Zone；Dialog、Popover、Backdrop、Icon Button 和危险操作获得统一样式。
 - Immersive Dock、Focus Dim / Outline / Shadow、Infinite Loading 与 Feed End State 完成 Polish；Infinite Feed、Occupancy Grid、Focus 临时脱离协议、原图/GIF 生命周期均未改写。
 - Loading、Empty、Error、Toast、Disabled、`focus-visible`、`prefers-reduced-motion`、forced colors、动态背景对比度和主要响应式断点集中在系统状态层。
+
+## v1.0.0 Phase 3 Visitor / Admin Access Gate
+
+- `app/auth.py` 提供 `AuthSettings`、不透明签名 Session、`POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout` 与集中权限策略。
+- `create_app(auth_settings=...)` 允许正式应用从环境启用认证，同时保留测试/未配置开发兼容模式；生产模式缺失三项 Secret 会 fail-fast。
+- `/api/*` 默认需要认证，非 GET mutation 默认 Admin Only；Semantic Search 与 Chat Recommendation 的 POST 明确作为只读检索例外。
+- Export/Import/Embedding/Enrichment/AI Settings/Collections/Similarity Inspection、Mobile Ingest 与 OpenAPI 文档全部 Admin Only。
+- `/media/images`、`/media/thumbnails`、`/media/template-images`、`/media/template-thumbnails` 统一受 Session 保护。
+- 前端 `auth.ts` 在创建 `MemeVaultApp` 前完成身份恢复；`api.ts` 对业务 401 和媒体认证失效发送统一回门事件。
+- Visitor UI 隐藏 Admin-only Header、Management、Inspector mutation、Caption mutation、Relation mutation、Forge 与复合 ZIP；单图复制、原图和单图下载保留。
+- 完整端点矩阵及安全审计见 [`PHASE3_PERMISSION_AUDIT.md`](PHASE3_PERMISSION_AUDIT.md)。
 
 ## v1.0.0 Free Gallery 布局边界
 

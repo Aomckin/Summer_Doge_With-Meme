@@ -148,6 +148,7 @@ import {
   saveCardMotionPreset,
   storedCardMotionPreset,
 } from "./card-tilt";
+import { capabilitiesFor, type Capabilities } from "./auth";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -436,6 +437,7 @@ export class MemeVaultApp {
   constructor(
     root: HTMLElement,
     private readonly api: MemeApi = defaultApi,
+    private readonly capabilities: Capabilities = capabilitiesFor("admin"),
   ) {
     this.elements = mountShell(root);
     new AppShellController({
@@ -947,6 +949,7 @@ export class MemeVaultApp {
       void this.randomize();
     });
     this.elements.openUploadButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
       this.batchUpload.open(
         this.state.availableTemplates,
         this.state.availableTags,
@@ -973,6 +976,7 @@ export class MemeVaultApp {
       void this.submitTemplate();
     });
     this.elements.openDownloadButton.addEventListener("click", () => {
+      if (!this.capabilities.canBatchDownload) return;
       this.batchDownload.open({
         query: this.state.query,
         tags: this.state.selectedTags,
@@ -1039,12 +1043,15 @@ export class MemeVaultApp {
         const button = target.closest<HTMLButtonElement>("[data-copy-detail]");
         if (meme && button) void copySourceWithFeedback(memeCopySource(meme), button);
       } else if (target.closest("[data-edit-meme]")) {
+        if (!this.capabilities.canWrite) return;
         this.beginEdit();
       } else if (target.closest("[data-manage-meme-collections]")) {
+        if (!this.capabilities.canWrite) return;
         if (this.state.selectedMeme) void this.collectionManager.openMembership(this.state.selectedMeme);
       } else if (target.closest("[data-cancel-edit]")) {
         this.cancelEdit();
       } else if (target.closest("[data-delete-meme]")) {
+        if (!this.capabilities.canWrite) return;
         void this.removeSelected();
       } else if (target.closest("[data-analyze-meme]")) {
         void this.analyzeSelected();

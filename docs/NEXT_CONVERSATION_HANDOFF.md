@@ -1,16 +1,16 @@
-# Meme Vault v1.0.0 Phase 2 交接说明
+# Meme Vault v1.0.0 Phase 3 交接说明
 
-> 当前交接基线：v1.0 Phase 2 完成提交（当前 `HEAD`）
+> 当前交接基线：v1.0 Phase 3 完成提交（当前 `HEAD`）
 >
 > 最后更新：2026-08-21
 >
-> 目的：让新的开发对话不依赖旧聊天记录，也能从已完成的 Phase 2 安全接手。
+> 目的：让新的开发对话不依赖旧聊天记录，也能从已完成的 Phase 3 安全接手。
 
 ## 1. 开始工作前的阅读顺序
 
 1. 本文：恢复版本基线、冻结边界、关键状态和接手步骤。
 2. [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md)：确认当前代码已经具备什么，以及主要调用链。
-3. [`PROJECT_PLAN.md`](PROJECT_PLAN.md)：了解长期路线；其中未勾选内容只是候选，不是自动授权的 Phase 2 Scope。
+3. [`PROJECT_PLAN.md`](PROJECT_PLAN.md)：了解长期路线；其中未勾选内容只是候选，不是自动授权的 Phase 3 Scope。
 4. 与具体任务直接相关的模块和测试。
 
 不要再使用旧的 v0.3.3 / v0.4 handoff 作为当前事实来源。它们只保留历史设计上下文。
@@ -19,16 +19,16 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 产品版本 | `v1.0.0 Phase 2` |
-| 基线提交 | v1.0 Phase 2 完成提交（当前 `HEAD`） |
-| 当前分支 | `codex/v1.0-phase2` |
+| 产品版本 | `v1.0.0 Phase 3` |
+| 基线提交 | v1.0 Phase 3 完成提交（当前 `HEAD`） |
+| 当前分支 | `codex/v1.0-phase3` |
 | 后端 | Python + FastAPI + SQLAlchemy + SQLite + Pillow |
 | 前端 | Vite + 原生 TypeScript + Vitest/jsdom |
 | 前端包版本 | `1.0.0` |
-| 主要部署形态 | 本地单进程、桌面管理端优先、可信局域网可访问 |
+| 主要部署形态 | 本地单进程、Admin 桌面管理、Visitor 小范围受邀访问 |
 | 文件存储 | 本地 `data/images`、`data/thumbnails` 等目录 |
 
-Phase 2 完成提交没有创建 Git Tag，也没有推送远端。正式发布前应由用户决定这些 Git 操作。
+Phase 3 完成提交没有创建 Git Tag，也没有推送远端。正式发布前应由用户决定这些 Git 操作。
 
 ## 3. Phase 1 最终交付面
 
@@ -97,11 +97,22 @@ Card Motion 自 Phase 1 起 Feature Freeze。Phase 2 只允许缺陷修复、性
 - Immersive Dock、Focus Viewer、Infinite Loading / End State 完成视觉 Polish，Free Gallery、Infinite Feed、GIF 与原图行为保持原边界。
 - Loading、Empty、Error、Toast、Disabled、Keyboard Focus、Reduced Motion、动态背景对比度和主要响应式断点集中处理。
 
+### 3.7 Phase 3 Visitor / Admin Access Gate
+
+- `app/auth.py` 集中维护环境配置、常量时间 Key 比较、不透明 Session Store、登录/身份/退出 API 与路由权限策略。
+- 未认证业务 API 和四类私有媒体返回 401；Visitor 对 mutation、批量导出、管理 API、Mobile Ingest 和 Swagger 返回 403。
+- Visitor 保留正常浏览、关键词/语义搜索、Similar、Random、Immersive、Infinite Feed、原图/GIF、Focus 与单图下载；复合 Meme ZIP 在后端按实际图片数再次拒绝。
+- `frontend/src/auth.ts` 在 Vault 构造前完成身份 bootstrap；Access Gate 不预加载 Meme，登录/退出无需刷新，401 或媒体 Session 失效会回到 Gate。
+- 前端使用集中 capabilities 保护 Upload 与 Batch Download command，并按 Role 收口 Header、Management、Inspector、Caption、Relation、Forge 等 mutation 入口；后端仍是最终安全边界。
+- Session 当前保存在单进程内存中，服务重启后失效；这符合现有单进程架构，不代表多进程共享 Session。
+- External Meme API 当前使用同一 Web Session 边界；Maibot 等机器客户端的独立凭据仍是后续单独设计项。
+
 ## 4. 前端关键代码地图
 
 | 责任 | 文件 |
 | --- | --- |
 | App State、页面业务编排 | `frontend/src/app.ts` |
+| Auth Bootstrap、Access Gate、Capabilities | `frontend/src/auth.ts` |
 | App Shell 操作分级与二级菜单 | `frontend/src/app-shell.ts` |
 | Shell 与 Meme Card Markup | `frontend/src/ui.ts` |
 | Card Preset / Lift / Tilt / Follow | `frontend/src/card-tilt.ts` |
@@ -186,14 +197,14 @@ Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默
 - `MemeResponse.images` 是完整有序图片组；兼容字段 `image_url`、`thumbnail_url`、width / height 等继续投影自首图。
 - 图片二进制保存在本地文件系统，不进入 SQLite。
 - Meme / Tag / Template / 图片变化通过现有 Derived Data Invalidation 令语义派生数据失效；不要在普通写事务里直接调用外部 Provider。
-- External Meme API 面向可信局域网，不代表已有公网鉴权、速率限制或分享权限。
-- 当前没有用户系统、租户、对象存储、云数据库或多进程状态同步。
+- External Meme API 已纳入 Web Session 认证，但尚无独立机器 Access Key、速率限制或分享 Token。
+- 当前没有用户账户数据库、租户、对象存储、云数据库或多进程 Session 同步。
 
 更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
 
-## 8. Phase 2 完成状态
+## 8. Phase 3 完成状态
 
-Phase 2 的 Immersive Infinite Feed 与六阶段整体视觉重构均已完成并通过人工验收：
+Phase 2 的 Immersive Infinite Feed 与六阶段整体视觉重构继续保持冻结；Phase 3 权限系统已完成：
 
 - 普通 Vault 继续正式分页，Immersive 使用独立 Feed Collection。
 - Sentinel 以 `1000px` root margin 预加载下一批；loading guard、AbortController、generation、Error/Retry、Empty/End State 已落地。
@@ -202,11 +213,11 @@ Phase 2 的 Immersive Infinite Feed 与六阶段整体视觉重构均已完成�
 - Dock 已移除上一页/下一页；退出后恢复普通页数据。
 - App Shell、Design System、Library / Card、Inspector / Dialog、Immersive Polish 和 System States / Responsive 已依次完成。
 
-Infinite Feed 性能验证：用户已手工完成 2000+ Meme 连续滚动并确认通过。Phase 2 最终门禁以本次完成提交记录为准。
+Phase 2 Infinite Feed 的 2000+ Meme 性能验收继续有效。Phase 3 自动化覆盖 Visitor/Admin Login、Unauthenticated、Visitor Read/Write、媒体与 Swagger、Session/Logout、Role Switching 和复合 Meme ZIP 权限。
 
 以下仍只是后续候选方向，不属于本轮 Scope：
 
-- 用户系统、权限和分享链接。
+- 用户账户系统、分享链接与机器客户端独立凭据。
 - 对象存储、数据库迁移、备份与部署。
 - 社交平台或聊天上下文接入。
 - Inspector 后台任务化、聚类或治理工具。
@@ -227,13 +238,13 @@ Infinite Feed 性能验证：用户已手工完成 2000+ Meme 连续滚动并确
 
 ## 10. 验证基线
 
-Phase 2 完成门禁：
+Phase 3 完成门禁：
 
 ```text
 TypeScript typecheck：通过
-Vitest：36 files / 334 tests passed
+Vitest：37 files / 338 tests passed
 Vite production build：通过
-Pytest：259 tests passed
+Pytest：264 tests passed
 git diff --check：通过
 ```
 
@@ -249,16 +260,18 @@ git diff --check
 
 生产页面由 FastAPI 托管 `frontend/dist`。前端源码变化后必须重新构建，单纯刷新浏览器不会更新旧产物。
 
-## 11. Phase 2 完成后的新对话建议起手式
+## 11. Phase 3 完成后的新对话建议起手式
 
 ```text
 请先阅读 README.md、docs/NEXT_CONVERSATION_HANDOFF.md、
 docs/CODEBASE_STATUS.md 和 docs/PROJECT_PLAN.md。
 
-当前基线是 Meme Vault v1.0.0 Phase 2 完成提交（当前 HEAD）。
+当前基线是 Meme Vault v1.0.0 Phase 3 完成提交（当前 HEAD）。
 Card Motion 已 Feature Freeze；Immersive Focus 必须保留 Occupancy Grid
 临时脱离协议和多图/GIF 媒体生命周期。
 
-Immersive Infinite Feed 与六阶段整体视觉重构均已完成；2000+ 真实数据连续滚动性能验收已通过。
+Visitor/Admin Access Gate、Session、API/媒体权限审计与 Visitor 只读 UI 已完成；
+External API 独立机器凭据、多进程 Session、用户账户与分享 Token 仍未实现。
+Immersive Infinite Feed 与六阶段整体视觉重构继续保持冻结；2000+ 真实数据连续滚动性能验收已通过。
 下一轮先由用户确定新的唯一主目标，不顺手展开其他候选方向。
 ```

@@ -34,6 +34,7 @@ from app.config import (
     THUMBNAILS_DIR,
     THUMBNAILS_URL_PREFIX,
 )
+from app.auth import AuthSettings, AuthorizationMiddleware, SessionStore, build_auth_router
 from app.database import SessionLocal, create_tables
 from app.services.import_job_service import ImportJobManager
 from app.services.export_job_service import ExportJobManager
@@ -71,6 +72,7 @@ def create_app(
     ai_settings_key_file: Path = AI_SETTINGS_KEY_FILE,
     import_archives_dir: Path = IMPORT_ARCHIVES_DIR,
     export_archives_dir: Path = EXPORT_ARCHIVES_DIR,
+    auth_settings: AuthSettings | None = None,
 ) -> FastAPI:
     resolved_images = images_dir.resolve()
     resolved_thumbnails = thumbnails_dir.resolve()
@@ -109,6 +111,16 @@ def create_app(
     application.state.export_job_manager = ExportJobManager(
         SessionLocal, resolved_images, resolved_thumbnails, resolved_export_archives
     )
+    resolved_auth_settings = auth_settings or AuthSettings.from_environment()
+    application.state.auth_enabled = resolved_auth_settings is not None
+    if resolved_auth_settings is not None:
+        session_store = SessionStore(
+            resolved_auth_settings.session_secret,
+            resolved_auth_settings.session_ttl_seconds,
+        )
+        application.state.session_store = session_store
+        application.add_middleware(AuthorizationMiddleware, store=session_store)
+        application.include_router(build_auth_router(resolved_auth_settings, session_store))
     application.state.semantic_index = SemanticIndex(SessionLocal)
     application.state.semantic_search_cache = SemanticSearchResultCache()
     application.state.embedding_job_manager = EmbeddingJobManager(

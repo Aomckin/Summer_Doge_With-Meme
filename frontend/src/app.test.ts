@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemeVaultApp, type MemeApi } from "./app";
+import { capabilitiesFor } from "./auth";
 import type {
   AppState,
   MemeImageResponse,
@@ -344,7 +345,7 @@ describe("MemeVaultApp", () => {
     expect(menu.querySelector("#open-semantic-index")).not.toBeNull();
     expect(menu.querySelector("#open-enrichment")).not.toBeNull();
     expect(menu.querySelector("#open-vault-inspector")).not.toBeNull();
-    expect(header.querySelectorAll(":scope > .toolbar > .header-actions > button")).toHaveLength(5);
+    expect(header.querySelectorAll(":scope > .toolbar > .header-actions > button")).toHaveLength(6);
   });
 
   it("renders natural-ratio cards with overlay metadata", async () => {
@@ -415,6 +416,20 @@ describe("MemeVaultApp", () => {
         tags: ["funny"],
       }),
     );
+  });
+
+  it("labels GIF cards as media without creating a content tag", async () => {
+    const gif = { ...makeMeme(2, "动图"), mime_type: "image/gif" };
+    const app = new MemeVaultApp(
+      root(),
+      makeApi({ listMemes: vi.fn().mockResolvedValue([gif]) }),
+    );
+
+    await app.start();
+
+    const card = document.querySelector<HTMLElement>('[data-meme-id="2"]')!;
+    expect(card.querySelector(".media-type-badge")?.textContent).toBe("GIF");
+    expect([...card.querySelectorAll(".tag")].map(tag => tag.textContent)).toEqual(["funny"]);
   });
 
   it("opens every exact Meme ID query without falling through to keyword search", async () => {
@@ -703,19 +718,117 @@ describe("MemeVaultApp", () => {
 
     await app.start();
 
-    expect(document.querySelectorAll("[data-tag]")).toHaveLength(8);
+    expect(document.querySelectorAll("[data-tag]:not([hidden])")).toHaveLength(8);
     expect(button("展开全部标签（+2）").getAttribute("aria-expanded")).toBe(
       "false",
     );
 
     button("展开全部标签（+2）").click();
-    expect(document.querySelectorAll("[data-tag]")).toHaveLength(10);
+    expect(document.querySelectorAll("[data-tag]:not([hidden])")).toHaveLength(10);
     expect(button("收起标签").getAttribute("aria-expanded")).toBe("true");
 
     document.querySelector<HTMLButtonElement>('[data-tag="标签10"]')?.click();
     button("收起标签").click();
-    expect(document.querySelectorAll("[data-tag]")).toHaveLength(9);
+    expect(document.querySelectorAll("[data-tag]:not([hidden])")).toHaveLength(9);
     expect(document.querySelector('[data-tag="标签10"]')).not.toBeNull();
+  });
+
+  it("filters tags locally, restores them when cleared, and preserves selection", async () => {
+    const tags = ["猫", "黑白猫", "猫和老鼠", "猫头鹰", "DOG", "doge"].map((name, index) => ({
+      ...funnyTag,
+      id: index + 1,
+      name,
+    }));
+    const listTags = vi.fn().mockResolvedValue(tags);
+    const app = new MemeVaultApp(root(), makeApi({ listTags }));
+    await app.start();
+
+    const search = document.querySelector<HTMLInputElement>("[data-tag-filter-search]")!;
+    search.value = "猫";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    expect([...document.querySelectorAll<HTMLButtonElement>("[data-tag]:not([hidden])")].map(button => button.dataset.tag))
+      .toEqual(["猫", "黑白猫", "猫和老鼠", "猫头鹰"]);
+    expect(listTags).toHaveBeenCalledTimes(1);
+
+    document.querySelector<HTMLButtonElement>('[data-tag="黑白猫"]')?.click();
+    expect(document.querySelector<HTMLInputElement>("[data-tag-filter-search]")?.value).toBe("猫");
+    expect(document.querySelector<HTMLButtonElement>('[data-tag="黑白猫"]')?.ariaPressed).toBe("true");
+
+    const rerenderedSearch = document.querySelector<HTMLInputElement>("[data-tag-filter-search]")!;
+    rerenderedSearch.value = "none";
+    rerenderedSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(document.querySelector("[data-tag-search-empty]")?.hasAttribute("hidden")).toBe(false);
+
+    rerenderedSearch.value = "";
+    rerenderedSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(document.querySelectorAll("[data-tag]:not([hidden])")).toHaveLength(tags.length);
+    expect(document.querySelector<HTMLButtonElement>('[data-tag="黑白猫"]')?.ariaPressed).toBe("true");
+  });
+
+  it("keeps template browsing available to visitors without exposing mutations", async () => {
+    const listMemePage = vi.fn().mockResolvedValue(memePage([]));
+    const api = makeApi({
+      listMemePage,
+      listTemplates: vi.fn().mockResolvedValue([dogeTemplate, wojakTemplate]),
+    });
+    const app = new MemeVaultApp(root(), api, capabilitiesFor("visitor"));
+    await app.start();
+
+    const browseButton = document.querySelector<HTMLButtonElement>("#browse-templates")!;
+    expect(browseButton).not.toBeNull();
+    browseButton.click();
+    expect(document.activeElement).toBe(document.querySelector("[data-template-filter-search]"));
+    expect(document.querySelector('[data-template-filter="3"]')).not.toBeNull();
+    document.querySelector<HTMLButtonElement>('[data-template-filter="3"]')?.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateId: 3 }),
+    ));
+    expect(api.createTemplate).not.toHaveBeenCalled();
+    expect(api.updateTemplate).not.toHaveBeenCalled();
+    expect(api.deleteTemplate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the collapsed template toggle outside the scrolling chip row", async () => {
+    const templates = Array.from({ length: 10 }, (_, index) => ({
+      ...dogeTemplate,
+      id: index + 1,
+      name: `模板 ${index + 1}`,
+    }));
+    const app = new MemeVaultApp(root(), makeApi({
+      listTemplates: vi.fn().mockResolvedValue(templates),
+    }));
+    await app.start();
+
+    const track = document.querySelector("#template-filters .filter-chip-track")!;
+    const scroll = track.querySelector(".filter-chip-scroll")!;
+    const toggle = track.querySelector<HTMLButtonElement>("[data-expand-templates]")!;
+    expect(toggle.parentElement).toBe(track);
+    expect(scroll.contains(toggle)).toBe(false);
+    toggle.click();
+    expect(document.querySelectorAll("[data-template-filter]")).toHaveLength(11);
+  });
+
+  it("toggles GIF mode for pages, infinite browsing, and random selection", async () => {
+    const listMemePage = vi.fn().mockResolvedValue(memePage([]));
+    const api = makeApi({ listMemePage });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    const gifMode = button("动图模式");
+    gifMode.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, gifOnly: true }),
+    ));
+    expect(gifMode.ariaPressed).toBe("true");
+    expect(gifMode.classList.contains("is-active")).toBe(true);
+
+    button("随机一个").click();
+    await vi.waitFor(() => expect(api.getRandomMeme).toHaveBeenCalledWith([], null, true));
+
+    gifMode.click();
+    await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ gifOnly: false }),
+    ));
   });
 
   it("shows tag management and replaces selected filters after a merge", async () => {

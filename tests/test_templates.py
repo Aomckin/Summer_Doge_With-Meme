@@ -14,6 +14,7 @@ from app.ai.client import AIImageResult, AITagSuggestion, AIUpstreamError
 from app.ai.embedding_client import ImageEmbeddingResult
 from app.api.memes import get_ai_client
 from app.api.templates import get_template_service
+from app.auth import AuthSettings
 from app.database import Base, get_db
 from app.main import create_app
 from app.models.ai_analysis import MemeAIAnalysis
@@ -368,6 +369,55 @@ def test_template_api_and_meme_assignment_round_trip(tmp_path: Path) -> None:
     finally:
         app.dependency_overrides.clear()
         session.close()
+
+
+def test_template_read_is_visitor_accessible_but_mutation_stays_admin_only(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        session = create_session()
+        app = create_app(
+            tmp_path / "images",
+            tmp_path / "thumbnails",
+            auth_settings=AuthSettings(
+                "visitor-secret",
+                "admin-secret",
+                "session-secret",
+            ),
+        )
+        app.dependency_overrides[get_db] = lambda: session
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                await client.post(
+                    "/api/auth/login",
+                    json={"key": "visitor-secret"},
+                )
+                assert (await client.get("/api/templates")).status_code == 200
+                assert (
+                    await client.post(
+                        "/api/templates",
+                        json={"name": "Visitor must not create"},
+                    )
+                ).status_code == 403
+
+                await client.post("/api/auth/logout")
+                await client.post(
+                    "/api/auth/login",
+                    json={"key": "admin-secret"},
+                )
+                created = await client.post(
+                    "/api/templates",
+                    json={"name": "Admin can create"},
+                )
+                assert created.status_code == 201
+        finally:
+            app.dependency_overrides.clear()
+            session.close()
+
+    asyncio.run(scenario())
 
 
 def test_invalid_upload_template_leaves_no_files(tmp_path: Path) -> None:

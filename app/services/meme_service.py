@@ -327,10 +327,16 @@ class MemeService:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
         return self.repository.list(
-            offset=offset, limit=limit, tags=tags, q=q, template_id=template_id
+            offset=offset,
+            limit=limit,
+            tags=tags,
+            q=q,
+            template_id=template_id,
+            gif_only=gif_only,
         )
 
     def list_meme_page(
@@ -341,6 +347,7 @@ class MemeService:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
         sort: str = "default",
         shuffle_seed: int | None = None,
     ) -> MemePage:
@@ -361,7 +368,7 @@ class MemeService:
             effective_seed = shuffle_seed
 
         total = self.repository.count_filtered(
-            tags=tags, q=q, template_id=template_id
+            tags=tags, q=q, template_id=template_id, gif_only=gif_only
         )
         total_pages = (total + page_size - 1) // page_size
         effective_page = min(page, total_pages) if total_pages else 1
@@ -371,6 +378,7 @@ class MemeService:
             tags=tags,
             q=q,
             template_id=template_id,
+            gif_only=gif_only,
             sort=sort,
             shuffle_seed=effective_seed,
         )
@@ -432,7 +440,11 @@ class MemeService:
         return self.tag_repository.list()
 
     def get_random_meme(
-        self, *, tags: Sequence[str] | None = None, template_id: int | None = None
+        self,
+        *,
+        tags: Sequence[str] | None = None,
+        template_id: int | None = None,
+        gif_only: bool = False,
     ) -> Meme:
         # Repository 负责随机元数据查询；缺失磁盘文件的记录不会泄漏给消费者。
         unavailable_ids: list[int] = []
@@ -440,6 +452,7 @@ class MemeService:
             meme = self.repository.get_random(
                 tags=tags,
                 template_id=template_id,
+                gif_only=gif_only,
                 exclude_ids=unavailable_ids,
             )
             if meme is None:

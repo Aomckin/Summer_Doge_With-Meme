@@ -34,6 +34,7 @@ def test_login_session_logout_and_role_switch(tmp_path: Path) -> None:
             assert visitor.json() == {"authenticated": True, "role": "visitor"}
             assert "HttpOnly" in visitor.headers["set-cookie"]
             assert "SameSite=strict" in visitor.headers["set-cookie"]
+            assert "Secure" not in visitor.headers["set-cookie"]
             assert (await client.get("/api/auth/me")).json()["role"] == "visitor"
             assert (await client.get("/api/tags")).status_code == 200
             assert (await client.post("/api/semantic-search", json={})).status_code != 403
@@ -70,6 +71,66 @@ def test_invalid_configuration_is_rejected() -> None:
         assert "different" in str(error)
     else:
         raise AssertionError("matching keys must be rejected")
+
+
+def test_production_environment_requires_all_secrets_and_secure_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MEME_VAULT_ENV", "production")
+    monkeypatch.setenv("VISITOR_ACCESS_KEY", "visitor-secret")
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "admin-secret")
+    monkeypatch.setenv("SESSION_SECRET", "session-secret")
+
+    settings_from_environment = AuthSettings.from_environment()
+
+    assert settings_from_environment is not None
+    assert settings_from_environment.secure_cookie is True
+
+    for missing_name in (
+        "VISITOR_ACCESS_KEY",
+        "ADMIN_ACCESS_KEY",
+        "SESSION_SECRET",
+    ):
+        monkeypatch.delenv(missing_name)
+        with pytest.raises(RuntimeError):
+            AuthSettings.from_environment()
+        monkeypatch.setenv(
+            missing_name,
+            {
+                "VISITOR_ACCESS_KEY": "visitor-secret",
+                "ADMIN_ACCESS_KEY": "admin-secret",
+                "SESSION_SECRET": "session-secret",
+            }[missing_name],
+        )
+
+
+def test_production_login_sets_secure_session_cookie(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        secure_settings = AuthSettings(
+            "visitor-secret",
+            "admin-secret",
+            "session-secret",
+            secure_cookie=True,
+        )
+        app = create_app(
+            tmp_path / "images",
+            tmp_path / "thumbs",
+            auth_settings=secure_settings,
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="https://public.example",
+        ) as client:
+            response = await client.post(
+                "/api/auth/login",
+                json={"key": "visitor-secret"},
+            )
+            cookie = response.headers["set-cookie"]
+            assert "Secure" in cookie
+            assert "HttpOnly" in cookie
+            assert "SameSite=strict" in cookie
+
+    run(scenario())
 
 
 def test_permission_policy_covers_read_write_and_sensitive_routes() -> None:

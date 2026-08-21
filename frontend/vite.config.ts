@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const backendTarget = env.BACKEND_TARGET || "http://127.0.0.1:8000";
+  const backendTarget = env.BACKEND_TARGET || "http://127.0.0.1:8002";
 
   return {
     server: {

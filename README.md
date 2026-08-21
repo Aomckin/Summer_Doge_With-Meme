@@ -1,4 +1,4 @@
-# Meme Vault v1.0.0 Phase 3
+# Meme Vault v1.0.0 Phase 4A/B
 
 ## Visitor / Admin Access
 
@@ -62,10 +62,10 @@ Meme Vault 是一个个人 Meme 收藏、管理、检索和创作网站。v1.0.0
 
 ```powershell
 npm.cmd --prefix frontend run build
-python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8002
 ```
 
-手机与电脑接入同一可信局域网后，在手机浏览器访问 `http://电脑的局域网IPv4:8000/mobile`。页面支持从系统相册多选 JPG/JPEG、PNG、WebP 和 GIF，按顺序逐张调用现有 `POST /api/memes` 入库；上传期间显示处理进度，完成后分别汇总成功数、失败数和失败文件名。“继续投喂”会清空本轮状态并开始下一轮。
+手机与电脑接入同一可信局域网后，在手机浏览器访问 `http://电脑的局域网IPv4:8002/mobile`。页面支持从系统相册多选 JPG/JPEG、PNG、WebP 和 GIF，按顺序逐张调用现有 `POST /api/memes` 入库；上传期间显示处理进度，完成后分别汇总成功数、失败数和失败文件名。“继续投喂”会清空本轮状态并开始下一轮。
 
 Mobile Ingest 使用同源相对 API，不需要配置或硬编码电脑 IP。它复用桌面端相同的图片校验、10 MB 大小限制、去重、文件名处理、原图/缩略图存储、数据库事务和 Derived Data Invalidation，不提供浏览、编辑、删除、登录、PWA 或公网访问能力。
 
@@ -145,19 +145,19 @@ npm.cmd --prefix frontend install
 分别在两个终端启动后端与 Vite 开发服务器：
 
 ```powershell
-python -m uvicorn app.main:app --env-file .env --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --reload --host 0.0.0.0 --port 8002
 ```
 
 ```powershell
 npm.cmd --prefix frontend run dev
 ```
 
-开发页面默认位于 <http://127.0.0.1:5173>。Vite 会把 `/api` 和 `/media` 代理到 <http://127.0.0.1:8000>。
+开发页面默认位于 <http://127.0.0.1:5173>。Vite 会把 `/api` 和 `/media` 代理到 <http://127.0.0.1:8002>。
 
 如需使用其他后端地址，在 `frontend/.env` 中设置：
 
 ```dotenv
-BACKEND_TARGET=http://127.0.0.1:8000
+BACKEND_TARGET=http://127.0.0.1:8002
 ```
 
 可以复制 [`frontend/.env.example`](frontend/.env.example) 作为起点。这个变量只配置 Vite 开发代理，不会进入浏览器构建产物。
@@ -168,23 +168,85 @@ BACKEND_TARGET=http://127.0.0.1:8000
 
 ```powershell
 npm.cmd --prefix frontend run build
-python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8002
 ```
 
 `build` 会先执行 `tsc --noEmit` 类型检查，再执行 Vite 构建。只有 `frontend/dist/index.html` 存在时，FastAPI 才会在根路径托管网页；没有构建产物时，后端 API 仍可独立启动。
 
 生产模式可访问：
 
-- 网页管理台：<http://127.0.0.1:8000/>
-- 手机投喂入口：<http://127.0.0.1:8000/mobile>（手机访问时把 `127.0.0.1` 替换为电脑的局域网 IPv4）
-- 健康检查：<http://127.0.0.1:8000/api/health>
-- Swagger API 文档：<http://127.0.0.1:8000/docs>
+- 网页管理台：<http://127.0.0.1:8002/>
+- 手机投喂入口：<http://127.0.0.1:8002/mobile>（手机访问时把 `127.0.0.1` 替换为电脑的局域网 IPv4）
+- 健康检查：<http://127.0.0.1:8002/api/health>
+- Swagger API 文档：<http://127.0.0.1:8002/docs>
 
 健康检查预期返回：
 
 ```json
 {"status":"ok"}
 ```
+
+## Public Deployment
+
+Phase 4A/B 先完成 Quick Tunnel 冒烟与公网兼容性审计；Quick Tunnel 只用于人工验收，随机 `trycloudflare.com` 地址不得写入配置、数据库或前端。正式固定域名和 Named Tunnel 要在 Quick Tunnel 人工验收通过后再配置。
+
+### 1. 配置生产环境
+
+复制 [`.env.example`](.env.example) 为本地 `.env`，填写三个互不相同的长随机 Secret，并设置：
+
+```dotenv
+VISITOR_ACCESS_KEY=<visitor secret>
+ADMIN_ACCESS_KEY=<admin secret>
+SESSION_SECRET=<session signing secret>
+MEME_VAULT_ENV=production
+```
+
+不要把 `.env`、Access Key、Session Secret、AI Provider Key 或 Cloudflare Tunnel Token 提交到 Git。Production 缺少任意一项 Access 配置时会直接拒绝启动；Production Session Cookie 保持 `Secure`、`HttpOnly` 和 `SameSite=Strict`。
+
+### 2. 本地启动与检查
+
+```powershell
+npm.cmd --prefix frontend run build
+python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8002 --proxy-headers --forwarded-allow-ips 127.0.0.1
+```
+
+先访问 <http://127.0.0.1:8002/api/health>。公网部署时不需要路由器端口转发，也不需要给 FastAPI 配置本地 TLS；Cloudflare 负责公网 HTTPS，cloudflared 到 Uvicorn 使用本机 HTTP。`--forwarded-allow-ips 127.0.0.1` 只信任同机 cloudflared 的代理头。
+
+### 3. Quick Tunnel 测试
+
+另开终端手动运行：
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8002
+```
+
+使用生成的临时 HTTPS 地址完成 Access Gate、Visitor、Admin、原图/GIF、单图下载、Immersive、Infinite Feed 与 Focus Viewer 冒烟测试；还应让手机关闭 Wi-Fi 后通过 4G/5G 复验。Quick Tunnel 不用于正式发布，也不由 Meme Vault 自动创建或保存。
+
+### 4. 正式 Tunnel（人工验收后）
+
+在 Cloudflare Dashboard 创建 remotely-managed Named Tunnel 和 Published Application，把固定 hostname（例如 `meme.example.com`）映射到：
+
+```text
+http://127.0.0.1:8002
+```
+
+Cloudflare 登录、域名、DNS、Tunnel 创建、Connector Token 与可选 Windows Service 均由部署者在 Cloudflare 侧管理。仓库不读取或保存 Tunnel Token。公网只分享 `https://meme.example.com` 形式的地址。
+
+### 5. Visitor / Admin 与 External API
+
+Tunnel 不替代 Meme Vault Access Gate。Visitor 保持只读；Upload、Edit、Delete、Settings、批量 ZIP/Export 与 Swagger 仍是 Admin Only。Web UI、API 和媒体全部使用同源相对 URL，因此会自动跟随本地、Quick Tunnel 或正式域名 Origin。
+
+当前 External Meme API 仍使用 Phase 3 的 Web Session 认证边界；同机消费者可以继续连接 `http://127.0.0.1:8002`，不要无意义绕行公网。面向独立机器客户端的独立凭据属于 Phase 4E，在完成前不要把浏览器 Access Key 写入脚本或 URL。
+
+### 6. Troubleshooting
+
+- 公网出现 `502`：确认 Uvicorn 正监听 `127.0.0.1:8002`，再确认 cloudflared 的 service URL 完全一致。
+- 本地 HTTP 无法保留 Production 登录：`Secure` Cookie 只通过 HTTPS 发送；本地开发使用 `MEME_VAULT_ENV=development`，Production 验收使用 Tunnel HTTPS。
+- 公网响应出现 `localhost`：停止验收并检查是否新增了绝对 URL；业务响应应返回 `/api/...` 或 `/media/...`。
+- Visitor 得到 `403`：确认调用的不是 Admin-only mutation、批量导出或 Swagger；未登录应返回 `401`。
+- Swagger 不可见：这是预期权限边界，只有 Admin Session 可以访问。
+
+完整首轮审计结果见 [`docs/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](docs/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 
 ## 运行测试
 
@@ -216,7 +278,7 @@ Luna 导入不再区分 dry-run 与 apply，也不会直接修改 Meme；所有�
 - App Shell 直接提供 Search、图片上传和 Immersive 核心入口；Random、批量下载与 Appearance 保留低权重直达入口，API 设置、模板、标签、元数据整理、场景召唤、宝库巡检等低频管理能力集中在二级菜单，原功能仍可访问。
 - 左侧资料库使用服务端正式分页，显示筛选后的总数和总页数，并支持首页、末页、上一页、下一页、数字页码与输入页码跳转。
 - 每页可显示 24、48 或 96 个 Meme，默认 24；卡片可切换超大、大、中、小四档响应式瀑布流密度。超大卡片直接显示原图，其余档使用缩略图。两项偏好保存在浏览器本地，卡片大小变化不会重新请求列表数据。
-- 资料库可在默认顺序与稳定随机顺序间切换；同一乱序种子可连续翻页，点击“重新洗牌”会生成新排列。顶部“随机一个”仍只抽取单个 Meme。
+- 资料库可在默认顺序与稳定随机顺序间切换；同一乱序种子可连续翻页，点击“重新洗牌”会生成新排列。顶部“动图模式”仅展示 GIF，“随机一个”会沿用当前 GIF、标签和模板筛选。
 - 网格卡片只显示首图封面；多图 Meme 会显示图片数量角标。
 - 右侧详情面板按顺序纵向展示完整图片组，并提供追加、删除和拖拽排序；最后一张图片不能删除，排序后的第一张自动成为封面。
 - 原图查看器可从任意图片打开，并通过按钮或左右方向键在当前图片组内切换。
@@ -354,7 +416,7 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 
 ## Meme API
 
-所有接口均以 `/api` 开头，可在 <http://127.0.0.1:8000/docs> 使用 Swagger 操作：
+所有接口均以 `/api` 开头，可在 <http://127.0.0.1:8002/docs> 使用 Swagger 操作：
 
 - `POST /api/memes`：使用 multipart 表单上传图片及标题、描述、来源、标签和可选 `template_id`。
 - `POST /api/import-jobs`：流式接收一个 ZIP 及公共元数据，持久化任务后立即返回 HTTP 202。
@@ -367,9 +429,9 @@ ZIP 导入由单线程 `ImportJobManager` 顺序执行，避免多个导入任�
 - `GET /api/export-jobs/{job_id}`、`GET /api/export-jobs/{job_id}/items`：读取导出进度和失败明细。
 - `GET /api/export-jobs/{job_id}/download`：以磁盘文件流下载 ready ZIP。
 - `POST /api/export-jobs/{job_id}/cancel`、`DELETE /api/export-jobs/{job_id}`：取消或删除导出任务。
-- `GET /api/memes`：获取列表，支持搜索标题和描述的 `q`、分页参数 `offset`/`limit`，以及可重复的 `tags` 参数。
-- `GET /api/memes/page`：主资料库分页接口；支持 `page`、24/48/96 的 `page_size`、`q`、重复 `tags`、`default`/`shuffle` 排序和稳定 `shuffle_seed`，并返回总数与总页数。原列表接口保持兼容。
-- `GET /api/memes/random`：随机获取 Meme，可使用重复的 `tags` 参数限定范围。
+- `GET /api/memes`：获取列表，支持搜索标题和描述的 `q`、分页参数 `offset`/`limit`、可重复的 `tags` 以及 `gif_only=true`。
+- `GET /api/memes/page`：主资料库分页接口；支持 `page`、24/48/96 的 `page_size`、`q`、重复 `tags`、`gif_only=true`、`default`/`shuffle` 排序和稳定 `shuffle_seed`，并返回总数与总页数。原列表接口保持兼容。
+- `GET /api/memes/random`：随机获取 Meme，可使用重复的 `tags`、模板及 `gif_only=true` 限定范围。
 - `GET /api/memes/{meme_id}`：获取详情。
 - `PATCH /api/memes/{meme_id}`：修改标题、描述、来源、标签数组或可空 `template_id`。
 - `DELETE /api/memes/{meme_id}`：删除记录、原图和缩略图。

@@ -205,7 +205,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   deleteTemplate(id: number): Promise<void>;
   uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse>;
   deleteTemplateReferenceImage(id: number): Promise<void>;
-  getRandomMeme(tags: string[], templateId?: number | null, signal?: AbortSignal): Promise<MemeResponse>;
+  getRandomMeme(tags: string[], templateId?: number | null, gifOnly?: boolean, signal?: AbortSignal): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
   createImportJob(input: CreateImportJobInput): Promise<ImportJobResponse>;
   getImportJob(id: number): Promise<ImportJobResponse>;
@@ -339,9 +339,11 @@ function initialState(): AppState {
     selectedMeme: null,
     query: "",
     selectedTags: [],
+    tagSearchQuery: "",
     tagsExpanded: false,
     selectedTemplateId: null,
     templatesExpanded: false,
+    gifOnly: false,
     page: 1,
     pageSize: storedPageSize(),
     totalMemes: 0,
@@ -908,6 +910,23 @@ export class MemeVaultApp {
       this.state.page = 1;
       void this.reloadMemes();
     });
+    this.elements.tagFilters.addEventListener("input", event => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement) || !input.matches("[data-tag-filter-search]")) return;
+      this.state.tagSearchQuery = input.value;
+      const query = input.value.trim().toLocaleLowerCase();
+      let visibleCount = 0;
+      for (const button of this.elements.tagFilters.querySelectorAll<HTMLButtonElement>("[data-tag]")) {
+        button.hidden = query
+          ? !button.dataset.tag?.toLocaleLowerCase().includes(query)
+          : button.hasAttribute("data-collapsed-hidden");
+        if (!button.hidden) visibleCount += 1;
+      }
+      const toggle = this.elements.tagFilters.querySelector<HTMLButtonElement>("[data-expand-tags]");
+      if (toggle) toggle.hidden = Boolean(query);
+      const empty = this.elements.tagFilters.querySelector<HTMLElement>("[data-tag-search-empty]");
+      if (empty) empty.hidden = visibleCount > 0;
+    });
 
     this.elements.templateFilters.addEventListener("click", (event) => {
       const target = (event.target as Element).closest<HTMLButtonElement>("button");
@@ -948,6 +967,17 @@ export class MemeVaultApp {
     this.elements.randomButton.addEventListener("click", () => {
       void this.randomize();
     });
+    this.elements.gifModeButton.addEventListener("click", () => {
+      this.state.gifOnly = !this.state.gifOnly;
+      if (this.state.gifOnly && this.state.searchMode === "semantic") {
+        this.state.searchMode = "keyword";
+        this.elements.searchMode.value = "keyword";
+        this.state.query = this.elements.searchInput.value.trim();
+      }
+      this.state.page = 1;
+      renderToolbar(this.elements, this.state);
+      void this.reloadMemes();
+    });
     this.elements.openUploadButton.addEventListener("click", () => {
       if (!this.capabilities.canWrite) return;
       this.batchUpload.open(
@@ -960,6 +990,11 @@ export class MemeVaultApp {
     });
     this.elements.openTemplatesButton.addEventListener("click", () => {
       this.openTemplateManager();
+    });
+    this.elements.browseTemplatesButton.addEventListener("click", () => {
+      this.elements.managementMenu.open = false;
+      this.elements.templateFilters.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      this.elements.templateFilters.querySelector<HTMLInputElement>("[data-template-filter-search]")?.focus();
     });
     this.elements.openTagsButton.addEventListener("click", () => {
       this.tagManager.open();
@@ -1562,6 +1597,7 @@ export class MemeVaultApp {
             q: this.state.query,
             tags: this.state.selectedTags,
             templateId: this.state.selectedTemplateId,
+            gifOnly: this.state.gifOnly,
             sort: this.state.listSort,
             shuffleSeed: this.state.shuffleSeed,
             signal: controller.signal,
@@ -1653,6 +1689,7 @@ export class MemeVaultApp {
       q: this.state.query,
       tags: this.state.selectedTags,
       templateId: this.state.selectedTemplateId,
+      gifOnly: this.state.gifOnly,
       sort: this.state.listSort,
       shuffleSeed: this.state.shuffleSeed,
       signal,
@@ -2012,10 +2049,16 @@ export class MemeVaultApp {
     this.state.actionError = null;
     renderToolbar(this.elements, this.state);
     try {
-      const meme = await this.api.getRandomMeme(
-        this.state.selectedTags,
-        this.state.selectedTemplateId,
-      );
+      const meme = this.state.gifOnly
+        ? await this.api.getRandomMeme(
+            this.state.selectedTags,
+            this.state.selectedTemplateId,
+            true,
+          )
+        : await this.api.getRandomMeme(
+            this.state.selectedTags,
+            this.state.selectedTemplateId,
+          );
       this.selectMeme(meme);
     } catch (error) {
       this.state.actionError = readableError(error);

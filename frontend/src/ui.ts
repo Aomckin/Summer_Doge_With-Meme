@@ -21,6 +21,7 @@ export interface AppElements {
   searchMode: HTMLSelectElement;
   semanticSearchButton: HTMLButtonElement;
   randomButton: HTMLButtonElement;
+  gifModeButton: HTMLButtonElement;
   openUploadButton: HTMLButtonElement;
   openMemeMakerButton: HTMLButtonElement;
   openDownloadButton: HTMLButtonElement;
@@ -28,6 +29,7 @@ export interface AppElements {
   openAppearanceButton: HTMLButtonElement;
   openImmersiveButton: HTMLButtonElement;
   openTemplatesButton: HTMLButtonElement;
+  browseTemplatesButton: HTMLButtonElement;
   openTagsButton: HTMLButtonElement;
   openSemanticIndexButton: HTMLButtonElement;
   openEnrichmentButton: HTMLButtonElement;
@@ -170,6 +172,7 @@ export function mountShell(root: HTMLElement): AppElements {
             <button id="semantic-search-button" class="button button-primary semantic-submit" type="button" hidden>语义搜索</button>
           </div>
           <div class="header-actions" aria-label="主要操作">
+            <button id="gif-mode-button" class="button header-action header-action-secondary" type="button" aria-pressed="false">动图模式</button>
             <button id="random-button" class="button header-action header-action-secondary" type="button">随机一个</button>
             <button id="open-download" class="button header-action header-action-secondary" type="button">批量下载</button>
             <button id="open-appearance" class="button header-action header-action-secondary" type="button">外观</button>
@@ -189,12 +192,13 @@ export function mountShell(root: HTMLElement): AppElements {
                 </section>
                 <section>
                   <span class="management-group-label">资料库管理</span>
+                  <button id="browse-templates" type="button" role="menuitem"><span>模板浏览</span><small>搜索并筛选模板</small></button>
                   <button id="open-templates" type="button" role="menuitem"><span>模板管理</span><small>维护视觉模板</small></button>
                   <button id="open-tags" type="button" role="menuitem"><span>标签管理</span><small>整理标签体系</small></button>
                   <button id="open-enrichment" type="button" role="menuitem"><span>元数据整理</span><small>审核分析建议</small></button>
                   <button id="open-vault-inspector" type="button" role="menuitem"><span>宝库巡检</span><small>检查相似与重复内容</small></button>
                 </section>
-                <section>
+                <section class="admin-only-menu-section">
                   <span class="management-group-label">系统</span>
                   <button id="open-semantic-index" type="button" role="menuitem"><span>语义索引</span><small>索引状态与任务</small></button>
                   <button id="open-settings" type="button" role="menuitem"><span>API 设置</span><small>厂商、模型与密钥</small></button>
@@ -524,6 +528,7 @@ export function mountShell(root: HTMLElement): AppElements {
     searchMode: required(root, "#search-mode"),
     semanticSearchButton: required(root, "#semantic-search-button"),
     randomButton: required(root, "#random-button"),
+    gifModeButton: required(root, "#gif-mode-button"),
     openUploadButton: required(root, "#open-upload"),
     openMemeMakerButton: required(root, "#open-meme-maker"),
     openDownloadButton: required(root, "#open-download"),
@@ -531,6 +536,7 @@ export function mountShell(root: HTMLElement): AppElements {
     openAppearanceButton: required(root, "#open-appearance"),
     openImmersiveButton: required(root, "#open-immersive"),
     openTemplatesButton: required(root, "#open-templates"),
+    browseTemplatesButton: required(root, "#browse-templates"),
     openTagsButton: required(root, "#open-tags"),
     openSemanticIndexButton: required(root, "#open-semantic-index"),
     openEnrichmentButton: required(root, "#open-enrichment"),
@@ -603,6 +609,8 @@ export function renderToolbar(
   elements.randomButton.textContent = state.randomizing
     ? "正在抽取…"
     : "随机一个";
+  elements.gifModeButton.classList.toggle("is-active", state.gifOnly);
+  elements.gifModeButton.setAttribute("aria-pressed", String(state.gifOnly));
 }
 
 function templateOptions(
@@ -743,7 +751,7 @@ export function renderTemplateFilters(elements: AppElements, state: AppState): v
     ? `<button class="filter-toggle" type="button" data-expand-templates aria-expanded="${state.templatesExpanded}">${state.templatesExpanded ? "收起模板" : `展开全部模板（+${hiddenCount}）`}</button>`
     : "";
   elements.templateFilters.toggleAttribute("data-expanded", state.templatesExpanded);
-  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><div class="filter-chip-track"><input type="search" data-template-filter-search placeholder="搜索模板…" aria-label="搜索资料库模板"><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}${toggle}</div>`;
+  elements.templateFilters.innerHTML = `<span class="filter-kind">模板</span><div class="filter-chip-track"><input type="search" data-template-filter-search placeholder="搜索模板…" aria-label="搜索资料库模板"><div class="filter-chip-scroll"><button class="filter-chip${allSelected ? " is-active" : ""}" type="button" data-template-filter="" aria-pressed="${allSelected}">全部</button>${templates}</div>${toggle}</div>`;
 }
 
 export function renderTags(elements: AppElements, state: AppState): void {
@@ -753,22 +761,29 @@ export function renderTags(elements: AppElements, state: AppState): void {
     return;
   }
   const collapsed = state.availableTags.length > COLLAPSED_TAG_LIMIT;
-  const visibleTags = state.tagsExpanded
-    ? state.availableTags
-    : state.availableTags.filter(
-        (tag, index) =>
-          index < COLLAPSED_TAG_LIMIT ||
-          state.selectedTags.includes(tag.name),
-      );
-  const hiddenCount = state.availableTags.length - visibleTags.length;
-  const tags = visibleTags
-    .map((tag) => {
+  const query = state.tagSearchQuery.trim().toLocaleLowerCase();
+  const defaultVisibleCount = state.availableTags.filter(
+    (tag, index) => state.tagsExpanded
+      || index < COLLAPSED_TAG_LIMIT
+      || state.selectedTags.includes(tag.name),
+  ).length;
+  const hiddenCount = state.availableTags.length - defaultVisibleCount;
+  let matchedCount = 0;
+  const tags = state.availableTags
+    .map((tag, index) => {
       const selected = state.selectedTags.includes(tag.name);
+      const collapsedHidden = !state.tagsExpanded
+        && index >= COLLAPSED_TAG_LIMIT
+        && !selected;
+      const matches = !query || tag.name.toLocaleLowerCase().includes(query);
+      if (matches) matchedCount += 1;
       return `
         <button
           class="filter-chip${selected ? " is-active" : ""}"
           type="button"
           data-tag="${escapeHtml(tag.name)}"
+          ${collapsedHidden ? "data-collapsed-hidden" : ""}
+          ${query ? (matches ? "" : "hidden") : (collapsedHidden ? "hidden" : "")}
           aria-pressed="${selected}"
         ><span>${escapeHtml(tag.name)}</span><small>${tag.usage_count}</small></button>
       `;
@@ -780,12 +795,13 @@ export function renderTags(elements: AppElements, state: AppState): void {
         class="filter-toggle"
         type="button"
         data-expand-tags
+        ${query ? "hidden" : ""}
         aria-expanded="${state.tagsExpanded}"
       >${state.tagsExpanded ? "收起标签" : `展开全部标签（+${hiddenCount}）`}</button>
     `
     : "";
   elements.tagFilters.toggleAttribute("data-expanded", state.tagsExpanded);
-  elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span><div class="filter-chip-track">${tags}${toggle}</div>`;
+  elements.tagFilters.innerHTML = `<span class="filter-kind">标签</span><div class="filter-chip-track"><input type="search" data-tag-filter-search value="${escapeHtml(state.tagSearchQuery)}" placeholder="搜索标签…" aria-label="搜索资料库标签"><div class="filter-chip-scroll">${tags}<span class="filter-search-empty muted" data-tag-search-empty ${matchedCount ? "hidden" : ""}>没有匹配的标签</span></div>${toggle}</div>`;
 }
 
 export function memeCardMarkup(
@@ -799,7 +815,8 @@ export function memeCardMarkup(
   const thumbnail = meme.thumbnail_url ?? meme.image_url;
   const image = !preferThumbnail && cardSize === "extra-large" ? meme.image_url : thumbnail;
   const copySource = memeCopySource(meme);
-  const isGif = copySource?.mime_type.toLowerCase().startsWith("image/gif") ?? false;
+  const isGif = (meme.images[0]?.mime_type ?? meme.mime_type)
+    .toLowerCase().startsWith("image/gif");
   const focusImages = meme.images?.length
     ? meme.images
     : [{
@@ -833,7 +850,7 @@ export function memeCardMarkup(
             <span class="card-image">
               <img data-card-image data-thumbnail-src="${escapeHtml(thumbnail)}" data-original-src="${escapeHtml(meme.image_url)}" src="${escapeHtml(image)}" alt="${escapeHtml(meme.title)}" width="${meme.width}" height="${meme.height}" loading="lazy">
               <span class="image-fallback" aria-hidden="true">图片不可用</span>
-              ${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}
+              ${isGif || meme.image_count > 1 ? `<span class="card-media-badges">${isGif ? '<span class="media-type-badge">GIF</span>' : ""}${meme.image_count > 1 ? `<span class="image-count-badge">${meme.image_count} 张</span>` : ""}</span>` : ""}
             </span>
             <span class="card-overlay"><strong>${escapeHtml(meme.title)}</strong>${score === undefined ? "" : `<span class="semantic-score">相关度 ${score.toFixed(3)}</span>`}<span class="card-tags">${tagMarkup(meme.tags.map((tag) => tag.name))}</span></span>
           </button>

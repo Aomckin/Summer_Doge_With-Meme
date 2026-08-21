@@ -40,6 +40,7 @@ class MemeRepository:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
     ) -> list[Meme]:
         statement = select(Meme)
         search = (q or "").strip().lower()
@@ -70,6 +71,8 @@ class MemeRepository:
             )
         if template_id is not None:
             statement = statement.where(Meme.template_id == template_id)
+        if gif_only:
+            statement = statement.where(func.lower(Meme.mime_type) == "image/gif")
         statement = statement.order_by(Meme.id).offset(offset).limit(limit)
         return list(self.session.scalars(statement))
 
@@ -79,6 +82,7 @@ class MemeRepository:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
     ):
         statement = select(Meme.id.label("meme_id"))
         search = (q or "").strip().lower()
@@ -105,6 +109,8 @@ class MemeRepository:
             )
         if template_id is not None:
             statement = statement.where(Meme.template_id == template_id)
+        if gif_only:
+            statement = statement.where(func.lower(Meme.mime_type) == "image/gif")
         return statement
 
     def count_filtered(
@@ -113,9 +119,10 @@ class MemeRepository:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
     ) -> int:
         filtered_ids = self._build_filtered_ids_statement(
-            tags=tags, q=q, template_id=template_id
+            tags=tags, q=q, template_id=template_id, gif_only=gif_only
         ).subquery()
         return int(
             self.session.scalar(select(func.count()).select_from(filtered_ids)) or 0
@@ -129,11 +136,12 @@ class MemeRepository:
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
         sort: str = "default",
         shuffle_seed: int | None = None,
     ) -> list[Meme]:
         filtered_ids = self._build_filtered_ids_statement(
-            tags=tags, q=q, template_id=template_id
+            tags=tags, q=q, template_id=template_id, gif_only=gif_only
         ).subquery()
         statement = select(Meme).join(
             filtered_ids,
@@ -195,6 +203,7 @@ class MemeRepository:
         *,
         tags: Sequence[str] | None = None,
         template_id: int | None = None,
+        gif_only: bool = False,
         exclude_ids: Sequence[int] = (),
     ) -> Meme | None:
         statement = select(Meme)
@@ -212,6 +221,8 @@ class MemeRepository:
             )
         if template_id is not None:
             statement = statement.where(Meme.template_id == template_id)
+        if gif_only:
+            statement = statement.where(func.lower(Meme.mime_type) == "image/gif")
         if exclude_ids:
             statement = statement.where(Meme.id.not_in(set(exclude_ids)))
         # SQLite 的 random() 为候选行生成随机顺序，只取第一条。

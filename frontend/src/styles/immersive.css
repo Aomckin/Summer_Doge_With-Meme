@@ -425,7 +425,7 @@
 }
 
 .immersive-focus-layer .is-immersive-focused .card-overlay,
-.immersive-focus-layer .is-immersive-focused .image-count-badge {
+.immersive-focus-layer .is-immersive-focused .card-media-badges {
   opacity: 0;
   pointer-events: none;
 }

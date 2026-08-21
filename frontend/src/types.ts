@@ -378,6 +378,7 @@ export interface ListMemesOptions {
   q?: string;
   tags?: string[];
   templateId?: number | null;
+  gifOnly?: boolean;
   signal?: AbortSignal;
 }
 
@@ -443,6 +444,7 @@ export interface ListMemePageOptions {
   q?: string;
   tags?: string[];
   templateId?: number | null;
+  gifOnly?: boolean;
   sort: MemeListSort;
   shuffleSeed?: number | null;
   signal?: AbortSignal;
@@ -606,9 +608,11 @@ export interface AppState {
   selectedMeme: MemeResponse | null;
   query: string;
   selectedTags: string[];
+  tagSearchQuery: string;
   tagsExpanded: boolean;
   selectedTemplateId: number | null;
   templatesExpanded: boolean;
+  gifOnly: boolean;
   page: number;
   pageSize: MemePageSize;
   totalMemes: number;

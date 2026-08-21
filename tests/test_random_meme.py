@@ -16,9 +16,9 @@ from app.services.meme_service import MemeService
 from app.storage.image_storage import ImageStorage
 
 
-def make_image_bytes(color: str) -> bytes:
+def make_image_bytes(color: str, image_format: str = "PNG") -> bytes:
     buffer = BytesIO()
-    Image.new("RGB", (120, 90), color=color).save(buffer, format="PNG")
+    Image.new("RGB", (120, 90), color=color).save(buffer, format=image_format)
     return buffer.getvalue()
 
 
@@ -86,3 +86,24 @@ def test_random_meme_can_be_limited_by_tags(random_context) -> None:
     assert response.status_code == 200
     assert response.json()["id"] == cat["id"]
     assert [tag["name"] for tag in response.json()["tags"]] == ["cat", "funny"]
+
+
+def test_random_meme_can_be_limited_to_gifs(random_context) -> None:
+    request(
+        "POST",
+        "/api/memes",
+        files={"file": ("still.png", make_image_bytes("blue"), "image/png")},
+        data={"title": "静图"},
+    )
+    gif = request(
+        "POST",
+        "/api/memes",
+        files={"file": ("moving.gif", make_image_bytes("red", "GIF"), "image/gif")},
+        data={"title": "动图"},
+    ).json()
+
+    response = request("GET", "/api/memes/random?gif_only=true")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == gif["id"]
+    assert response.json()["mime_type"] == "image/gif"

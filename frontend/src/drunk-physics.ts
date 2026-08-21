@@ -35,11 +35,11 @@ export interface DrunkPhysicsEnvironment {
   ) => DrunkIntersectionObserver;
 }
 
-const ATTRACTION_RADIUS = 520;
-const ATTRACTION_DISTANCE = 18;
-const ATTRACTION_LIFT = 18;
-const ATTRACTION_TILT_X = 7;
-const ATTRACTION_TILT_Y = 9;
+const ATTRACTION_RADIUS = 620;
+const ATTRACTION_DISTANCE = 26;
+const ATTRACTION_LIFT = 22;
+const ATTRACTION_TILT_X = 9;
+const ATTRACTION_TILT_Y = 12;
 const AMBIENT_LERP = 0.1;
 const HOVER_AMBIENT_FACTOR = 0.16;
 
@@ -164,10 +164,10 @@ export class DrunkPhysicsController {
     return {
       phase: this.random() * Math.PI * 2,
       speed: 0.00035 + this.random() * 0.00045,
-      amplitudeX: 1.5 + this.random() * 2.3,
-      amplitudeY: 1.2 + this.random() * 1.8,
-      rotationAmplitude: 0.25 + this.random() * 0.45,
-      liftAmplitude: 1.5 + this.random() * 2.5,
+      amplitudeX: 2.5 + this.random() * 3.5,
+      amplitudeY: 2 + this.random() * 3,
+      rotationAmplitude: 0.4 + this.random() * 0.7,
+      liftAmplitude: 2.5 + this.random() * 4,
       centerX: 0,
       centerY: 0,
       width: 0,

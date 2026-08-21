@@ -2,7 +2,7 @@
 
 该 API 面向可信局域网中的通用消费者，不绑定 MaiBot、QQ 或任何消息平台。以下
 URL 都是相对路径；消费者应把它们与 Meme Vault 的 Base URL（例如
-`http://192.168.1.20:8000`）拼接。接口不返回服务器磁盘路径。
+`http://192.168.1.20:8002`）拼接。接口不返回服务器磁盘路径。
 
 ## Random Meme
 
@@ -16,7 +16,7 @@ URL 都是相对路径；消费者应把它们与 Meme Vault 的 Base URL（例�
 请求：
 
 ```bash
-curl http://localhost:8000/api/memes/random
+curl http://localhost:8002/api/memes/random
 ```
 
 响应示例（实际响应还会保留现有 Meme DTO 的标题、尺寸、标签等字段）：
@@ -54,7 +54,7 @@ curl http://localhost:8000/api/memes/random
 请求：
 
 ```bash
-curl "http://localhost:8000/api/memes/semantic?q=无语地看着对方&limit=1"
+curl "http://localhost:8002/api/memes/semantic?q=无语地看着对方&limit=1"
 ```
 
 响应示例：
@@ -103,7 +103,7 @@ curl "http://localhost:8000/api/memes/semantic?q=无语地看着对方&limit=1"
 请求：
 
 ```bash
-curl http://localhost:8000/api/memes/123/image --output meme.webp
+curl http://localhost:8002/api/memes/123/image --output meme.webp
 ```
 
 GIF 会原样返回完整 GIF，不会返回首帧或转换为 PNG/JPEG。ID 不存在返回 `404`；
@@ -116,13 +116,13 @@ GIF 会原样返回完整 GIF，不会返回首帧或转换为 PNG/JPEG。ID 不
 服务端继续按部署命令监听网络接口，不硬编码 localhost 或具体局域网 IP。例如：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8002
 ```
 
 同一局域网中的消费者可以调用：
 
 ```bash
-curl http://192.168.1.20:8000/api/memes/random
+curl http://192.168.1.20:8002/api/memes/random
 ```
 
 从 JSON 取得相对 `image_url` 后，将它拼接到同一个 Base URL。v0.9.1 按 Trusted LAN

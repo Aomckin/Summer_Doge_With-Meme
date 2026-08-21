@@ -107,11 +107,12 @@ describe("listMemePage", () => {
       pageSize: 48,
       q: "猫",
       tags: ["反讽", "猫"],
+      gifOnly: true,
       sort: "shuffle",
       shuffleSeed: 92837461,
     })).resolves.toEqual(page);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "/api/memes/page?page=2&page_size=48&sort=shuffle&q=%E7%8C%AB&tags=%E5%8F%8D%E8%AE%BD&tags=%E7%8C%AB&shuffle_seed=92837461",
+      "/api/memes/page?page=2&page_size=48&sort=shuffle&q=%E7%8C%AB&tags=%E5%8F%8D%E8%AE%BD&tags=%E7%8C%AB&gif_only=true&shuffle_seed=92837461",
     );
   });
 });

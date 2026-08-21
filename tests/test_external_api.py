@@ -101,6 +101,28 @@ def test_random_result_links_to_original_image_with_exact_mime_and_bytes(
     assert image_response.content == content
 
 
+def test_public_api_payload_uses_origin_relative_urls(external_context) -> None:
+    created = request(
+        "POST",
+        "/api/memes",
+        files={"file": ("public.png", image_bytes("PNG"), "image/png")},
+        data={"title": "public"},
+    ).json()
+    external = request("GET", "/api/memes/random").json()
+
+    urls = [
+        created["image_url"],
+        created["thumbnail_url"],
+        *(image["image_url"] for image in created["images"]),
+        *(image["thumbnail_url"] for image in created["images"]),
+        external["image_url"],
+    ]
+    for url in (url for url in urls if url is not None):
+        assert url.startswith("/")
+        assert "localhost" not in url
+        assert "127.0.0.1" not in url
+
+
 def test_random_skips_record_with_missing_files(external_context, monkeypatch) -> None:
     _, storage, service = external_context
     missing = service.create_meme(

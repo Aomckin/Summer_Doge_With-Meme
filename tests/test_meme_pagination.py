@@ -25,14 +25,15 @@ def request(app, path: str):
 
 
 def build_meme(number: int) -> Meme:
+    is_gif = number == 105
     return Meme(
         title=f"Meme {number}",
         description="猫咪描述" if number == 37 else f"描述 {number}",
-        original_filename=f"{number}.png",
-        stored_filename=f"stored-{number}.png",
-        file_path=f"stored-{number}.png",
+        original_filename=f"{number}.{'gif' if is_gif else 'png'}",
+        stored_filename=f"stored-{number}.{'gif' if is_gif else 'png'}",
+        file_path=f"stored-{number}.{'gif' if is_gif else 'png'}",
         thumbnail_path=None,
-        mime_type="image/png",
+        mime_type="image/gif" if is_gif else "image/png",
         file_size=number,
         width=320,
         height=240,
@@ -132,6 +133,16 @@ def test_page_filters_by_template_and_combines_with_tags(pagination_context) -> 
     assert combined.json()["total"] == 5
     assert ids(combined) == [2, 4, 6, 8, 10]
     assert request(pagination_context, "/api/memes/page?template_id=0").status_code == 422
+
+
+def test_gif_only_filters_legacy_and_paged_lists(pagination_context) -> None:
+    page = request(pagination_context, "/api/memes/page?gif_only=true")
+    legacy = request(pagination_context, "/api/memes?gif_only=true")
+
+    assert page.status_code == 200
+    assert page.json()["total"] == 1
+    assert ids(page) == [105]
+    assert [item["id"] for item in legacy.json()] == [105]
 
 
 def test_shuffle_validation_stability_pages_and_filters(pagination_context) -> None:

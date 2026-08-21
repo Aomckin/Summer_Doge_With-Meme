@@ -188,7 +188,7 @@ def build_auth_router(settings: AuthSettings, store: SessionStore) -> APIRouter:
             samesite="strict",
             path="/",
         )
-        LOGGER.info("Login success: %s", role)
+        LOGGER.info("%s login success", role.capitalize())
         return AuthResponse(authenticated=True, role=role)
 
     @router.get("/me", response_model=AuthResponse)

@@ -1,10 +1,10 @@
-# Meme Vault v1.0.0 Phase 3 交接说明
+# Meme Vault v1.0.0 Phase 4A/B 交接说明
 
-> 当前交接基线：v1.0 Phase 3 完成提交（当前 `HEAD`）
+> 当前交接基线：v1.0 Phase 3 完成提交之上的 Phase 4A/B 工作区
 >
 > 最后更新：2026-08-21
 >
-> 目的：让新的开发对话不依赖旧聊天记录，也能从已完成的 Phase 3 安全接手。
+> 目的：让新的开发对话不依赖旧聊天记录，也能从已完成的 Phase 3 与正在验收的 Phase 4A/B 安全接手。
 
 ## 1. 开始工作前的阅读顺序
 
@@ -29,6 +29,15 @@
 | 文件存储 | 本地 `data/images`、`data/thumbnails` 等目录 |
 
 Phase 3 完成提交没有创建 Git Tag，也没有推送远端。正式发布前应由用户决定这些 Git 操作。
+
+### 2.1 Phase 4A/B 当前状态
+
+- 默认后端端口已统一为 `8002`，包括 README、Vite 开发代理、External API 文档和 Phase 4 任务书附件。
+- Web API、媒体、下载、Viewer、Immersive 与 Infinite Feed 已确认使用同源相对 URL，没有客户端可见的 localhost 后端硬编码。
+- Production Cookie、三项 Secret fail-fast、CORS、Swagger、静态媒体和日志已完成首轮审计与自动化复验。
+- Quick Tunnel 保持人工工具；启动命令和验收矩阵见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
+- 当前停点是等待用户执行 Quick Tunnel 真外网验收。验收通过前不要进入 Phase 4C，也不要代替用户操作 Cloudflare 账号、域名、DNS、Named Tunnel 或 Service。
+- External API 当前仍复用 Web Session；独立机器认证明确留给 Phase 4E。
 
 ## 3. Phase 1 最终交付面
 

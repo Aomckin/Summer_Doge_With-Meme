@@ -112,8 +112,8 @@ describe("DrunkPhysicsController", () => {
     expect(harness.frames).toHaveLength(1);
     harness.frames.shift()?.(0);
 
-    expect(numberVariable(near, "--card-drunk-x")).toBeGreaterThan(0);
-    expect(numberVariable(near, "--card-drunk-lift")).toBeLessThan(0);
+    expect(numberVariable(near, "--card-drunk-x")).toBeGreaterThan(1.5);
+    expect(numberVariable(near, "--card-drunk-lift")).toBeLessThan(-1.5);
     expect(numberVariable(near, "--card-drunk-tilt-y")).toBeGreaterThan(0);
     expect(Math.abs(numberVariable(far, "--card-drunk-x"))).toBeLessThan(0.001);
     expect(harness.frames).toHaveLength(1);

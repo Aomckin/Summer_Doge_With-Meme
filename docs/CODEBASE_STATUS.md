@@ -383,7 +383,7 @@ POST .../captions/generate 或 .../rewrite
 
 ```powershell
 # 后端
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8002
 
 # 前端开发
 npm.cmd --prefix frontend install
@@ -411,7 +411,16 @@ v0.6.3 在不修改现有向量格式、Provider 或 ZIP Import 的前提下补�
 - Meme Merge 在同一事务内迁移 Source membership：Target 已在牌组时保留 Target 原位置并删除重复项；仅 Source 在牌组时把原 Item 改指向 Target，尽量保留原 position。
 - v0.6.4 未实现拖拽排序、智能牌组、AI 推荐、分享或云同步；Phase 3 的 Vault 级 Visitor/Admin 权限不改变 Collection 数据模型。
 
-Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8000`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
+Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8002`。修改前端源码后必须重新构建，FastAPI 托管的生产页面才会更新。
+
+## v1.0.0 Phase 4A/B Public Deployment Compatibility
+
+- 默认后端端口统一为 `8002`；Vite 的绝对 `BACKEND_TARGET` 仅存在于开发代理配置，不进入浏览器构建产物。
+- Web API、四类媒体、Template、External API、Download、Focus Viewer 与 Infinite Feed 均使用同源相对 URL，不向客户端返回 localhost 或服务器磁盘路径。
+- Quick Tunnel 由部署者手工运行；Uvicorn 只监听 `127.0.0.1:8002`，并仅信任 `127.0.0.1` 的代理头。
+- Production 继续要求三项 Access Secret 并启用 Secure Cookie；HttpOnly、SameSite=Strict、媒体认证、Visitor/Admin 权限和 Admin-only Swagger 保持不变。
+- 未启用全局 CORS，没有新增 WebSocket/SSE、路由器端口转发、本地 TLS、Cloudflare Access、Tunnel Token 配置或自动 DNS。
+- 完整证据、人工命令与后续停点见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 
 ## v0.8.3 Meme Forge 工作流闭环边界
 

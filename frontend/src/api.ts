@@ -415,6 +415,7 @@ export function listMemes(options: ListMemesOptions): Promise<MemeResponse[]> {
     params.append("tags", tag);
   }
   if (options.templateId) params.set("template_id", String(options.templateId));
+  if (options.gifOnly) params.set("gif_only", "true");
 
   return requestJson<MemeResponse[]>(`/api/memes?${params}`, {
     signal: options.signal,
@@ -463,6 +464,7 @@ export function listMemePage(
   if (query) params.set("q", query);
   for (const tag of options.tags ?? []) params.append("tags", tag);
   if (options.templateId) params.set("template_id", String(options.templateId));
+  if (options.gifOnly) params.set("gif_only", "true");
   if (options.sort === "shuffle" && options.shuffleSeed !== null && options.shuffleSeed !== undefined) {
     params.set("shuffle_seed", String(options.shuffleSeed));
   }
@@ -552,6 +554,7 @@ export function deleteTemplateReferenceImage(id: number): Promise<void> {
 export function getRandomMeme(
   tags: string[],
   templateId: number | null = null,
+  gifOnly = false,
   signal?: AbortSignal,
 ): Promise<MemeResponse> {
   const params = new URLSearchParams();
@@ -559,6 +562,7 @@ export function getRandomMeme(
     params.append("tags", tag);
   }
   if (templateId) params.set("template_id", String(templateId));
+  if (gifOnly) params.set("gif_only", "true");
   const query = params.size ? `?${params}` : "";
   return requestJson<MemeResponse>(`/api/memes/random${query}`, { signal });
 }

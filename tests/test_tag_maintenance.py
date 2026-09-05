@@ -101,7 +101,7 @@ def tag_links(database_path: Path, meme_id: int) -> list[tuple[str, str, float |
         session.close()
 
 
-def test_new_luna_candidate_imports_suggestion_without_modifying_meme(tmp_path: Path) -> None:
+def test_new_local_agent_candidate_imports_suggestion_without_modifying_meme(tmp_path: Path) -> None:
     database = tmp_path / "vault.db"
     session = create_database(database)
     meme = seed_meme(session, 1, tags=(("old", "ai"),))
@@ -151,7 +151,7 @@ def test_export_preserves_multi_image_position_order(tmp_path: Path) -> None:
     ]
 
 
-def test_local_ui_displays_exported_images_and_luna_prompt(tmp_path: Path) -> None:
+def test_local_ui_displays_exported_images_and_agent_prompt(tmp_path: Path) -> None:
     database = tmp_path / "vault.db"
     session = create_database(database)
     meme = seed_meme(session, 1, positions=(1, 0))
@@ -168,7 +168,7 @@ def test_local_ui_displays_exported_images_and_luna_prompt(tmp_path: Path) -> No
     first = page.index(f'/image/1/{meme.id}/0')
     second = page.index(f'/image/1/{meme.id}/1')
     assert first < second
-    assert "交给 Codex Luna 的提示词" in page
+    assert "交给本地 Agent 助手的提示词" in page
     assert str((work_dir / "batch_0001").resolve()) in page
     assert "提交到元数据整理审核池" in page
     assert "--apply" not in page
@@ -192,6 +192,34 @@ def test_export_batch_pagination_is_by_meme_id(tmp_path: Path) -> None:
     manifest = json.loads((batch / "manifest.json").read_text(encoding="utf-8"))
 
     assert [item["meme_id"] for item in manifest["memes"]] == [11, 12]
+
+
+def test_export_supports_complete_id_range(tmp_path: Path) -> None:
+    database = tmp_path / "vault.db"
+    session = create_database(database)
+    for number in range(1, 13):
+        seed_meme(session, number)
+    session.close()
+
+    batch = export_batch(
+        database_path=database,
+        work_dir=tmp_path / "work",
+        start_id=3,
+        end_id=11,
+    )
+    manifest = json.loads((batch / "manifest.json").read_text(encoding="utf-8"))
+
+    assert [item["meme_id"] for item in manifest["memes"]] == list(range(3, 12))
+    assert manifest["start_id"] == 3
+    assert manifest["end_id"] == 11
+
+
+def test_export_cli_accepts_id_range() -> None:
+    args = build_parser().parse_args([
+        "export", "--start-id", "100", "--end-id", "180",
+    ])
+
+    assert (args.start_id, args.end_id) == (100, 180)
 
 
 def test_export_does_not_overwrite_existing_candidates(tmp_path: Path) -> None:

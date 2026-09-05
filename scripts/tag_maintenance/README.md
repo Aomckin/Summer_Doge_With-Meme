@@ -4,17 +4,18 @@
 
 这组脚本只读取本地 SQLite 和图片路径，不导入或调用 Meme Vault 的 AI client，
 也不需要 Qwen、OpenAI 或其他第三方 API Key。它不会自动分析图片；导出的
-`candidates.jsonl` 需要由 Codex Luna 使用本地图片查看能力逐条填写。
+`candidates.jsonl` 需要由任一本地 Agent 助手使用本地图片查看能力逐条填写。
 
 ## 最简入口
 
 ```powershell
-.\tagging.ps1
+.\run-tagging.ps1
 ```
 
 该脚本启动仅监听 `127.0.0.1` 的本地页面并自动打开浏览器。页面提供导出、
-按 position 排列的图片预览、PowerShell 命令预设、Luna 提示词复制，以及把
+按 position 排列的图片预览、PowerShell 命令预设、通用 Agent 提示词复制，以及把
 候选直接提交到统一元数据审核池的入口。
+原有的 `.\tagging.ps1` 仍可继续使用。
 
 ## 1. 导出批次
 
@@ -24,11 +25,11 @@
 .\.venv\Scripts\python.exe -m scripts.tag_maintenance export
 ```
 
-默认按 `meme_id ASC` 排序，每批 20 个 Meme（可选 10、20、50），并输出到
-`data/tagging_work/batch_0001/`。指定批次和大小：
+默认旧式 CLI 仍按 `meme_id ASC` 导出 20 个 Meme。推荐直接指定闭区间 ID 范围，
+范围内所有现有 Meme 会输出到所选批次目录，例如 `data/tagging_work/batch_0001/`：
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.tag_maintenance export --batch 2 --batch-size 10
+.\.venv\Scripts\python.exe -m scripts.tag_maintenance export --start-id 100 --end-id 299 --batch 2
 ```
 
 每个批次包含：
@@ -40,7 +41,7 @@
 - `templates.json`：当前已有模板词典。
 - `image_paths.json`：按 `meme_id` 和 `position` 提供的本地绝对路径映射。
 
-Luna 的可复制提示词维护在 [`LUNA_PROMPT.txt`](LUNA_PROMPT.txt)，详细边界见
+通用本地 Agent 的可复制提示词维护在 [`AGENT_PROMPT.txt`](AGENT_PROMPT.txt)，详细边界见
 [`docs/LUNA_TAGGING_WORKFLOW.md`](../../docs/LUNA_TAGGING_WORKFLOW.md)。
 
 ## 2. 填写并提交人工审核

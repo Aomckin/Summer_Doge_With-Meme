@@ -11,7 +11,8 @@
 | `/api/auth/logout` | POST | 不存在 | public |
 | `/api/health` | GET | public | public，且只返回 `status` |
 | `/api/memes`, `/api/memes/page`, `/api/memes/{id}` | GET | public | authenticated |
-| `/api/memes/random`, `/api/memes/semantic`, `/api/memes/{id}/similar` | GET | public | authenticated |
+| `/api/memes/library-random`, `/api/memes/{id}/similar` | GET | public | authenticated |
+| `/api/memes/random`, `/api/memes/semantic`, `/api/memes/{id}/image` | GET | public | External Bearer Key |
 | `/api/semantic-search`, `/api/meme-recommendations/chat` | POST | public | authenticated（只读检索） |
 | `/api/memes/{id}/image`, `/media/images/*`, `/media/thumbnails/*` | GET | public | authenticated |
 | `/media/template-images/*`, `/media/template-thumbnails/*` | GET | public | authenticated |
@@ -31,7 +32,7 @@
 
 - CORS：应用当前未安装宽泛 CORS middleware，不存在 `*` 与 credentials 的危险组合。浏览器会话使用 `SameSite=Strict`，并拒绝 `Sec-Fetch-Site: cross-site` 的 mutation。
 - Static Media：四个媒体挂载点都经过 Authorization middleware，不再允许裸 URL 绕过认证。
-- External API：Random、Semantic 与 Meme Media 当前纳入同一 authenticated Web Session 边界；没有现存独立机器 Access Key。Maibot 公网接入前应单独设计机器凭据，不应复用或保存 Visitor 原始 Key。
+- External API：v1.0.1 起 Random、Semantic 与 External Media 使用独立 `EXTERNAL_API_KEY` Bearer 认证，不接受 Visitor/Admin Session 或 Key 代替。
 - Swagger：启用权限系统后仅 Admin 可访问；开发兼容模式保持原行为。
 - 错误：认证失败统一返回 `Invalid access key`，不会透露命中的是哪类 Key，日志不记录 Key。
 
@@ -45,7 +46,7 @@
 ## Non-Goals / 后续边界
 
 - 本轮没有用户数据库、注册、OAuth、JWT、Redis、多租户或权限表。
-- 本轮没有实现机器客户端独立 Access Key；External API 暂时沿用 Web Session，不能直接视为 Maibot 公网接入完成。
+- Phase 3 当时未实现机器客户端独立 Key；该限制已由 v1.0.1 Hotfix 解除。
 - 带宽限制、HTTPS、Tunnel 与 DDoS 防护属于反向代理/托管层，不塞入 Meme Vault 业务代码。
 
 ## 完成门禁

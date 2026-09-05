@@ -258,16 +258,14 @@ def list_meme_page(
     )
 
 
-# 固定路径 /random 放在 /{meme_id} 前，避免被当成一个动态 ID。
-@router.get("/random", response_model=MemeResponse)
-def get_random_meme(
+def _select_random_meme(
     service: ServiceDependency,
-    tags: Annotated[list[str] | None, Query()] = None,
-    template_id: Annotated[int | None, Query(ge=1)] = None,
+    tags: list[str] | None,
+    template_id: int | None,
     gif_only: bool = False,
-) -> MemeResponse:
+) -> Meme:
     try:
-        meme = service.get_random_meme(
+        return service.get_random_meme(
             tags=tags, template_id=template_id, gif_only=gif_only
         )
     except NoMemesAvailableError as error:
@@ -275,7 +273,32 @@ def get_random_meme(
     except MemeFileMissingError as error:
         # 410 表示记录曾存在，但其对应文件已经不可用。
         raise HTTPException(status_code=410, detail=str(error)) from error
-    return meme_to_external_response(meme)
+
+
+# Web UI keeps Session authentication and never receives the machine key.
+@router.get("/library-random", response_model=MemeResponse)
+def get_library_random_meme(
+    service: ServiceDependency,
+    tags: Annotated[list[str] | None, Query()] = None,
+    template_id: Annotated[int | None, Query(ge=1)] = None,
+    gif_only: bool = False,
+) -> MemeResponse:
+    return meme_to_response(
+        _select_random_meme(service, tags, template_id, gif_only)
+    )
+
+
+# Fixed external path stays before /{meme_id} and requires the machine Bearer key.
+@router.get("/random", response_model=MemeResponse)
+def get_random_meme(
+    service: ServiceDependency,
+    tags: Annotated[list[str] | None, Query()] = None,
+    template_id: Annotated[int | None, Query(ge=1)] = None,
+    gif_only: bool = False,
+) -> MemeResponse:
+    return meme_to_external_response(
+        _select_random_meme(service, tags, template_id, gif_only)
+    )
 
 
 @router.post("/{meme_id}/analyze", response_model=AIAnalysisResponse)

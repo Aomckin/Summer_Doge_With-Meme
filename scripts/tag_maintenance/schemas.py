@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class TagCandidate(BaseModel):
-    """One Luna metadata candidate; legacy tag-only JSONL remains valid."""
+    """One local-agent metadata candidate; legacy tag-only JSONL remains valid."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 

@@ -18,6 +18,8 @@ from app.services.meme_service import MemeService
 from app.services.semantic_search_service import MemeEmbeddingUnavailableError
 from app.storage.image_storage import ImageStorage
 
+EXTERNAL_API_KEY = "external-machine-secret"
+
 
 def image_bytes(image_format: str) -> bytes:
     output = BytesIO()
@@ -37,11 +39,18 @@ def image_bytes(image_format: str) -> bytes:
 
 
 def request(method: str, path: str, **kwargs) -> Response:
+    headers = dict(kwargs.pop("headers", {}))
+    if method == "GET" and (
+        path in {"/api/memes/random", "/api/memes/semantic"}
+        or (path.startswith("/api/memes/") and path.endswith("/image"))
+    ):
+        headers.setdefault("Authorization", f"Bearer {EXTERNAL_API_KEY}")
+
     async def send() -> Response:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            return await client.request(method, path, **kwargs)
+            return await client.request(method, path, headers=headers, **kwargs)
 
     return asyncio.run(send())
 
@@ -58,12 +67,32 @@ def external_context(tmp_path: Path):
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
     service = MemeService(session, storage)
     app.dependency_overrides[get_meme_service] = lambda: service
+    previous_external_api_key = app.state.external_api_key
+    app.state.external_api_key = EXTERNAL_API_KEY
 
     yield session, storage, service
 
+    app.state.external_api_key = previous_external_api_key
     app.dependency_overrides.clear()
     session.close()
     engine.dispose()
+
+
+def test_external_api_rejects_missing_and_wrong_bearer_key(external_context) -> None:
+    _, _, service = external_context
+    meme = service.create_meme(
+        "machine.png", image_bytes("PNG"), title="machine"
+    )
+
+    for path in ("/api/memes/random", f"/api/memes/{meme.id}/image"):
+        missing = request("GET", path, headers={"Authorization": ""})
+        wrong = request("GET", path, headers={"Authorization": "Bearer wrong"})
+        assert missing.status_code == 401
+        assert missing.headers["www-authenticate"] == "Bearer"
+        assert wrong.status_code == 401
+
+    assert request("GET", "/api/memes/random").status_code == 200
+    assert request("GET", f"/api/memes/{meme.id}/image").status_code == 200
 
 
 @pytest.mark.parametrize(

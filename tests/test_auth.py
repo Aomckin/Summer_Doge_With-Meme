@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.api.memes import download_meme
-from app.auth import AuthSettings, _required_role
+from app.auth import AuthSettings, _required_role, resolve_external_api_key
 from app.main import create_app
 
 
@@ -16,7 +16,12 @@ def settings() -> AuthSettings:
 
 
 async def make_client(tmp_path: Path) -> AsyncClient:
-    app = create_app(tmp_path / "images", tmp_path / "thumbs", auth_settings=settings())
+    app = create_app(
+        tmp_path / "images",
+        tmp_path / "thumbs",
+        auth_settings=settings(),
+        external_api_key="external-secret",
+    )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -71,6 +76,10 @@ def test_invalid_configuration_is_rejected() -> None:
         assert "different" in str(error)
     else:
         raise AssertionError("matching keys must be rejected")
+
+    for reused_key in ("visitor-secret", "admin-secret"):
+        with pytest.raises(ValueError, match="must differ"):
+            resolve_external_api_key(settings(), reused_key)
 
 
 def test_production_environment_requires_all_secrets_and_secure_cookie(
@@ -134,12 +143,63 @@ def test_production_login_sets_secure_session_cookie(tmp_path: Path) -> None:
 
 
 def test_permission_policy_covers_read_write_and_sensitive_routes() -> None:
+    assert _required_role("/api/memes/random", "GET") == "external"
+    assert _required_role("/api/memes/library-random", "GET") == "authenticated"
+    assert _required_role("/api/memes/semantic", "GET") == "external"
+    assert _required_role("/api/memes/123/image", "GET") == "external"
     assert _required_role("/api/memes/1/similar", "GET") == "authenticated"
     assert _required_role("/api/semantic-search", "POST") == "authenticated"
     assert _required_role("/api/memes/1", "PATCH") == "admin"
     assert _required_role("/api/memes/1/collections", "GET") == "admin"
     assert _required_role("/api/export-jobs/1/download", "GET") == "admin"
     assert _required_role("/media/images/private.gif", "GET") == "authenticated"
+
+
+def test_web_sessions_do_not_authenticate_external_api_and_bearer_cannot_write(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        async with await make_client(tmp_path) as client:
+            external = {"Authorization": "Bearer external-secret"}
+            assert (await client.get("/api/memes/random")).status_code == 401
+            assert (await client.get(
+                "/api/memes/random",
+                headers={"Authorization": "Bearer wrong"},
+            )).status_code == 401
+            assert (await client.get(
+                "/api/memes/random",
+                headers={"Authorization": "Bearer visitor-secret"},
+            )).status_code == 401
+            assert (await client.get(
+                "/api/memes/random",
+                headers={"Authorization": "Bearer admin-secret"},
+            )).status_code == 401
+
+            visitor = await client.post(
+                "/api/auth/login", json={"key": "visitor-secret"}
+            )
+            assert visitor.status_code == 200
+            assert (await client.get("/api/memes/random")).status_code == 401
+            assert (await client.post(
+                "/api/memes", headers=external, files={}
+            )).status_code == 403
+
+            await client.post("/api/auth/logout")
+            admin = await client.post(
+                "/api/auth/login", json={"key": "admin-secret"}
+            )
+            assert admin.status_code == 200
+            assert (await client.get("/api/memes/random")).status_code == 401
+            assert (await client.get(
+                "/api/memes/not-an-id/image", headers=external
+            )).status_code == 422
+
+        async with await make_client(tmp_path / "bearer-only") as client:
+            assert (await client.post(
+                "/api/memes", headers=external, files={}
+            )).status_code == 401
+
+    run(scenario())
 
 
 def test_visitor_cannot_turn_multi_image_download_into_zip() -> None:

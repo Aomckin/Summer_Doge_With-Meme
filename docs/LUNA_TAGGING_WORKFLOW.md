@@ -1,23 +1,25 @@
-# Luna 本地元数据工作流
+# 本地 Agent 元数据工作流
 
 > v0.6.1 当前执行标准。
 
-这套流程使用 Codex Luna 的本地图片查看能力生成候选，不调用 Meme Vault 配置的
-Qwen、OpenAI 或其他在线 AI Provider，也不让 Luna 直接修改 SQLite。
+这套流程使用本地 Agent 助手的图片查看能力生成候选，不调用 Meme Vault 配置的
+Qwen、OpenAI 或其他在线 AI Provider，也不让 Agent 直接修改 SQLite。
 
 ## 最短使用方式
 
 在仓库根目录运行：
 
 ```powershell
-.\tagging.ps1
+.\run-tagging.ps1
 ```
+
+原有的 `.\tagging.ps1` 仍可继续使用。
 
 浏览器会打开 <http://127.0.0.1:8765>。页面可以：
 
-- 选择批次并导出。
+- 填写起止 ID 和批次号后导出；范围包含首尾 ID。
 - 按 `position` 顺序显示每个 Meme 的完整图片组。
-- 一键复制当前批次的 Luna 提示词。
+- 一键复制当前批次的通用 Agent 提示词。
 - 一键校验候选并提交到“元数据整理”审核池。
 - 复制导出和提交人工审核的 PowerShell 预设。
 
@@ -27,7 +29,7 @@ Qwen、OpenAI 或其他在线 AI Provider，也不让 Luna 直接修改 SQLite�
 
 ## 文件与数据流
 
-默认每批按 `meme_id ASC` 导出 20 个 Meme；页面允许 10、20、50：
+页面按 `meme_id ASC` 导出起止 ID 范围内的全部现有 Meme。批次号仅用于区分输出目录：
 
 ```text
 data/tagging_work/batch_0001/
@@ -43,8 +45,8 @@ data/tagging_work/batch_0001/
 ```text
 SQLite + 本地图片
   → 页面导出批次
-  → Luna 按 position 查看完整图片组
-  → Luna 只填写 candidates.jsonl
+  → 本地 Agent 按 position 查看完整图片组
+  → 本地 Agent 只填写 candidates.jsonl
   → 页面或 CLI 校验并提交
   → MemeEnrichmentService / Repository 创建 pending Suggestion
   → audit_*.jsonl
@@ -52,7 +54,7 @@ SQLite + 本地图片
   → 按字段采用后才修改 Meme
 ```
 
-## Luna 输出标准
+## Agent 输出标准
 
 每个 Meme 在 `candidates.jsonl` 中恰好占一行，字段必须与当前 Pydantic Schema
 一致：
@@ -73,13 +75,13 @@ SQLite + 本地图片
 
 标题、描述合理时返回 null；模板只能使用 `templates.json` 中的已有名称。需要人工复核时，在最终报告中列出 `meme_id`，不要扩展 JSONL 格式。
 
-## Luna 提示词
+## Agent 提示词
 
 页面中的提示词来自
-[`scripts/tag_maintenance/LUNA_PROMPT.txt`](../scripts/tag_maintenance/LUNA_PROMPT.txt)，
-已经自动替换为当前批次绝对路径，可直接复制给 Codex Luna。
+[`scripts/tag_maintenance/AGENT_PROMPT.txt`](../scripts/tag_maintenance/AGENT_PROMPT.txt)，
+已经自动替换为当前批次绝对路径，可直接复制给任一本地 Agent 助手。
 
-Luna 只负责查看图片和填写候选，禁止：
+Agent 只负责查看图片和填写候选，禁止：
 
 - 调用外部 AI API。
 - 运行导入器或直接修改数据库。
@@ -91,6 +93,6 @@ Luna 只负责查看图片和填写候选，禁止：
 - 候选格式、重复 ID、不存在的 Meme 和受保护标签删除都会被拒绝。
 - 导入命令统一把候选写入 `MemeEnrichmentSuggestion`，不提供 dry-run 或 CLI apply。
 - 整批候选在一个事务中创建；失败会回滚，不留下部分审核项。
-- 新旧两种 Luna JSONL 都只创建待审核 Suggestion，不直接修改 Meme。
+- 新旧两种候选 JSONL 都只创建待审核 Suggestion，不直接修改 Meme。
 - 真正的数据写入在网页审核台按字段采用，并记录数据库审计。
 - `data/tagging_work/`、图片、数据库和审计文件不得提交 Git。

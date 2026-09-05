@@ -538,13 +538,13 @@ Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供
 - [x] 完成 CORS、Static Media、External API、错误信息与日志安全审计；端点矩阵独立落档。
 - [x] TypeScript、37 个 Vitest 文件 / 338 项测试、264 项 Pytest、生产构建与 `git diff --check` 通过。
 
-Phase 3 使用单进程内存 Session，服务重启会注销现有会话；没有引入用户数据库、OAuth、JWT、Redis、RBAC 权限树、复杂限流或 CAPTCHA。External API 当前使用 Web Session，机器客户端独立凭据仍待单独设计。
+Phase 3 使用单进程内存 Session，服务重启会注销现有会话；没有引入用户数据库、OAuth、JWT、Redis、RBAC 权限树、复杂限流或 CAPTCHA。External API 的机器客户端独立凭据已在 v1.0.1 Hotfix 中完成。
 
 ### Phase 3 后续候选：公开访问与部署增强（尚未排期）
 
 > v1.0.0 Phase 3 已提供私人/小范围受邀访问边界。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
 
-- [ ] 用户账户系统、分享链接与机器客户端独立凭据
+- [ ] 用户账户系统与分享链接
 - [ ] 网络上传入口和上传收件箱
 - [ ] 内容审核
 - [ ] 对象存储与数据库迁移

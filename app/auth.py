@@ -20,6 +20,35 @@ from starlette.responses import JSONResponse
 LOGGER = logging.getLogger("meme_vault.auth")
 Role = Literal["visitor", "admin"]
 SESSION_COOKIE = "meme_vault_session"
+ExternalApiPath = Literal["external"]
+
+
+def _is_external_api_request(path: str, method: str) -> bool:
+    if method not in {"GET", "HEAD"}:
+        return False
+    if path in {"/api/memes/random", "/api/memes/semantic"}:
+        return True
+    parts = path.split("/")
+    return len(parts) == 5 and parts[1:3] == ["api", "memes"] and parts[4:] == ["image"]
+
+
+def resolve_external_api_key(
+    auth_settings: AuthSettings | None,
+    configured_key: str | None = None,
+) -> str | None:
+    key = (
+        configured_key
+        if configured_key is not None
+        else os.getenv("EXTERNAL_API_KEY", "")
+    ).strip()
+    if not key:
+        return None
+    if auth_settings is not None and any(
+        hmac.compare_digest(key, web_key)
+        for web_key in (auth_settings.visitor_key, auth_settings.admin_key)
+    ):
+        raise ValueError("External API key must differ from Visitor and Admin keys")
+    return key
 
 
 @dataclass(frozen=True)
@@ -113,11 +142,16 @@ class AuthResponse(BaseModel):
     role: Role | None
 
 
-def _required_role(path: str, method: str) -> Literal["public", "authenticated", "admin"]:
+def _required_role(
+    path: str,
+    method: str,
+) -> Literal["public", "authenticated", "admin", "external"]:
     if path in {"/api/health"} or path.startswith("/api/auth/"):
         return "public"
     if path in {"/docs", "/redoc", "/openapi.json"}:
         return "admin"
+    if _is_external_api_request(path, method):
+        return "external"
     if path == "/mobile" or path.startswith("/api/import-jobs"):
         return "admin"
     if path.startswith((
@@ -146,14 +180,39 @@ def _required_role(path: str, method: str) -> Literal["public", "authenticated",
 
 
 class AuthorizationMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, store: SessionStore) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, app, store: SessionStore | None = None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(app)
         self.store = store
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        role = self.store.resolve(request.cookies.get(SESSION_COOKIE))
+        role: Role | None = (
+            self.store.resolve(request.cookies.get(SESSION_COOKIE))
+            if self.store
+            else "admin"
+        )
         request.state.auth_role = role
         required = _required_role(request.url.path, request.method)
+        if required == "external":
+            configured_key = getattr(request.app.state, "external_api_key", None)
+            authorization = request.headers.get("authorization", "")
+            scheme, separator, token = authorization.partition(" ")
+            authenticated = bool(
+                configured_key
+                and separator
+                and scheme.lower() == "bearer"
+                and token
+                and hmac.compare_digest(token, configured_key)
+            )
+            if not authenticated:
+                return JSONResponse(
+                    {"detail": "External API authentication required"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            request.state.external_api_authenticated = True
+            return await call_next(request)
+        if self.store is None:
+            return await call_next(request)
         if required != "public" and role is None:
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
         if required == "admin" and role != "admin":

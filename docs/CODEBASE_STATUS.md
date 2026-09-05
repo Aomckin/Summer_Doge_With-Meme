@@ -1,6 +1,6 @@
 # Meme Vault 代码现状速览
 
-> 提交基线：v1.0.0 Phase 3 完成提交（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
+> 提交基线：v1.0.1 External API Machine Authentication Hotfix（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
 
 ## 当前能力
 
@@ -421,6 +421,12 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8002`。修改前
 - Production 继续要求三项 Access Secret 并启用 Secure Cookie；HttpOnly、SameSite=Strict、媒体认证、Visitor/Admin 权限和 Admin-only Swagger 保持不变。
 - 未启用全局 CORS，没有新增 WebSocket/SSE、路由器端口转发、本地 TLS、Cloudflare Access、Tunnel Token 配置或自动 DNS。
 - 完整证据、人工命令与后续停点见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
+
+## v1.0.1 External API Machine Authentication
+
+- `GET /api/memes/random`、`GET /api/memes/semantic` 与 `GET /api/memes/{id}/image` 统一要求 `Authorization: Bearer <EXTERNAL_API_KEY>`。
+- External API 不接受 Visitor/Admin Session Cookie 代替机器 Key；External、Visitor 与 Admin 三把 Key 必须互不相同。
+- External Key 只穿透上述三个只读入口，不授权 Upload、Edit、Delete、Batch/ZIP、Settings 或其他 Web API。
 
 ## v0.8.3 Meme Forge 工作流闭环边界
 

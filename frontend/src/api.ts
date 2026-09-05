@@ -564,7 +564,7 @@ export function getRandomMeme(
   if (templateId) params.set("template_id", String(templateId));
   if (gifOnly) params.set("gif_only", "true");
   const query = params.size ? `?${params}` : "";
-  return requestJson<MemeResponse>(`/api/memes/random${query}`, { signal });
+  return requestJson<MemeResponse>(`/api/memes/library-random${query}`, { signal });
 }
 
 export function uploadMeme(input: UploadMemeInput): Promise<MemeResponse> {

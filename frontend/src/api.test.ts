@@ -28,6 +28,7 @@ import {
   listCaptions,
   parseTagInput,
   generateCaptions,
+  getRandomMeme,
   reorderMemeImages,
   testAIProvider,
   rewriteCaption,
@@ -113,6 +114,19 @@ describe("listMemePage", () => {
     })).resolves.toEqual(page);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "/api/memes/page?page=2&page_size=48&sort=shuffle&q=%E7%8C%AB&tags=%E5%8F%8D%E8%AE%BD&tags=%E7%8C%AB&gif_only=true&shuffle_seed=92837461",
+    );
+  });
+});
+
+describe("getRandomMeme", () => {
+  it("uses the Web Session route instead of the machine-only External route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(meme));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getRandomMeme(["funny"], 3, true);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/memes/library-random?tags=funny&template_id=3&gif_only=true",
     );
   });
 });

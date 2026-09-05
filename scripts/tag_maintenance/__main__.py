@@ -17,7 +17,9 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--database", type=Path, default=DATABASE_PATH)
     export_parser.add_argument("--work-dir", type=Path)
     export_parser.add_argument("--batch", type=int, default=1)
-    export_parser.add_argument("--batch-size", type=int, choices=(10, 20, 50), default=20)
+    export_parser.add_argument("--batch-size", type=int, default=20)
+    export_parser.add_argument("--start-id", type=int)
+    export_parser.add_argument("--end-id", type=int)
 
     import_parser = subparsers.add_parser("import", help="Submit candidates for metadata review")
     import_parser.add_argument("candidates", type=Path)
@@ -41,6 +43,8 @@ def main() -> None:
             work_dir=args.work_dir,
             batch_number=args.batch,
             batch_size=args.batch_size,
+            start_id=args.start_id,
+            end_id=args.end_id,
         )
         print(json.dumps({"batch_dir": str(batch_dir)}, ensure_ascii=False))
         return

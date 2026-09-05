@@ -1,4 +1,4 @@
-# Meme Vault v1.0.0 Phase 4A/B 交接说明
+# Meme Vault v1.0.1 Hotfix 交接说明
 
 > 当前交接基线：v1.0 Phase 3 完成提交之上的 Phase 4A/B 工作区
 >
@@ -19,7 +19,7 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 产品版本 | `v1.0.0 Phase 3` |
+| 产品版本 | `v1.0.1` |
 | 基线提交 | v1.0 Phase 3 完成提交（当前 `HEAD`） |
 | 当前分支 | `codex/v1.0-phase3` |
 | 后端 | Python + FastAPI + SQLAlchemy + SQLite + Pillow |
@@ -37,7 +37,7 @@ Phase 3 完成提交没有创建 Git Tag，也没有推送远端。正式发布�
 - Production Cookie、三项 Secret fail-fast、CORS、Swagger、静态媒体和日志已完成首轮审计与自动化复验。
 - Quick Tunnel 保持人工工具；启动命令和验收矩阵见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 - 当前停点是等待用户执行 Quick Tunnel 真外网验收。验收通过前不要进入 Phase 4C，也不要代替用户操作 Cloudflare 账号、域名、DNS、Named Tunnel 或 Service。
-- External API 当前仍复用 Web Session；独立机器认证明确留给 Phase 4E。
+- External API 已使用独立 Bearer Key；Web Random 已迁移到 Session 专用 `/api/memes/library-random`。
 
 ## 3. Phase 1 最终交付面
 
@@ -114,7 +114,7 @@ Card Motion 自 Phase 1 起 Feature Freeze。Phase 2 只允许缺陷修复、性
 - `frontend/src/auth.ts` 在 Vault 构造前完成身份 bootstrap；Access Gate 不预加载 Meme，登录/退出无需刷新，401 或媒体 Session 失效会回到 Gate。
 - 前端使用集中 capabilities 保护 Upload 与 Batch Download command，并按 Role 收口 Header、Management、Inspector、Caption、Relation、Forge 等 mutation 入口；后端仍是最终安全边界。
 - Session 当前保存在单进程内存中，服务重启后失效；这符合现有单进程架构，不代表多进程共享 Session。
-- External Meme API 当前使用同一 Web Session 边界；Maibot 等机器客户端的独立凭据仍是后续单独设计项。
+- External Meme API 的 Random、Semantic 与 External Media 已统一使用独立机器 Bearer Key。
 
 ## 4. 前端关键代码地图
 
@@ -206,7 +206,7 @@ Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默
 - `MemeResponse.images` 是完整有序图片组；兼容字段 `image_url`、`thumbnail_url`、width / height 等继续投影自首图。
 - 图片二进制保存在本地文件系统，不进入 SQLite。
 - Meme / Tag / Template / 图片变化通过现有 Derived Data Invalidation 令语义派生数据失效；不要在普通写事务里直接调用外部 Provider。
-- External Meme API 已纳入 Web Session 认证，但尚无独立机器 Access Key、速率限制或分享 Token。
+- External Meme API 已有独立机器 Access Key；多客户端 Key 轮换、速率限制与分享 Token 仍未实现。
 - 当前没有用户账户数据库、租户、对象存储、云数据库或多进程 Session 同步。
 
 更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
@@ -275,12 +275,12 @@ git diff --check
 请先阅读 README.md、docs/NEXT_CONVERSATION_HANDOFF.md、
 docs/CODEBASE_STATUS.md 和 docs/PROJECT_PLAN.md。
 
-当前基线是 Meme Vault v1.0.0 Phase 3 完成提交（当前 HEAD）。
+当前基线是 Meme Vault v1.0.1 External API Machine Authentication Hotfix（当前 HEAD）。
 Card Motion 已 Feature Freeze；Immersive Focus 必须保留 Occupancy Grid
 临时脱离协议和多图/GIF 媒体生命周期。
 
 Visitor/Admin Access Gate、Session、API/媒体权限审计与 Visitor 只读 UI 已完成；
-External API 独立机器凭据、多进程 Session、用户账户与分享 Token 仍未实现。
+External API 独立机器凭据已实现；多进程 Session、用户账户与分享 Token 仍未实现。
 Immersive Infinite Feed 与六阶段整体视觉重构继续保持冻结；2000+ 真实数据连续滚动性能验收已通过。
 下一轮先由用户确定新的唯一主目标，不顺手展开其他候选方向。
 ```

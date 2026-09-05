@@ -57,7 +57,7 @@ def test_random_meme_components_exist() -> None:
 
 
 def test_random_meme_returns_clear_error_for_empty_database(random_context) -> None:
-    response = request("GET", "/api/memes/random")
+    response = request("GET", "/api/memes/library-random")
 
     assert response.status_code == 404
     assert "No Meme" in response.json()["detail"]
@@ -79,7 +79,7 @@ def test_random_meme_can_be_limited_by_tags(random_context) -> None:
 
     response = request(
         "GET",
-        "/api/memes/random",
+        "/api/memes/library-random",
         params=[("tags", "cat"), ("tags", "funny")],
     )
 
@@ -102,7 +102,7 @@ def test_random_meme_can_be_limited_to_gifs(random_context) -> None:
         data={"title": "动图"},
     ).json()
 
-    response = request("GET", "/api/memes/random?gif_only=true")
+    response = request("GET", "/api/memes/library-random?gif_only=true")
 
     assert response.status_code == 200
     assert response.json()["id"] == gif["id"]

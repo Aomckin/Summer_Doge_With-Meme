@@ -14,7 +14,7 @@ from .exporter import export_batch
 from .importer import import_candidates
 
 
-PROMPT_PATH = Path(__file__).with_name("LUNA_PROMPT.txt")
+PROMPT_PATH = Path(__file__).with_name("AGENT_PROMPT.txt")
 
 
 def _batch_dir(work_dir: Path, batch_number: int) -> Path:
@@ -57,6 +57,8 @@ def render_page(
     work_dir: Path,
     batch_number: int,
     *,
+    start_id: int = 1,
+    end_id: int = 20,
     message: str = "",
 ) -> str:
     manifest = _load_manifest(work_dir, batch_number)
@@ -68,7 +70,8 @@ def render_page(
     )
     export_command = (
         ".\\.venv\\Scripts\\python.exe -m scripts.tag_maintenance export "
-        f"--batch {batch_number} --batch-size 20"
+        f"--start-id {start_id} --end-id {end_id} "
+        f"--batch {batch_number}"
     )
     import_command = (
         ".\\.venv\\Scripts\\python.exe -m scripts.tag_maintenance import "
@@ -112,14 +115,18 @@ input,button,textarea{{font:inherit;padding:8px}}button{{cursor:pointer}}.notice
 figcaption{{color:#666}}.copy{{display:flex;gap:8px}}textarea{{width:100%;min-height:42px}}.prompt textarea{{min-height:360px}}
 </style></head><body><h1>Meme Vault 离线标签</h1>{notice}
 <section><h2>批次操作</h2><form method="post" action="/export">
-<label>批次<input name="batch" type="number" min="1" value="{batch_number}"></label>
-<label>每批 Meme<select name="batch_size"><option>10</option><option selected>20</option><option>50</option></select></label>
+<label>开始 ID<input name="start_id" type="number" min="1" value="{start_id}" required></label>
+<label>结束 ID<input name="end_id" type="number" min="1" value="{end_id}" required></label>
+<label>批次<input name="batch" type="number" min="1" value="{batch_number}" required></label>
 <button>导出并显示</button></form>
-<form method="post" action="/submit-review"><input name="batch" type="hidden" value="{batch_number}">
+<form method="post" action="/submit-review">
+<input name="batch" type="hidden" value="{batch_number}">
+<input name="start_id" type="hidden" value="{start_id}">
+<input name="end_id" type="hidden" value="{end_id}">
 <button>提交到元数据整理审核池</button></form></section>
 <section><h2>PowerShell 预设</h2>{_copy_block("导出", export_command)}
 {_copy_block("提交到人工审核", import_command)}</section>
-<section class="prompt"><h2>交给 Codex Luna 的提示词</h2>{_copy_block("直接复制整段", prompt)}</section>
+<section class="prompt"><h2>交给本地 Agent 助手的提示词</h2>{_copy_block("直接复制整段", prompt)}</section>
 <section><h2>{batch_name} 图片</h2>{cards}</section>
 <script>function copyPrevious(button){{navigator.clipboard.writeText(button.previousElementSibling.value);button.textContent='已复制'}}</script>
 </body></html>"""
@@ -135,8 +142,14 @@ def run_ui(
     resolved_work_dir = (work_dir or database_path.parent / "tagging_work").resolve()
 
     class Handler(BaseHTTPRequestHandler):
-        def _page(self, batch: int, message: str = "", status: int = 200) -> None:
-            body = render_page(resolved_work_dir, batch, message=message).encode("utf-8")
+        def _page(
+            self, batch: int, message: str = "", status: int = 200,
+            start_id: int = 1, end_id: int = 20,
+        ) -> None:
+            body = render_page(
+                resolved_work_dir, batch, start_id=start_id, end_id=end_id,
+                message=message,
+            ).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -147,7 +160,11 @@ def run_ui(
             parsed = urlparse(self.path)
             if parsed.path == "/":
                 query = parse_qs(parsed.query)
-                self._page(int(query.get("batch", ["1"])[0]), query.get("message", [""])[0])
+                self._page(
+                    int(query.get("batch", ["1"])[0]), query.get("message", [""])[0],
+                    start_id=int(query.get("start_id", ["1"])[0]),
+                    end_id=int(query.get("end_id", ["20"])[0]),
+                )
                 return
             parts = parsed.path.strip("/").split("/")
             if len(parts) == 4 and parts[0] == "image":
@@ -170,8 +187,9 @@ def run_ui(
                 length = min(int(self.headers.get("Content-Length", "0")), 65536)
                 form = parse_qs(self.rfile.read(length).decode("utf-8"))
                 batch = int(form.get("batch", ["1"])[0])
+                start_id = int(form.get("start_id", ["1"])[0])
+                end_id = int(form.get("end_id", ["20"])[0])
                 if self.path == "/export":
-                    size = int(form.get("batch_size", ["20"])[0])
                     if _load_manifest(resolved_work_dir, batch):
                         message = f"batch_{batch:04d} 已存在，直接显示；候选文件未覆盖"
                     else:
@@ -179,7 +197,8 @@ def run_ui(
                             database_path=database_path,
                             work_dir=resolved_work_dir,
                             batch_number=batch,
-                            batch_size=size,
+                            start_id=start_id,
+                            end_id=end_id,
                         )
                         message = f"batch_{batch:04d} 已导出"
                 elif self.path == "/submit-review":
@@ -188,17 +207,23 @@ def run_ui(
                         database_path=database_path,
                     )
                     message = (
-                        f"已提交 {result['suggestion_count']} 条 Luna 建议；"
+                        f"已提交 {result['suggestion_count']} 条本地 Agent 建议；"
                         "请前往 Meme Vault 的“元数据整理”进行人工审核"
                     )
                 else:
                     self.send_error(404)
                     return
                 self.send_response(303)
-                self.send_header("Location", "/?" + urlencode({"batch": batch, "message": message}))
+                self.send_header("Location", "/?" + urlencode({
+                    "batch": batch, "start_id": start_id, "end_id": end_id,
+                    "message": message,
+                }))
                 self.end_headers()
             except (OSError, ValueError, LookupError) as exc:
-                self._page(locals().get("batch", 1), str(exc), 400)
+                self._page(
+                    locals().get("batch", 1), str(exc), 400,
+                    locals().get("start_id", 1), locals().get("end_id", 20),
+                )
 
         def log_message(self, _format: str, *_args: object) -> None:
             return

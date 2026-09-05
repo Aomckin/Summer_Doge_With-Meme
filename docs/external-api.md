@@ -1,4 +1,4 @@
-# Meme Vault v1.0.0 External Meme API / 外部 Meme API
+# Meme Vault v1.0.1 External Meme API / 外部 Meme API
 
 该 API 面向可信局域网中的通用消费者，不绑定 MaiBot、QQ 或任何消息平台。以下
 URL 都是相对路径；消费者应把它们与 Meme Vault 的 Base URL（例如
@@ -6,11 +6,22 @@ URL 都是相对路径；消费者应把它们与 Meme Vault 的 Base URL（例�
 
 ## Authentication / 认证
 
-External API（外部 API）是只读接口。开发兼容模式未启用 Access Gate（访问门禁）时，
-下方示例可以直接调用；配置 Visitor / Admin Access Gate（访客 / 管理员访问门禁）后，
-API 与私有媒体会沿用同源 Web Session（网页会话）认证边界。v1.0.0 尚未提供独立的
-Machine Access Key（机器访问密钥），因此不要把 Visitor Key（访客密钥）写入 URL、
-查询参数或长期运行的客户端脚本。
+External API（外部 API）始终使用独立机器凭据，不复用 Web Session。服务端配置：
+
+```dotenv
+EXTERNAL_API_KEY=<独立随机长密钥>
+```
+
+客户端的 Random、Semantic 与后续 `image_url` 请求都必须携带：
+
+```http
+Authorization: Bearer <EXTERNAL_API_KEY>
+```
+
+无 Key、错误 Key、Visitor/Admin Cookie 或把 Visitor/Admin Key 当作 Bearer 都返回 `401`。
+`EXTERNAL_API_KEY` 必须与 Visitor/Admin Key 不同；真实值只保存在被 Git 忽略的 `.env`
+或部署环境中，不放入 URL、查询参数、仓库或日志。该 Key 只开放以下三个只读入口，
+不会授权 Upload、Edit、Delete、Batch/ZIP、Settings 或其他 Web API。
 
 ## Random Meme
 
@@ -24,7 +35,7 @@ Machine Access Key（机器访问密钥），因此不要把 Visitor Key（访�
 请求：
 
 ```bash
-curl http://localhost:8002/api/memes/random
+curl -H "Authorization: Bearer $EXTERNAL_API_KEY" http://localhost:8002/api/memes/random
 ```
 
 响应示例（实际响应还会保留现有 Meme DTO 的标题、尺寸、标签等字段）：
@@ -62,7 +73,7 @@ curl http://localhost:8002/api/memes/random
 请求：
 
 ```bash
-curl "http://localhost:8002/api/memes/semantic?q=无语地看着对方&limit=1"
+curl -H "Authorization: Bearer $EXTERNAL_API_KEY" "http://localhost:8002/api/memes/semantic?q=无语地看着对方&limit=1"
 ```
 
 响应示例：
@@ -111,7 +122,7 @@ curl "http://localhost:8002/api/memes/semantic?q=无语地看着对方&limit=1"
 请求：
 
 ```bash
-curl http://localhost:8002/api/memes/123/image --output meme.webp
+curl -H "Authorization: Bearer $EXTERNAL_API_KEY" http://localhost:8002/api/memes/123/image --output meme.webp
 ```
 
 GIF 会原样返回完整 GIF，不会返回首帧或转换为 PNG/JPEG。ID 不存在返回 `404`；
@@ -130,8 +141,9 @@ GIF 会原样返回完整 GIF，不会返回首帧或转换为 PNG/JPEG。ID 不
 同一局域网中的消费者可以调用：
 
 ```bash
-curl http://192.168.1.20:8002/api/memes/random
+curl -H "Authorization: Bearer $EXTERNAL_API_KEY" http://192.168.1.20:8002/api/memes/random
 ```
 
-从 JSON 取得相对 `image_url` 后，将它拼接到同一个 Base URL。v0.9.1 按 Trusted LAN
-边界运行，不提供 OAuth、JWT、API Key、HTTPS 或限流；不要把服务直接暴露到公网。
+从 JSON 取得相对 `image_url` 后，将它拼接到同一个 Base URL，并在媒体请求中继续携带
+同一个 Bearer Header。Bearer Key 不替代 HTTPS；公网部署仍应通过受控 Tunnel / HTTPS，
+并避免把服务直接暴露为无 TLS 的公网端口。

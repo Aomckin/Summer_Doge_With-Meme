@@ -18,7 +18,7 @@
 | Secrets | PASS | Production 缺少 Access 配置会 fail-fast；仓库不接收 Tunnel Token，`.env` 被忽略。 |
 | Production errors | PASS | FastAPI Production 默认不启用 debug stack trace；业务错误不返回数据库路径、SQL、环境变量或 Secret。 |
 | Production logs | FIXED | 成功登录只记录 `Visitor login success` / `Admin login success`，失败只记录 `Login failed`，不记录 Key 或 Session Token。 |
-| External API | FIXED | 响应 URL 已确认是相对路径且不泄露磁盘路径；当前机器调用仍使用 Web Session，独立机器凭据明确留给 Phase 4E。 |
+| External API | FIXED | Random、Semantic 与 External Media 使用独立 Bearer Key；不接受 Web Session 代替，不授权任何写接口。响应 URL 继续保持相对路径且不泄露磁盘路径。 |
 | WebSocket / SSE | N/A | 当前产品没有 WebSocket 或 SSE，Phase 4A/B 不新增。 |
 | Host allowlist | N/A | 正式 hostname 尚未确定；按任务书要求在域名确定后再配置，避免现在锁死 Quick Tunnel 与本地开发。 |
 
@@ -61,5 +61,5 @@ cloudflared tunnel --url http://127.0.0.1:8002
 ## 已知后续项
 
 - Phase 4C：用户在 Cloudflare 侧创建 Named Tunnel、固定域名、Published Application 和 DNS。
-- Phase 4E：为 Maibot 等机器客户端设计独立 External API 认证；当前不能把浏览器 Cookie 当作最终机器认证方案。
+- v1.0.1 已完成 Maibot 等机器客户端的独立 External API Bearer 认证；后续如需轮换、限流或多客户端 Key，应另立任务。
 - 正式 hostname 确定后再评估 Trusted Host / Origin allowlist。

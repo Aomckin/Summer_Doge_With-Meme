@@ -24,11 +24,17 @@ def export_batch(
     work_dir: Path | None = None,
     batch_number: int = 1,
     batch_size: int = 20,
+    start_id: int | None = None,
+    end_id: int | None = None,
 ) -> Path:
     if batch_number < 1:
         raise ValueError("batch_number must be at least 1")
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
+    if (start_id is None) != (end_id is None):
+        raise ValueError("start_id and end_id must be provided together")
+    if start_id is not None and (start_id < 1 or end_id < start_id):
+        raise ValueError("ID range must satisfy 1 <= start_id <= end_id")
     database_path = database_path.resolve()
     if not database_path.is_file():
         raise FileNotFoundError(f"SQLite database does not exist: {database_path}")
@@ -42,10 +48,15 @@ def export_batch(
 
     session = make_session(database_path)
     try:
-        memes = MemeRepository(session).list(
-            offset=(batch_number - 1) * batch_size,
-            limit=batch_size,
-        )
+        offset = (batch_number - 1) * batch_size
+        if start_id is None:
+            memes = MemeRepository(session).list(offset=offset, limit=batch_size)
+        else:
+            memes = [
+                meme
+                for meme in MemeRepository(session).list_all_for_export()
+                if start_id <= meme.id <= end_id
+            ]
         records: list[dict[str, object]] = []
         image_paths: dict[str, list[dict[str, object]]] = {}
         candidates: list[dict[str, object]] = []
@@ -103,7 +114,9 @@ def export_batch(
             "schema_version": 1,
             "generated_at": datetime.now(UTC).isoformat(),
             "batch_number": batch_number,
-            "batch_size": batch_size,
+            "batch_size": len(memes) if start_id is not None else batch_size,
+            "start_id": start_id,
+            "end_id": end_id,
             "sort": "meme_id ASC",
             "memes": records,
         }

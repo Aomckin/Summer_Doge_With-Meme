@@ -14,7 +14,7 @@ Meme Vault 解决的是一个很朴素的问题：当 Meme 收藏不断增长，
 
 `Local-first（本地优先）` · `Semantic Search（语义搜索）` · `Immersive Browsing（沉浸浏览）` · `Visitor / Admin（访客 / 管理员）` · `Read-only External API（只读外部 API）`
 
-**Current release / 当前版本：v1.0.0**
+**Current release / 当前版本：v1.0.1**
 
 ## Screenshots / 界面截图
 
@@ -148,6 +148,12 @@ python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8002
 
 打开 <http://127.0.0.1:8002/>。Production Build（生产构建）会先执行 TypeScript Typecheck（TypeScript 类型检查），再由 Vite 生成 `frontend/dist/`；FastAPI 会在根路径托管构建后的前端。
 
+已有环境和前端构建时，也可以一键启动后端：
+
+```powershell
+.\run-meme-vault.ps1
+```
+
 前端开发时，可以分别启动后端和 Vite Dev Server（Vite 开发服务器）：
 
 ```powershell
@@ -159,12 +165,13 @@ npm.cmd --prefix frontend run dev
 
 ## Configuration / 配置
 
-`.env.example` 是可提交的配置模板；`.env` 存放真实本地 Secret（密钥），已经被 Git 忽略。门禁启用时，前三项必须同时配置，且 Visitor 与 Admin Key（访客与管理员密钥）不能相同。
+`.env.example` 是可提交的配置模板；`.env` 存放真实本地 Secret（密钥），已经被 Git 忽略。Web 门禁启用时，Visitor、Admin 与 Session 三项必须同时配置。External API Key 独立配置，且三把 Access Key 必须互不相同。
 
 ```dotenv
 VISITOR_ACCESS_KEY=
 ADMIN_ACCESS_KEY=
 SESSION_SECRET=
+EXTERNAL_API_KEY=
 MEME_VAULT_ENV=development
 
 DATABASE_URL=sqlite:///data/meme_vault.db
@@ -178,6 +185,7 @@ AI_SETTINGS_ENCRYPTION_KEY=
 
 - `MEME_VAULT_ENV=development`：适合本机开发；未配置门禁三项时保持无认证兼容模式。
 - `MEME_VAULT_ENV=production`：缺少门禁配置会 Fail Fast（快速失败），Session Cookie（会话 Cookie）会启用 `Secure`。
+- `EXTERNAL_API_KEY`：Random、Semantic 与 External Media 的只读 Bearer Key；未配置时这些机器端点统一返回 `401`，不会回退到 Web Session。
 - `DATABASE_URL`：可选；默认使用 `data/meme_vault.db`。
 - AI Provider（AI 提供方）也可以在 Admin（管理员）界面配置并加密保存；环境变量是兼容回退方式。
 
@@ -204,6 +212,12 @@ Cloudflare Quick Tunnel（Cloudflare 临时隧道）适合临时测试或私人�
 cloudflared tunnel --url http://127.0.0.1:8002
 ```
 
+也可以在后端已经运行时一键启动临时通道：
+
+```powershell
+.\run-cloudflare-tunnel.ps1
+```
+
 ```text
 Temporary trycloudflare URL（临时网址）
                     │
@@ -220,7 +234,7 @@ Stop cloudflared（关闭后入口失效）
 
 Meme Vault 提供 Read-only External API（只读外部 API），可信客户端可获取随机 Meme，或通过自然语言进行语义检索；这为 Maibot 等外部客户端提供了集成入口。
 
-启用 Access Gate（访问门禁）后，External API 当前仍沿用 Web Session（网页会话）认证边界，尚未提供独立的 Machine Access Key（机器访问密钥）。不要把 Visitor Key（访客密钥）写入 URL 或脚本。端点、参数与错误语义见 [External API Documentation / 外部 API 文档](docs/external-api.md)。
+External API 始终使用独立的 `Authorization: Bearer <EXTERNAL_API_KEY>` 机器认证，不接受 Visitor/Admin Session Cookie，也禁止复用 Visitor/Admin Key。该凭据只开放 Random、Semantic 与响应中的 External Media；Upload、Edit、Delete、Batch/ZIP 和 Settings 仍不可用。端点、参数与错误语义见 [External API Documentation / 外部 API 文档](docs/external-api.md)。
 
 ## Testing / 测试
 
@@ -239,7 +253,7 @@ npm.cmd --prefix frontend run build
 
 - Meme Vault is local-first：数据库、原图和缩略图保留在运行服务的机器上。
 - SQLite 数据库、本地媒体、导入导出归档、`.env` 和本地 AI 密钥文件都已被 `.gitignore` 排除。
-- 私有媒体 URL 受 Visitor / Admin Session（访客 / 管理员会话）保护。
+- Web 私有媒体 URL 受 Visitor / Admin Session（访客 / 管理员会话）保护；External Media 入口单独校验机器 Bearer Key。
 - 建议定期备份整个 `data/（本地数据目录）`，尤其是数据库与媒体文件。
 - 仓库只跟踪 `data/images/.gitkeep` 与 `data/thumbnails/.gitkeep`，不包含用户的私人 Meme 数据库或媒体收藏。
 
@@ -260,7 +274,6 @@ scripts/             离线整理与维护脚本
 - Quick Tunnel（临时隧道）的媒体速度取决于宿主机上行带宽与公网链路。
 - Session Store（会话存储）位于当前 FastAPI 进程内；服务重启后需要重新登录。
 - Semantic Search（语义搜索）需要先配置可用的 Multimodal Embedding Provider（多模态嵌入提供方）并建立 Ready Embedding（就绪向量）。
-- 当前 External API（外部 API）没有独立机器凭据；跨机器自动化接入不应复用浏览器 Visitor Key（访客密钥）。
 
 ## Documentation / 文档
 

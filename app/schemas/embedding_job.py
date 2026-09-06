@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EmbeddingJobCreate(BaseModel):
+    # v2.0 起必填：索引任务范围必须显式指定仓库，不再静默回退默认 meme Vault。
+    vault_id: int = Field(ge=1)
     scope: Literal["missing_or_stale", "failed", "all"] = "missing_or_stale"
     max_workers: int = Field(default=4, ge=1, le=8)
 

@@ -14,7 +14,7 @@ Meme Vault 解决的是一个很朴素的问题：当 Meme 收藏不断增长，
 
 `Local-first（本地优先）` · `Semantic Search（语义搜索）` · `Immersive Browsing（沉浸浏览）` · `Visitor / Admin（访客 / 管理员）` · `Read-only External API（只读外部 API）`
 
-**Current release / 当前版本：v1.0.1**
+**Current release / 当前版本：v2.0 — Multi-Vault（含 Vault Profile 与 Per-Vault Appearance）**
 
 ## Screenshots / 界面截图
 
@@ -25,6 +25,30 @@ Meme Vault 解决的是一个很朴素的问题：当 Meme 收藏不断增长，
 ### Appearance / 外观设置
 
 ![Appearance settings（外观设置）](docs/images/appearance.png)
+
+## Multi-Vault / 多仓库
+
+v2.0 起，一个 Meme Vault 实例可以管理多个相互独立的 Vault（仓库）：
+
+```text
+MemeVault
+→ Vault 管理
+    → Meme（默认仓库，承载 v2.0 之前的全部数据）
+    → Anime
+    → Life
+    → ...
+```
+
+- 每个仓库的图片、搜索结果、向量索引、标签统计与随机浏览完全隔离。
+- 单图上传上限默认 100MB，可在新建/编辑仓库时按仓库调整“单图大小上限（MB）”（1–1024）。
+- 同一图片允许同时存在于不同仓库；重复检测只在其所属仓库内生效。
+- 每个仓库有一个 Profile（meme / anime / photo / game_score / generic）：决定界面文案、可用功能（Capability）与扩展元数据。Anime 仓库支持作品/角色/画师/来源/收藏度/方向的详情编辑，以及收藏与横竖图筛选。
+- 每个仓库拥有独立的外观主题（强调色、背景、模糊、面板材质、氛围），保存到服务器并随仓库切换；上传的背景图按仓库持久化，换设备也不丢。
+- 顶栏 Vault Selector（仓库切换器）切换仓库；当前仓库反映在 URL `/v/{slug}` 中，刷新、收藏与前进后退均可恢复。
+- 新仓库的图片保存在 `data/vaults/{slug}/` 独立目录；默认 meme 仓库继续使用原 `data/images/`，升级不移动任何既有文件。
+- Vault 管理 API：`GET/POST /api/vaults`、`GET/PATCH/DELETE /api/vaults/{id}`；非空仓库删除必须显式 `force=true`，默认 meme 仓库不可删除。
+- Vault 作用域资产端点：`/api/vaults/{id}/memes...`、`/api/vaults/{id}/tags`、`/api/vaults/{id}/semantic-search` 与 `/media/vaults/{slug}/...`。
+- 旧 `/api/memes/*` 外部接口保持兼容，默认绑定 meme 仓库，Maibot 等既有消费者无需修改。
 
 ## Features / 核心能力
 
@@ -260,7 +284,7 @@ npm.cmd --prefix frontend run build
 ## Project Structure / 项目结构
 
 ```text
-app/                 后端应用：API、模型、仓储与业务服务
+app/                 后端应用：API、模型、仓储与业务服务（含 Multi-Vault）
 frontend/            前端应用：TypeScript、Vite 与 Vitest
 data/                本地数据：SQLite、原图、缩略图与任务产物（默认不跟踪）
 docs/                项目文档：API、权限与部署审计

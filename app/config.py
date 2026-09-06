@@ -21,6 +21,14 @@ TEMPLATE_IMAGES_URL_PREFIX = "/media/template-images"
 TEMPLATE_THUMBNAILS_URL_PREFIX = "/media/template-thumbnails"
 DATABASE_PATH = DATA_DIR / "meme_vault.db"
 
+# 单图大小上限默认值（MB）；每个 Vault 可在 config 中覆盖 max_file_size_mb。
+DEFAULT_MAX_FILE_SIZE_MB = 100
+
+# 默认 Vault 承载 v2.0 之前的全部数据；storage_path 为空表示沿用旧共享目录。
+# 常量放在 config 是为了避免 database 与 models 之间的循环导入。
+DEFAULT_VAULT_SLUG = "meme"
+DEFAULT_VAULT_NAME = "暗苟，夏，Meme"
+
 # 部署时可以用环境变量替换数据库；本地开发则自动使用 SQLite 文件。
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

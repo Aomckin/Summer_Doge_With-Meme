@@ -38,18 +38,22 @@ class SimilarityInspectionService:
     def inspect(
         self,
         *,
+        vault_id: int | None = None,
         scope: str = "id_range",
         start_meme_id: int | None = None,
         end_meme_id: int | None = None,
         top_k: int = 5,
         similarity_threshold: float = 0.85,
     ) -> dict[str, object]:
+        from app.services.vault_service import resolve_vault_id
+
+        resolved_vault = resolve_vault_id(self.session, vault_id)
         model = AISettingsRepository(self.session).active_embedding_model()
         if model is None:
             raise SimilarityInspectionUnavailableError(
                 "Semantic embedding model is not configured"
             )
-        statement = select(Meme.id)
+        statement = select(Meme.id).where(Meme.vault_id == resolved_vault)
         if scope == "id_range":
             if start_meme_id is None or end_meme_id is None:
                 raise ValueError("ID range is required")
@@ -79,6 +83,7 @@ class SimilarityInspectionService:
             )
             hits = self.semantic_index.search(
                 vector,
+                vault_id=resolved_vault,
                 model_record_id=model.id,
                 model_id=model.model_id,
                 dimension=EMBEDDING_DIMENSION,

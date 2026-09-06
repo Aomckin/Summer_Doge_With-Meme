@@ -32,6 +32,8 @@ from app.database import get_db
 from app.models.meme import Meme
 from app.models.ai_analysis import MemeAIAnalysis
 from app.repositories.ai_analysis_repository import AIAnalysisRepository
+from app.repositories.meme_repository import MemeRepository
+from app.repositories.vault_repository import VaultRepository
 from app.schemas.ai_analysis import AIAnalysisConfirm, AIAnalysisResponse
 from app.schemas.meme import ImageOrderRequest, MemePageResponse, MemeRelationRequest, MemeResponse, MemeUpdate
 from app.schemas.template import TemplateResponse
@@ -43,9 +45,9 @@ from app.services.meme_service import (
     MemeService,
     NoMemesAvailableError,
 )
+from app.storage.vault_storage import VaultStorageService
 from app.storage.image_storage import (
     FORMAT_DETAILS,
-    ImageStorage,
     ImageTooLargeError,
     InvalidImageError,
 )
@@ -62,15 +64,63 @@ def get_meme_service(
     session: Annotated[Session, Depends(get_db)],
 ) -> MemeService:
     # FastAPI 先通过 get_db 提供一次请求专用的 Session，再组装 Service。
-    storage = ImageStorage(
-        request.app.state.images_dir,
-        request.app.state.thumbnails_dir,
-    )
-    return MemeService(session, storage)
+    # 旧路由是兼容层：文件读写固定落在默认 meme Vault 的存储目录。
+    vault = VaultRepository(session).get_default()
+    if vault is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Default meme Vault is missing; restart to migrate",
+        )
+    vault_storage: VaultStorageService = request.app.state.vault_storage
+    return MemeService(session, vault_storage.storage_for(vault))
 
 
 # 把较长的依赖声明起别名，下面每个接口都能直接写 service: ServiceDependency。
 ServiceDependency = Annotated[MemeService, Depends(get_meme_service)]
+
+
+def get_default_vault_id(
+    session: Annotated[Session, Depends(get_db)],
+) -> int:
+    """兼容层入口：显式解析默认 meme Vault，查询永远携带具体 vault_id。"""
+    vault = VaultRepository(session).get_default()
+    if vault is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Default meme Vault is missing; restart to migrate",
+        )
+    return vault.id
+
+
+DefaultVaultId = Annotated[int, Depends(get_default_vault_id)]
+
+
+def get_meme_scoped_service(
+    request: Request,
+    session: Annotated[Session, Depends(get_db)],
+    meme_id: int,
+) -> MemeService:
+    """详情路由依赖：按目标 Meme 所属 Vault 解析存储目录。
+
+    Meme 不存在时回退默认 Vault 存储，由路由自身的 404 处理接管。
+    """
+    vault_storage: VaultStorageService = request.app.state.vault_storage
+    meme = MemeRepository(session).get_by_id(meme_id)
+    vault = (
+        VaultRepository(session).get_by_id(meme.vault_id)
+        if meme is not None
+        else VaultRepository(session).get_default()
+    )
+    if vault is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Default meme Vault is missing; restart to migrate",
+        )
+    return MemeService(session, vault_storage.storage_for(vault))
+
+
+# 详情路由使用按 Meme 归属解析存储的 Service，保证跨 Vault 文件操作不落错目录。
+ScopedServiceDependency = Annotated[MemeService, Depends(get_meme_scoped_service)]
 
 
 def get_ai_client(
@@ -146,6 +196,7 @@ def _to_ai_analysis_response(
 @router.post("", response_model=MemeResponse, status_code=201)
 async def upload_meme(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     file: Annotated[UploadFile, File()],
     title: Annotated[str, Form(min_length=1, max_length=255)],
     description: Annotated[str | None, Form()] = None,
@@ -159,6 +210,7 @@ async def upload_meme(
         meme = service.create_meme(
             file.filename or "upload",
             content,
+            vault_id=default_vault_id,
             title=title,
             description=description,
             source=source,
@@ -179,7 +231,7 @@ async def upload_meme(
 
 
 @router.get("/{meme_id}/image", response_class=FileResponse)
-def get_meme_image(meme_id: int, service: ServiceDependency) -> FileResponse:
+def get_meme_image(meme_id: int, service: ScopedServiceDependency) -> FileResponse:
     """Return the original cover asset inline, including an unmodified GIF."""
     try:
         meme = service.get_meme(meme_id)
@@ -201,6 +253,7 @@ def get_meme_image(meme_id: int, service: ServiceDependency) -> FileResponse:
 @router.get("", response_model=list[MemeResponse])
 def list_memes(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     tags: Annotated[list[str] | None, Query()] = None,
@@ -212,6 +265,7 @@ def list_memes(
     return [
         meme_to_response(meme)
         for meme in service.list_memes(
+            vault_id=default_vault_id,
             offset=offset,
             limit=limit,
             tags=tags,
@@ -225,6 +279,7 @@ def list_memes(
 @router.get("/page", response_model=MemePageResponse)
 def list_meme_page(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: int = 24,
     tags: Annotated[list[str] | None, Query()] = None,
@@ -236,6 +291,7 @@ def list_meme_page(
 ) -> MemePageResponse:
     try:
         result = service.list_meme_page(
+            vault_id=default_vault_id,
             page=page,
             page_size=page_size,
             tags=tags,
@@ -260,12 +316,14 @@ def list_meme_page(
 
 def _select_random_meme(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     tags: list[str] | None,
     template_id: int | None,
     gif_only: bool = False,
 ) -> Meme:
     try:
         return service.get_random_meme(
+            vault_id=default_vault_id,
             tags=tags, template_id=template_id, gif_only=gif_only
         )
     except NoMemesAvailableError as error:
@@ -279,12 +337,13 @@ def _select_random_meme(
 @router.get("/library-random", response_model=MemeResponse)
 def get_library_random_meme(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     tags: Annotated[list[str] | None, Query()] = None,
     template_id: Annotated[int | None, Query(ge=1)] = None,
     gif_only: bool = False,
 ) -> MemeResponse:
     return meme_to_response(
-        _select_random_meme(service, tags, template_id, gif_only)
+        _select_random_meme(service, default_vault_id, tags, template_id, gif_only)
     )
 
 
@@ -292,12 +351,13 @@ def get_library_random_meme(
 @router.get("/random", response_model=MemeResponse)
 def get_random_meme(
     service: ServiceDependency,
+    default_vault_id: DefaultVaultId,
     tags: Annotated[list[str] | None, Query()] = None,
     template_id: Annotated[int | None, Query(ge=1)] = None,
     gif_only: bool = False,
 ) -> MemeResponse:
     return meme_to_external_response(
-        _select_random_meme(service, tags, template_id, gif_only)
+        _select_random_meme(service, default_vault_id, tags, template_id, gif_only)
     )
 
 
@@ -305,7 +365,7 @@ def get_random_meme(
 def analyze_meme(
     meme_id: int,
     request: Request,
-    service: ServiceDependency,
+    service: ScopedServiceDependency,
     ai_client: AIClientDependency,
 ) -> AIAnalysisResponse:
     try:
@@ -329,7 +389,7 @@ def analyze_meme(
 
 
 @router.get("/{meme_id}/download")
-def download_meme(meme_id: int, request: Request, service: ServiceDependency):
+def download_meme(meme_id: int, request: Request, service: ScopedServiceDependency):
     try:
         meme = service.get_meme(meme_id)
     except MemeNotFoundError as error:
@@ -386,7 +446,7 @@ def download_meme(meme_id: int, request: Request, service: ServiceDependency):
 
 
 @router.get("/{meme_id}/images/{image_id}/download")
-def download_meme_image(meme_id: int, image_id: int, service: ServiceDependency) -> FileResponse:
+def download_meme_image(meme_id: int, image_id: int, service: ScopedServiceDependency) -> FileResponse:
     meme = service.repository.get_by_id(meme_id)
     if meme is None:
         raise HTTPException(404, f"Meme {meme_id} does not exist")
@@ -402,7 +462,7 @@ def download_meme_image(meme_id: int, image_id: int, service: ServiceDependency)
 
 
 @router.post("/{meme_id}/images", response_model=MemeResponse)
-async def append_meme_image(meme_id: int, service: ServiceDependency, file: Annotated[UploadFile, File()]) -> MemeResponse:
+async def append_meme_image(meme_id: int, service: ScopedServiceDependency, file: Annotated[UploadFile, File()]) -> MemeResponse:
     try:
         return meme_to_response(service.append_image(meme_id, file.filename or "upload", await file.read()))
     except MemeNotFoundError as error:
@@ -418,7 +478,7 @@ async def append_meme_image(meme_id: int, service: ServiceDependency, file: Anno
 
 
 @router.patch("/{meme_id}/images/order", response_model=MemeResponse)
-def reorder_meme_images(meme_id: int, payload: ImageOrderRequest, service: ServiceDependency) -> MemeResponse:
+def reorder_meme_images(meme_id: int, payload: ImageOrderRequest, service: ScopedServiceDependency) -> MemeResponse:
     try:
         return meme_to_response(service.reorder_images(meme_id, payload.image_ids))
     except MemeNotFoundError as error:
@@ -430,7 +490,7 @@ def reorder_meme_images(meme_id: int, payload: ImageOrderRequest, service: Servi
 
 
 @router.delete("/{meme_id}/images/{image_id}", response_model=MemeResponse)
-def delete_meme_image(meme_id: int, image_id: int, service: ServiceDependency) -> MemeResponse:
+def delete_meme_image(meme_id: int, image_id: int, service: ScopedServiceDependency) -> MemeResponse:
     try:
         return meme_to_response(service.delete_image(meme_id, image_id))
     except MemeNotFoundError as error:
@@ -442,7 +502,7 @@ def delete_meme_image(meme_id: int, image_id: int, service: ServiceDependency) -
 
 
 @router.get("/{meme_id}/relations", response_model=list[MemeResponse])
-def list_meme_relations(meme_id: int, service: ServiceDependency) -> list[MemeResponse]:
+def list_meme_relations(meme_id: int, service: ScopedServiceDependency) -> list[MemeResponse]:
     try:
         return [meme_to_response(meme) for meme in service.list_relations(meme_id)]
     except MemeNotFoundError as error:
@@ -452,7 +512,7 @@ def list_meme_relations(meme_id: int, service: ServiceDependency) -> list[MemeRe
 
 
 @router.post("/{meme_id}/relations", response_model=list[MemeResponse])
-def add_meme_relations(meme_id: int, payload: MemeRelationRequest, service: ServiceDependency) -> list[MemeResponse]:
+def add_meme_relations(meme_id: int, payload: MemeRelationRequest, service: ScopedServiceDependency) -> list[MemeResponse]:
     try:
         return [meme_to_response(meme) for meme in service.add_relations(meme_id, payload.meme_ids)]
     except MemeNotFoundError as error:
@@ -464,7 +524,7 @@ def add_meme_relations(meme_id: int, payload: MemeRelationRequest, service: Serv
 
 
 @router.delete("/{meme_id}/relations/{related_meme_id}", status_code=204)
-def delete_meme_relation(meme_id: int, related_meme_id: int, service: ServiceDependency) -> Response:
+def delete_meme_relation(meme_id: int, related_meme_id: int, service: ScopedServiceDependency) -> Response:
     try:
         service.remove_relation(meme_id, related_meme_id)
     except MemeNotFoundError as error:
@@ -482,7 +542,7 @@ def confirm_ai_analysis(
     meme_id: int,
     analysis_id: int,
     payload: AIAnalysisConfirm,
-    service: ServiceDependency,
+    service: ScopedServiceDependency,
 ) -> MemeResponse:
     try:
         meme = service.confirm_ai_analysis(
@@ -508,7 +568,7 @@ def confirm_ai_analysis(
 
 
 @router.get("/{meme_id}", response_model=MemeResponse)
-def get_meme(meme_id: int, service: ServiceDependency) -> MemeResponse:
+def get_meme(meme_id: int, service: ScopedServiceDependency) -> MemeResponse:
     try:
         meme = service.get_meme(meme_id)
     except MemeNotFoundError as error:
@@ -522,7 +582,7 @@ def get_meme(meme_id: int, service: ServiceDependency) -> MemeResponse:
 def update_meme(
     meme_id: int,
     payload: MemeUpdate,
-    service: ServiceDependency,
+    service: ScopedServiceDependency,
 ) -> MemeResponse:
     try:
         meme = service.update_meme(
@@ -540,7 +600,7 @@ def update_meme(
 
 
 @router.delete("/{meme_id}", status_code=204)
-def delete_meme(meme_id: int, service: ServiceDependency) -> Response:
+def delete_meme(meme_id: int, service: ScopedServiceDependency) -> Response:
     try:
         service.delete_meme(meme_id)
     except MemeNotFoundError as error:

@@ -88,6 +88,8 @@ async def create_import_job(
     request: Request,
     service: ServiceDependency,
     archive: Annotated[UploadFile, File()],
+    # v2.0 起必填：导入目标仓库必须显式指定，不再静默回退默认 meme Vault。
+    vault_id: Annotated[int, Form(ge=1)],
     tags: Annotated[str | None, Form()] = None,
     template_id: Annotated[str | None, Form()] = None,
     source: Annotated[str | None, Form(max_length=500)] = None,
@@ -108,6 +110,7 @@ async def create_import_job(
                 destination.write(chunk)
         partial.replace(target)
         job = service.create_job(
+            vault_id=vault_id,
             original_filename=filename,
             archive_path=target,
             tags=_parse_tags(tags),

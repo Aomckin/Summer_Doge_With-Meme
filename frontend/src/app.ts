@@ -54,6 +54,8 @@ import {
   deleteEmbeddingJob,
   listCollections, getCollection, createCollection, updateCollection,
   deleteCollection, removeCollectionMeme, getMemeCollections, replaceMemeCollections,
+  listVaults, createVault, updateVault, deleteVault, updateVaultAssetMetadata, updateVaultAppearance,
+  updateVaultBackgroundImage, deleteVaultBackgroundImage,
 } from "./api";
 import type {
   AIAnalysisConfirmPayload,
@@ -82,6 +84,7 @@ import type {
   ChatRecommendationInput, ChatRecommendationResponse,
   SimilarityInspectionInput, SimilarityInspectionResponse,
   CollectionSummary, CollectionDetail, CollectionPayload, MemeCollectionsResponse,
+  VaultCreateInput, VaultUpdateInput, VaultSummary,
 } from "./types";
 import { BatchUploadController } from "./batch-upload";
 import { BatchDownloadController } from "./batch-download";
@@ -119,6 +122,7 @@ import {
   renderTemplateReferenceInputPreview,
   renderToolbar,
   TEMPLATE_PAGE_SIZE,
+  renderCapabilityGating,
 } from "./ui";
 import { clampPage } from "./pagination";
 import { SemanticIndexManager } from "./semantic-index-manager";
@@ -127,6 +131,7 @@ import { ChatRecommendationController } from "./chat-recommendation";
 import { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
 import { AppearanceController } from "./appearance/appearance-controller";
+import { DEFAULT_APPEARANCE_SETTINGS } from "./appearance/appearance-types";
 import { AppearanceView } from "./appearance/appearance-view";
 import { ImmersiveController } from "./immersive/immersive-controller";
 import { ImmersiveRandomNavigator } from "./immersive/immersive-random";
@@ -149,6 +154,8 @@ import {
   storedCardMotionPreset,
 } from "./card-tilt";
 import { capabilitiesFor, type Capabilities } from "./auth";
+import { VaultManagerController } from "./vault-manager";
+import { PROFILE_DEFAULT_PRESET_ID, isVaultProfileName } from "./vault-profile";
 
 const PAGE_SIZE_KEY = "meme-vault.page-size";
 const CARD_SIZE_KEY = "meme-vault.card-size";
@@ -205,7 +212,7 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   deleteTemplate(id: number): Promise<void>;
   uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse>;
   deleteTemplateReferenceImage(id: number): Promise<void>;
-  getRandomMeme(tags: string[], templateId?: number | null, gifOnly?: boolean, signal?: AbortSignal): Promise<MemeResponse>;
+  getRandomMeme(tags: string[], templateId?: number | null, gifOnly?: boolean, signal?: AbortSignal, vaultId?: number): Promise<MemeResponse>;
   uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
   createImportJob(input: CreateImportJobInput): Promise<ImportJobResponse>;
   getImportJob(id: number): Promise<ImportJobResponse>;
@@ -253,6 +260,14 @@ export interface MemeApi extends AISettingsApi, CaptionLabApi {
   replaceMemeCollections?(memeId: number, collectionIds: number[]): Promise<MemeCollectionsResponse>;
   enrichMeme?(id: number): Promise<EnrichmentSuggestionResponse>;
   analyzeMeme(id: number): Promise<AIAnalysisResponse>;
+  listVaults?(): Promise<VaultSummary[]>;
+  updateVaultAssetMetadata?(vaultId: number, memeId: number, data: Record<string, unknown>): Promise<MemeResponse>;
+  updateVaultAppearance?(vaultId: number, appearance: Record<string, unknown>): Promise<VaultSummary>;
+  updateVaultBackgroundImage?(vaultId: number, file: File): Promise<VaultSummary>;
+  deleteVaultBackgroundImage?(vaultId: number): Promise<VaultSummary>;
+  createVault?(input: VaultCreateInput): Promise<VaultSummary>;
+  updateVault?(id: number, input: VaultUpdateInput): Promise<VaultSummary>;
+  deleteVault?(id: number, force?: boolean): Promise<void>;
   confirmAIAnalysis(
     memeId: number,
     analysisId: number,
@@ -316,6 +331,10 @@ const defaultApi: MemeApi = {
 
 function initialState(): AppState {
   return {
+    vaults: [],
+    currentVault: null,
+    orientationFilter: null,
+    favoriteOnly: false,
     searchMode: "keyword",
     semanticSubmittedQuery: "",
     semanticScores: {},
@@ -435,6 +454,7 @@ export class MemeVaultApp {
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
+  private readonly vaultManager: VaultManagerController;
 
   constructor(
     root: HTMLElement,
@@ -442,6 +462,34 @@ export class MemeVaultApp {
     private readonly capabilities: Capabilities = capabilitiesFor("admin"),
   ) {
     this.elements = mountShell(root);
+    this.vaultManager = new VaultManagerController(
+      this.elements.vaultSelector,
+      this.elements.vaultSelectorName,
+      {
+        list: () => (this.api.listVaults ?? listVaults)(),
+        create: input => (this.api.createVault ?? createVault)(input),
+        update: (id, input) => (this.api.updateVault ?? updateVault)(id, input),
+        delete: (id, force) => (this.api.deleteVault ?? deleteVault)(id, force),
+      },
+      {
+        canManage: this.capabilities.canWrite,
+        onSwitch: vault => void this.switchVault(vault),
+        onVaultsChanged: vaults => {
+          this.state.vaults = vaults;
+          const current = vaults.find(candidate => candidate.id === this.state.currentVault?.id);
+          if (current) {
+            this.state.currentVault = current;
+          } else if (this.state.currentVault && vaults.length) {
+            // 当前仓库被删除后重新按 URL 解析。
+            this.state.currentVault = null;
+            void this.applyVaultFromLocation();
+          }
+        },
+      },
+    );
+    window.addEventListener("popstate", () => {
+      void this.applyVaultFromLocation();
+    });
     new AppShellController({
       root: this.elements.appRoot,
       searchInput: this.elements.searchInput,
@@ -455,6 +503,32 @@ export class MemeVaultApp {
       this.elements.appearanceDialog,
       this.elements.appearanceContent,
       this.appearance,
+      {
+        getVault: () => this.state.currentVault,
+        canEdit: this.capabilities.canWrite,
+        onUploadBackground: async file => {
+          await this.applyBackgroundMutation(vault2 =>
+            (this.api.updateVaultBackgroundImage ?? updateVaultBackgroundImage)(vault2, file),
+          );
+        },
+        onRemoveBackground: async () => {
+          await this.applyBackgroundMutation(vault2 =>
+            (this.api.deleteVaultBackgroundImage ?? deleteVaultBackgroundImage)(vault2),
+          );
+        },
+        onResetAppearance: async () => {
+          // 先清除上传的背景，再恢复 Profile 默认预设。
+          const vault = this.state.currentVault;
+          if (vault?.background_image_url) {
+            await (this.api.deleteVaultBackgroundImage ?? deleteVaultBackgroundImage)(vault.id);
+          }
+          this.appearance.applyPreset(
+            PROFILE_DEFAULT_PRESET_ID[
+              (isVaultProfileName(vault?.profile) ? vault.profile : "generic")
+            ] as never,
+          );
+        },
+      },
     );
     this.immersiveRandom = new ImmersiveRandomNavigator(this.elements.memeGrid);
     this.immersiveOccupancyGrid = new ImmersiveOccupancyGrid(this.elements.memeGrid);
@@ -635,7 +709,7 @@ export class MemeVaultApp {
               failed_count: 0, incompatible_count: 0, active_model_id: null,
               dimension: 1024, running_job: null,
             }),
-        createJob: (scope, maxWorkers) => (this.api.createEmbeddingJob ?? createEmbeddingJob)(scope, maxWorkers),
+        createJob: (scope, maxWorkers) => (this.api.createEmbeddingJob ?? createEmbeddingJob)(scope, maxWorkers, this.requireVaultId()),
         getJob: id => (this.api.getEmbeddingJob ?? getEmbeddingJob)(id),
         listItems: (id, offset, limit, status) => (this.api.listEmbeddingJobItems ?? listEmbeddingJobItems)(id, offset, limit, status),
         cancelJob: id => (this.api.cancelEmbeddingJob ?? cancelEmbeddingJob)(id),
@@ -646,8 +720,8 @@ export class MemeVaultApp {
     this.enrichmentWorkbench = new EnrichmentWorkbenchController(
       this.elements.openEnrichmentButton,
       {
-        createJob: input => createEnrichmentJob(input),
-        estimateJob: input => estimateEnrichmentJob(input),
+        createJob: input => createEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
+        estimateJob: input => estimateEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
         getJob: id => getEnrichmentJob(id),
         cancelJob: id => cancelEnrichmentJob(id),
         retryFailed: id => retryFailedEnrichmentJob(id),
@@ -691,7 +765,8 @@ export class MemeVaultApp {
     );
     this.batchUpload = new BatchUploadController({
       uploadMeme: (input) => this.api.uploadMeme(input),
-      createImportJob: (input) => this.api.createImportJob(input),
+      // 任务类接口必须显式携带仓库：后端对缺失 vault_id 直接报错，不再回退默认仓。
+      createImportJob: (input) => this.api.createImportJob({ ...input, vaultId: this.requireVaultId() }),
       getImportJob: (id) => this.api.getImportJob(id),
       listImportJobItems: (id, offset, limit, status) =>
         this.api.listImportJobItems(id, offset, limit, status),
@@ -708,7 +783,7 @@ export class MemeVaultApp {
       },
     });
     this.batchDownload = new BatchDownloadController({
-      createExportJob: input => this.api.createExportJob(input),
+      createExportJob: input => this.api.createExportJob({ ...input, vaultId: this.requireVaultId() }),
       getExportJob: id => this.api.getExportJob(id),
       listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
       cancelExportJob: id => this.api.cancelExportJob(id),
@@ -726,14 +801,231 @@ export class MemeVaultApp {
         await this.reloadMemes();
       },
     });
+    this.elements.profileFilters.addEventListener("click", (event) => {
+      const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-profile-filter]");
+      if (!chip) return;
+      const filter = chip.dataset.profileFilter;
+      if (filter === "favorite") {
+        this.state.favoriteOnly = !this.state.favoriteOnly;
+      } else if (filter === "landscape" || filter === "portrait" || filter === "square") {
+        this.state.orientationFilter = this.state.orientationFilter === filter ? null : filter;
+      }
+      this.state.page = 1;
+      void this.reloadMemes();
+    });
+    this.elements.detailPanel.addEventListener("submit", (event) => {
+      const form = (event.target as Element).closest<HTMLFormElement>("form[data-profile-metadata-form]");
+      if (!form || event.target !== form) return;
+      event.preventDefault();
+      void this.saveProfileMetadata(form);
+    });
     this.bindEvents();
     installSearchableTemplateSelectors();
     this.render();
   }
 
   async start(): Promise<void> {
+    await this.refreshVaults();
+    // 外观属于仓库本身：仓库解析后立即应用其主题（自定义优先，其次 Profile 默认）。
+    this.applyVaultTheme();
+    // 仓库解析完成后整体重渲染，让 Capability 门控按当前仓库生效。
+    this.render();
     await Promise.all([
-      this.appearance.load(),
+      this.reloadMemes(),
+      this.refreshTags(),
+      this.refreshTemplates(),
+    ]);
+  }
+
+  /** 背景图变更（上传/删除）：更新当前仓库的主题数据并立即应用。 */
+  private async applyBackgroundMutation(
+    call: (vaultId: number) => Promise<VaultSummary>,
+  ): Promise<void> {
+    const vault = this.state.currentVault;
+    if (!vault) return;
+    const updated = await call(vault.id);
+    const index = this.state.vaults.findIndex(candidate => candidate.id === updated.id);
+    if (index >= 0) this.state.vaults[index] = updated;
+    if (this.state.currentVault?.id === updated.id) this.state.currentVault = updated;
+    this.applyVaultTheme();
+  }
+
+  /** 把当前仓库的主题应用到外观控制器；切换仓库时同步调用，避免主题闪烁。 */
+  private applyVaultTheme(): void {
+    const vault = this.state.currentVault;
+    if (!vault) return;
+    // 与后端解析结果合并默认值，容忍旧数据缺字段。
+    const resolved = {
+      ...DEFAULT_APPEARANCE_SETTINGS,
+      ...(vault.appearance ?? {}) as Record<string, unknown>,
+    } as unknown as Parameters<AppearanceController["applyVaultTheme"]>[0];
+    this.appearance.setVaultPersistence(
+      this.capabilities.canWrite
+        ? async settings => {
+            await (this.api.updateVaultAppearance ?? updateVaultAppearance)(vault.id, settings as unknown as Record<string, unknown>);
+          }
+        : null,
+    );
+    this.appearance.applyVaultTheme(resolved, vault.background_image_url ?? null);
+  }
+
+  /** meme 仓库返回 undefined，继续走旧兼容接口；其他仓库返回其 id。 */
+  private vaultIdParam(): number | undefined {
+    const vault = this.state.currentVault;
+    return vault && vault.slug !== "meme" ? vault.id : undefined;
+  }
+
+  private async saveProfileMetadata(form: HTMLFormElement): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const vault = this.state.currentVault;
+    if (!meme || !vault) return;
+    const data = new FormData(form);
+    const payload: Record<string, unknown> = {};
+    const text = (name: string): string => String(data.get(name) ?? "").trim();
+    if (text("work")) payload.work = text("work");
+    const characters = text("characters");
+    if (characters) {
+      payload.characters = characters
+        .split(/[,，、]/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+    if (text("artist")) payload.artist = text("artist");
+    const favorite = Number(data.get("favorite_level") ?? 0);
+    if (Number.isFinite(favorite) && favorite >= 1) payload.favorite_level = Math.floor(favorite);
+    if (text("source_url")) payload.source_url = text("source_url");
+    const errorElement = form.querySelector<HTMLElement>("[data-profile-metadata-error]");
+    const submitButton = form.querySelector<HTMLButtonElement>("button[type='submit']");
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const updated = await (this.api.updateVaultAssetMetadata ?? updateVaultAssetMetadata)(
+        vault.id,
+        meme.id,
+        payload,
+      );
+      // replaceMeme 原地更新 state.memes、selectedMeme 与详情面板。
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (errorElement) {
+        errorElement.textContent = readableError(error);
+        errorElement.hidden = false;
+      }
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  }
+
+  private hasCapability(capability: string): boolean {
+    return this.state.currentVault?.capabilities?.[capability] === true;
+  }
+
+  /** 任务类接口用：缺失当前仓库时抛错，绝不静默回退默认 meme Vault。 */
+  private requireVaultId(): number {
+    const vault = this.state.currentVault;
+    if (!vault) {
+      throw new Error("当前仓库尚未加载完成，请稍后重试");
+    }
+    return vault.id;
+  }
+
+  private vaultSlugFromLocation(): string | null {
+    const match = window.location.pathname.match(/^\/v\/([a-z0-9][a-z0-9-]{0,63})\/?$/i);
+    return match ? match[1].toLowerCase() : null;
+  }
+
+  private async refreshVaults(): Promise<void> {
+    this.state.vaults = await this.vaultManager.refresh();
+    if (this.state.currentVault) {
+      const refreshed = this.state.vaults.find(
+        candidate => candidate.id === this.state.currentVault?.id,
+      );
+      if (refreshed) {
+        this.state.currentVault = refreshed;
+        this.vaultManager.updateSelector(refreshed);
+        return;
+      }
+    }
+    const slug = this.vaultSlugFromLocation();
+    const target = this.resolveVault(slug);
+    this.state.currentVault = target;
+    this.vaultManager.updateSelector(target);
+    // 规范化为 /v/{slug}，刷新与分享均可恢复。
+    if (target && window.location.pathname !== `/v/${target.slug}`) {
+      window.history.replaceState(null, "", `/v/${target.slug}`);
+    }
+  }
+
+  private resolveVault(slug: string | null): VaultSummary | null {
+    const vaults = this.state.vaults;
+    if (!vaults.length) return null;
+    if (slug) {
+      const matched = vaults.find(vault => vault.slug === slug);
+      if (matched) return matched;
+    }
+    return vaults.find(vault => vault.slug === "meme") ?? vaults[0];
+  }
+
+  private async applyVaultFromLocation(): Promise<void> {
+    if (!this.state.vaults.length) {
+      await this.refreshVaults();
+      return;
+    }
+    const slug = this.vaultSlugFromLocation();
+    const target = this.resolveVault(slug);
+    if (!target || target.id === this.state.currentVault?.id) return;
+    await this.switchVault(target, { push: false });
+  }
+
+  private async switchVault(
+    vault: VaultSummary,
+    options: { push?: boolean } = {},
+  ): Promise<void> {
+    if (vault.id === this.state.currentVault?.id) return;
+    this.state.currentVault = vault;
+    // 数据、Profile、Capability、词汇与外观一起切换；主题在数据加载前应用，避免闪烁。
+    this.applyVaultTheme();
+    this.vaultManager.updateSelector(vault);
+    if (options.push !== false) {
+      window.history.pushState(null, "", `/v/${vault.slug}`);
+    }
+    // 重置浏览状态：搜索、筛选、分页、选中与沉浸全部重新绑定当前仓库。
+    this.listController?.abort();
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    this.state.query = "";
+    this.state.selectedTags = [];
+    this.state.selectedTemplateId = null;
+    this.state.gifOnly = false;
+    this.state.orientationFilter = null;
+    this.state.favoriteOnly = false;
+    this.state.page = 1;
+    this.state.totalMemes = 0;
+    this.state.totalPages = 0;
+    this.state.listSort = "default";
+    this.state.shuffleSeed = null;
+    this.state.memes = [];
+    this.state.searchMode = "keyword";
+    this.state.semanticSubmittedQuery = "";
+    this.state.semanticScores = {};
+    this.state.selectedMeme = null;
+    this.state.similarMemes = [];
+    this.state.similarLoading = false;
+    this.state.similarError = null;
+    this.state.similarExpanded = false;
+    this.state.relatedMemes = [];
+    this.state.relationError = null;
+    this.state.listError = null;
+    this.state.actionError = null;
+    this.elements.searchInput.value = "";
+    this.elements.searchMode.value = "keyword";
+    if (this.immersive.isActive()) {
+      this.elements.immersiveExitButton.click();
+    }
+    this.captionLab.clear();
+    this.render();
+    await Promise.all([
       this.reloadMemes(),
       this.refreshTags(),
       this.refreshTemplates(),
@@ -981,8 +1273,9 @@ export class MemeVaultApp {
     this.elements.openUploadButton.addEventListener("click", () => {
       if (!this.capabilities.canWrite) return;
       this.batchUpload.open(
-        this.state.availableTemplates,
+        this.hasCapability("templates") ? this.state.availableTemplates : [],
         this.state.availableTags,
+        this.vaultIdParam(),
       );
     });
     this.elements.openSettingsButton.addEventListener("click", () => {
@@ -1311,6 +1604,7 @@ export class MemeVaultApp {
   }
 
   private render(): void {
+    renderCapabilityGating(this.elements, this.state);
     renderToolbar(this.elements, this.state);
     renderOperationError(this.elements, this.state);
     renderTemplateFilters(this.elements, this.state);
@@ -1590,6 +1884,7 @@ export class MemeVaultApp {
             page: this.state.page,
             page_size: this.state.pageSize,
             signal: controller.signal,
+            vaultId: this.vaultIdParam(),
           })
         : await this.api.listMemePage({
             page: this.state.page,
@@ -1601,6 +1896,9 @@ export class MemeVaultApp {
             sort: this.state.listSort,
             shuffleSeed: this.state.shuffleSeed,
             signal: controller.signal,
+            vaultId: this.vaultIdParam(),
+            orientation: this.state.orientationFilter,
+            favorite: this.state.favoriteOnly,
           });
       if (this.listController !== controller) {
         return;
@@ -1674,6 +1972,7 @@ export class MemeVaultApp {
         page,
         page_size: pageSize as MemePageSize,
         signal,
+        vaultId: this.vaultIdParam(),
       });
       return {
         items: response.items.map(item => ({ meme: item.meme, score: item.score })),
@@ -1693,6 +1992,9 @@ export class MemeVaultApp {
       sort: this.state.listSort,
       shuffleSeed: this.state.shuffleSeed,
       signal,
+      vaultId: this.vaultIdParam(),
+      orientation: this.state.orientationFilter,
+      favorite: this.state.favoriteOnly,
     });
     return {
       items: response.items.map(meme => ({ meme })),
@@ -1765,7 +2067,7 @@ export class MemeVaultApp {
 
   private async refreshTags(): Promise<void> {
     try {
-      this.state.availableTags = await this.api.listTags();
+      this.state.availableTags = await this.api.listTags({ vaultId: this.vaultIdParam() });
       this.batchUpload.setAvailableTags(this.state.availableTags);
       this.editTagEditor?.setAvailableTags(this.state.availableTags);
       renderTags(this.elements, this.state);
@@ -2054,10 +2356,15 @@ export class MemeVaultApp {
             this.state.selectedTags,
             this.state.selectedTemplateId,
             true,
+            undefined,
+            this.vaultIdParam(),
           )
         : await this.api.getRandomMeme(
             this.state.selectedTags,
             this.state.selectedTemplateId,
+            false,
+            undefined,
+            this.vaultIdParam(),
           );
       this.selectMeme(meme);
     } catch (error) {

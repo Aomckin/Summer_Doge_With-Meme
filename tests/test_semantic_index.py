@@ -31,6 +31,7 @@ from app.services.tag_service import TagService
 from app.services.template_service import TemplateService
 from app.storage.image_storage import ImageStorage
 from app.storage.template_image_storage import TemplateImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def png(color=(20, 40, 60, 255), *, size=(12, 8), mode="RGBA") -> bytes:
@@ -59,14 +60,17 @@ def semantic_context(tmp_path: Path):
         session.add_all([provider, model, template])
         session.commit()
         model_id = model.id
-    yield factory, storage, model_id, tmp_path
+        vault = ensure_default_vault(session)
+    yield factory, storage, model_id, tmp_path, vault
     engine.dispose()
 
 
 def add_meme(session: Session, storage: ImageStorage, title: str, *, tags=(), image_count=1) -> Meme:
     color_seed = sum(title.encode("utf-8")) % 200
+    vault = ensure_default_vault(session)
     first = storage.save(f"{title}-0.png", png((color_seed, 40, 60, 255)))
     meme = Meme(
+        vault_id=vault.id,
         title=title, description="蓝色舞台中人物被强光照亮",
         original_filename=first.original_filename, stored_filename=first.stored_filename,
         file_path=first.file_path.name, thumbnail_path=first.thumbnail_path.name,
@@ -78,6 +82,7 @@ def add_meme(session: Session, storage: ImageStorage, title: str, *, tags=(), im
     for position in range(image_count):
         stored = first if position == 0 else storage.save(f"{title}-{position}.png", png((20 + position, 40, 60, 255)))
         meme.images.append(MemeImage(
+            vault_id=vault.id,
             original_filename=stored.original_filename, stored_filename=stored.stored_filename,
             file_path=stored.file_path.name, thumbnail_path=stored.thumbnail_path.name,
             mime_type=stored.mime_type, file_size=stored.file_size, width=stored.width,
@@ -145,7 +150,7 @@ def test_rebuild_api_maps_model_snapshot_to_public_model_id() -> None:
 
 
 def test_content_hash_is_stable_and_tracks_title_tags_and_image_order(semantic_context) -> None:
-    factory, storage, model_id, _ = semantic_context
+    factory, storage, model_id, _, vault = semantic_context
     with factory() as session:
         meme = add_meme(session, storage, "闪光弹", tags=("舞台", "蓝色调"), image_count=6)
         builder = MemeEmbeddingContentBuilder(storage)
@@ -167,7 +172,7 @@ def test_content_hash_is_stable_and_tracks_title_tags_and_image_order(semantic_c
 
 
 def test_gif_fallback_reads_first_frame_and_outputs_data_uri(semantic_context) -> None:
-    factory, storage, model_id, _ = semantic_context
+    factory, storage, model_id, _, vault = semantic_context
     frames = [Image.new("RGB", (20, 10), color) for color in ("red", "blue")]
     output = BytesIO()
     frames[0].save(output, format="GIF", save_all=True, append_images=frames[1:], loop=0)
@@ -205,7 +210,7 @@ class FakeClient:
 
 
 def test_semantic_search_orders_cosine_filters_tags_and_caches_pages(semantic_context) -> None:
-    factory, storage, model_id, tmp_path = semantic_context
+    factory, storage, model_id, tmp_path, vault = semantic_context
     e1 = [0.0] * 1024
     e1[0] = 1.0
     e2 = [0.0] * 1024
@@ -234,7 +239,7 @@ def test_semantic_search_orders_cosine_filters_tags_and_caches_pages(semantic_co
 def test_semantic_top_five_random_reuses_local_ranking_and_skips_unavailable_asset(
     semantic_context, monkeypatch
 ) -> None:
-    factory, storage, model_id, tmp_path = semantic_context
+    factory, storage, model_id, tmp_path, vault = semantic_context
     query_vector = [0.0] * 1024
     query_vector[0] = 1.0
     scores = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5)
@@ -276,7 +281,7 @@ def test_semantic_top_five_random_reuses_local_ranking_and_skips_unavailable_ass
 def test_semantic_top_five_random_reports_library_without_ready_embeddings(
     semantic_context,
 ) -> None:
-    factory, storage, _, tmp_path = semantic_context
+    factory, storage, _, tmp_path, vault = semantic_context
     with factory() as session:
         add_meme(session, storage, "not-indexed")
     fake = FakeClient([1.0] + [0.0] * 1023)
@@ -296,7 +301,7 @@ def test_semantic_top_five_random_reports_library_without_ready_embeddings(
 
 
 def test_index_generation_invalidates_query_cache_and_similar_never_calls_provider(semantic_context) -> None:
-    factory, storage, model_id, tmp_path = semantic_context
+    factory, storage, model_id, tmp_path, vault = semantic_context
     vector = [0.0] * 1024
     vector[0] = 1.0
     with factory() as session:
@@ -311,7 +316,7 @@ def test_index_generation_invalidates_query_cache_and_similar_never_calls_provid
     with factory() as session:
         service = SemanticSearchService(session, storage, tmp_path / "key", index, cache, client=fake)
         service.search(query="相似反应", tags=[], page=1, page_size=24)
-        MemeEmbeddingRepository(session).bump_generation()
+        MemeEmbeddingRepository(session).bump_generation(vault.id)
         session.commit()
         service.search(query="相似反应", tags=[], page=1, page_size=24)
         assert fake.calls == 2
@@ -327,7 +332,7 @@ def test_index_generation_invalidates_query_cache_and_similar_never_calls_provid
 
 
 def test_missing_statistics_and_stale_marking(semantic_context) -> None:
-    factory, storage, model_id, _ = semantic_context
+    factory, storage, model_id, _, vault = semantic_context
     with factory() as session:
         first = add_meme(session, storage, "first")
         second = add_meme(session, storage, "second")
@@ -335,8 +340,8 @@ def test_missing_statistics_and_stale_marking(semantic_context) -> None:
         session.commit()
         repository = MemeEmbeddingRepository(session)
         counts = repository.count_status(
-            model_record_id=model_id, model_id="qwen3-vl-embedding", dimension=1024,
-            kind=EMBEDDING_KIND,
+            vault_id=vault.id, model_record_id=model_id, model_id="qwen3-vl-embedding",
+            dimension=1024, kind=EMBEDDING_KIND,
         )
         assert counts["missing"] == 1
         assert invalidate_meme_semantic_data(session, [first.id]) == 1
@@ -346,7 +351,7 @@ def test_missing_statistics_and_stale_marking(semantic_context) -> None:
 
 
 def test_business_mutations_mark_embeddings_stale_and_delete_cascades(semantic_context) -> None:
-    factory, storage, model_id, tmp_path = semantic_context
+    factory, storage, model_id, tmp_path, vault = semantic_context
     vector = [1.0] + [0.0] * 1023
     with factory() as session:
         meme = add_meme(session, storage, "mutable", tags=("source-tag",))

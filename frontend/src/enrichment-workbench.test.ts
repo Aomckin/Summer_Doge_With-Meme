@@ -17,7 +17,7 @@ const meme: MemeResponse = {
   image_url: "/media/one.png", thumbnail_url: "/thumbs/one.png",
   mime_type: "image/png", file_size: 10, width: 8, height: 8,
   file_hash: "b".repeat(64), created_at: "2026-01-01", updated_at: "2026-01-01",
-  tags: [], template: null, image_count: 1,
+  tags: [], template: null, image_count: 1, vault_id: 1, vault_asset_no: null,
   images: [{ id: 1, original_filename: "one.png", stored_filename: "one.png",
     image_url: "/media/one.png", thumbnail_url: "/thumbs/one.png",
     mime_type: "image/png", file_size: 10, width: 8, height: 8,

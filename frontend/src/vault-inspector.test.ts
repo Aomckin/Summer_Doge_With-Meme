@@ -16,6 +16,8 @@ function meme(id: number, title = `Meme ${id}`): MemeResponse {
     template: null,
     images: [{ id, original_filename: `${id}.png`, stored_filename: `${id}.png`, image_url: `/media/${id}.png`, thumbnail_url: null, mime_type: "image/png", file_size: 10, width: 10, height: 10, file_hash: String(id), position: 0, created_at: "2026-01-01" }],
     image_count: 1,
+    vault_id: 1,
+    vault_asset_no: id,
   };
 }
 

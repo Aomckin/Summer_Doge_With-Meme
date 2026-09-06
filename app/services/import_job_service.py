@@ -10,7 +10,9 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.import_job import ImportJob, ImportJobItem
+from app.models.vault import Vault
 from app.repositories.import_job_repository import ImportJobRepository
+from app.storage.vault_storage import VaultStorageService
 from app.services.meme_service import DuplicateImageError, MemeService
 from app.storage.image_storage import ImageStorage, StoredImage
 
@@ -81,6 +83,7 @@ class ImportJobService:
     ) -> None:
         self.session = session
         self.storage = storage
+        self.vault_profile: str | None = None
         self.archives_dir = archives_dir.resolve()
         self.archives_dir.mkdir(parents=True, exist_ok=True)
         self.repository = ImportJobRepository(session)
@@ -88,6 +91,7 @@ class ImportJobService:
     def create_job(
         self,
         *,
+        vault_id: int,
         original_filename: str,
         archive_path: Path,
         tags: list[str],
@@ -96,6 +100,7 @@ class ImportJobService:
         chunk_size: int,
     ) -> ImportJob:
         job = ImportJob(
+            vault_id=vault_id,
             original_filename=Path(original_filename.replace("\\", "/")).name[:255]
             or "archive.zip",
             archive_path=archive_path.name,
@@ -154,6 +159,10 @@ class ImportJobService:
             archive.unlink(missing_ok=True)
 
     def run(self, job_id: int, cancel_event: Event | None = None) -> None:
+        # Profile 上传管线需要目标仓库的 profile；一次加载，整个任务复用。
+        job = self.get_job(job_id)
+        vault = self.session.get(Vault, job.vault_id)
+        self.vault_profile = vault.profile if vault is not None else None
         event = cancel_event or Event()
         job = self.get_job(job_id)
         retry_indexes = None
@@ -272,6 +281,7 @@ class ImportJobService:
                             ).create_meme_no_commit(
                                 info.filename,
                                 validated,
+                                vault_id=job.vault_id,
                                 title=(PurePosixPath(info.filename).stem or "Meme")[:255],
                                 source=job.source,
                                 tags=tags,
@@ -348,13 +358,11 @@ class ImportJobManager:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
-        images_dir: Path,
-        thumbnails_dir: Path,
+        vault_storage: VaultStorageService,
         archives_dir: Path,
     ) -> None:
         self.session_factory = session_factory
-        self.images_dir = images_dir
-        self.thumbnails_dir = thumbnails_dir
+        self.vault_storage = vault_storage
         self.archives_dir = archives_dir
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="meme-import")
         self.events: dict[int, Event] = {}
@@ -398,11 +406,17 @@ class ImportJobManager:
     def _run(self, job_id: int, event: Event) -> None:
         try:
             with self.session_factory() as session:
-                ImportJobService(
-                    session,
-                    ImageStorage(self.images_dir, self.thumbnails_dir),
-                    self.archives_dir,
-                ).run(job_id, event)
+                # 存储目录按导入目标 Vault 解析；legacy Vault 复用旧共享目录。
+                job = session.get(ImportJob, job_id)
+                vault = None
+                if job is not None:
+                    vault = session.get(Vault, job.vault_id)
+                storage = (
+                    self.vault_storage.storage_for(vault)
+                    if vault is not None
+                    else ImageStorage(self.vault_storage.legacy_images_dir, self.vault_storage.legacy_thumbnails_dir)
+                )
+                ImportJobService(session, storage, self.archives_dir).run(job_id, event)
         finally:
             with self.lock:
                 self.events.pop(job_id, None)

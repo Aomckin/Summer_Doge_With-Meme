@@ -10,6 +10,8 @@ function meme(id: number, title = `Meme ${id}`): MemeResponse {
     mime_type: "image/png", file_size: 10, width: 10, height: 10, file_hash: String(id),
     created_at: "2026-01-01", updated_at: "2026-01-01", tags: [], template: null,
     images: [], image_count: 1,
+    vault_id: 1,
+    vault_asset_no: id,
   };
 }
 
@@ -30,6 +32,11 @@ function api(overrides: Partial<MemeApi> = {}): MemeApi {
     listMemeRelations: vi.fn().mockResolvedValue([]),
     semanticSearch: vi.fn().mockResolvedValue(semantic()),
     listSimilarMemes: vi.fn().mockRejectedValue(new ApiError(409, "missing")),
+    listVaults: vi.fn().mockResolvedValue([
+      { id: 1, name: "Meme", slug: "meme", type: "meme", profile: "meme", capabilities: { semanticSearch: true, directRelations: true, aiAnalysis: true, randomAsset: true, templates: true, captions: true }, description: null, icon: null, meme_count: 0 },
+    ]),
+    createVault: vi.fn(),
+    deleteVault: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as MemeApi;
 }

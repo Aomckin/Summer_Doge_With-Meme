@@ -59,6 +59,8 @@ function makeMeme(id: number, title = `Meme ${id}`): MemeResponse {
     template: null,
     images: [],
     image_count: 1,
+    vault_id: 1,
+    vault_asset_no: id,
   };
 }
 
@@ -166,6 +168,12 @@ function makeApi(overrides: Partial<MemeApi> = {}): MemeApi {
       suggested_template: null,
     }),
     confirmAIAnalysis: vi.fn().mockResolvedValue(makeMeme(1)),
+    listVaults: vi.fn().mockResolvedValue([
+      { id: 1, name: "Meme", slug: "meme", type: "meme", profile: "meme", capabilities: { semanticSearch: true, directRelations: true, aiAnalysis: true, randomAsset: true, templates: true, captions: true }, description: null, icon: null, meme_count: 0, max_file_size_mb: 100 },
+    ]),
+    createVault: vi.fn(),
+    updateVault: vi.fn(),
+    deleteVault: vi.fn().mockResolvedValue(undefined),
     listAIProviderPresets: vi.fn().mockResolvedValue([
       {
         id: "qwen",
@@ -345,7 +353,9 @@ describe("MemeVaultApp", () => {
     expect(menu.querySelector("#open-semantic-index")).not.toBeNull();
     expect(menu.querySelector("#open-enrichment")).not.toBeNull();
     expect(menu.querySelector("#open-vault-inspector")).not.toBeNull();
-    expect(header.querySelectorAll(":scope > .toolbar > .header-actions > button")).toHaveLength(6);
+    // Vault Selector + 动图模式/随机/批量下载/外观/图片上传/沉浸浏览。
+    expect(header.querySelectorAll(":scope > .toolbar > .header-actions > button")).toHaveLength(7);
+    expect(header.querySelector(".header-actions > #vault-selector")).not.toBeNull();
   });
 
   it("renders natural-ratio cards with overlay metadata", async () => {
@@ -678,6 +688,8 @@ describe("MemeVaultApp", () => {
       .mockResolvedValueOnce(memePage([makeMeme(2)], 48, 2));
     const app = new MemeVaultApp(root(), makeApi({ listMemePage }));
     const starting = app.start();
+    // start() 现在先解析当前 Vault，再进入列表加载；等待一个宏任务让加载态生效。
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(document.querySelector<HTMLSelectElement>("[data-list-sort]")?.disabled).toBe(true);
     expect(document.querySelector<HTMLButtonElement>("[data-page]")?.disabled).toBe(true);
     const state = (app as unknown as { state: AppState }).state;
@@ -823,7 +835,7 @@ describe("MemeVaultApp", () => {
     expect(gifMode.classList.contains("is-active")).toBe(true);
 
     button("随机一个").click();
-    await vi.waitFor(() => expect(api.getRandomMeme).toHaveBeenCalledWith([], null, true));
+    await vi.waitFor(() => expect(api.getRandomMeme).toHaveBeenCalledWith([], null, true, undefined, undefined));
 
     gifMode.click();
     await vi.waitFor(() => expect(listMemePage).toHaveBeenLastCalledWith(
@@ -932,7 +944,7 @@ describe("MemeVaultApp", () => {
 
     button("随机一个").click();
     await vi.runAllTimersAsync();
-    expect(api.getRandomMeme).toHaveBeenCalledWith(["funny"], null);
+    expect(api.getRandomMeme).toHaveBeenCalledWith(["funny"], null, false, undefined, undefined);
     expect(document.querySelector("[data-detail-title]")?.textContent).toBe(
       "随机 Meme",
     );

@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ExportJobCreate(BaseModel):
+    # v2.0 起必填：导出范围必须显式指定仓库，不再静默回退默认 meme Vault。
+    vault_id: int = Field(ge=1)
     scope: Literal["all", "filtered"] = "all"
     query: str | None = Field(default=None, max_length=500)
     tags: list[str] = Field(default_factory=list)

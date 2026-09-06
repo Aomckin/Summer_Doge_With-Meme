@@ -15,11 +15,20 @@ class MemeEmbeddingRepository:
         )
 
     def compatible_ready(
-        self, *, model_record_id: int, model_id: str, dimension: int, kind: str
+        self,
+        *,
+        vault_id: int,
+        model_record_id: int,
+        model_id: str,
+        dimension: int,
+        kind: str,
     ) -> list[MemeEmbedding]:
+        # 语义索引按 Vault 分片：只加载当前仓库 Meme 的兼容 ready 向量。
         return list(self.session.scalars(
             select(MemeEmbedding)
+            .join(Meme, Meme.id == MemeEmbedding.meme_id)
             .where(
+                Meme.vault_id == vault_id,
                 MemeEmbedding.status == "ready",
                 MemeEmbedding.model_record_id == model_record_id,
                 MemeEmbedding.model_id_snapshot == model_id,
@@ -29,14 +38,18 @@ class MemeEmbeddingRepository:
             .order_by(MemeEmbedding.meme_id)
         ))
 
-    def generation(self) -> int:
-        state = self.session.get(SemanticIndexState, 1)
+    def generation(self, vault_id: int) -> int:
+        state = self.session.scalar(
+            select(SemanticIndexState).where(SemanticIndexState.vault_id == vault_id)
+        )
         return state.generation if state is not None else 0
 
-    def bump_generation(self) -> int:
-        state = self.session.get(SemanticIndexState, 1)
+    def bump_generation(self, vault_id: int) -> int:
+        state = self.session.scalar(
+            select(SemanticIndexState).where(SemanticIndexState.vault_id == vault_id)
+        )
         if state is None:
-            state = SemanticIndexState(id=1, generation=1)
+            state = SemanticIndexState(vault_id=vault_id, generation=1)
             self.session.add(state)
         else:
             state.generation += 1
@@ -44,21 +57,31 @@ class MemeEmbeddingRepository:
         return state.generation
 
     def count_status(
-        self, *, model_record_id: int | None, model_id: str | None, dimension: int,
+        self, *, vault_id: int, model_record_id: int | None, model_id: str | None,
+        dimension: int,
         kind: str,
     ) -> dict[str, int]:
-        total = int(self.session.scalar(select(func.count(Meme.id))) or 0)
-        rows = self.session.execute(
-            select(MemeEmbedding.status, func.count(MemeEmbedding.id)).group_by(
-                MemeEmbedding.status
+        total = int(
+            self.session.scalar(
+                select(func.count(Meme.id)).where(Meme.vault_id == vault_id)
             )
+            or 0
+        )
+        rows = self.session.execute(
+            select(MemeEmbedding.status, func.count(MemeEmbedding.id))
+            .join(Meme, Meme.id == MemeEmbedding.meme_id)
+            .where(Meme.vault_id == vault_id)
+            .group_by(MemeEmbedding.status)
         ).all()
         all_counts = {str(status): int(count) for status, count in rows}
         existing = sum(all_counts.values())
         compatible_ready = 0
         if model_record_id is not None and model_id is not None:
             compatible_ready = int(self.session.scalar(
-                select(func.count(MemeEmbedding.id)).where(
+                select(func.count(MemeEmbedding.id))
+                .join(Meme, Meme.id == MemeEmbedding.meme_id)
+                .where(
+                    Meme.vault_id == vault_id,
                     MemeEmbedding.status == "ready",
                     MemeEmbedding.model_record_id == model_record_id,
                     MemeEmbedding.model_id_snapshot == model_id,

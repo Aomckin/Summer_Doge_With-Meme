@@ -18,6 +18,8 @@ class ImportJob(Base):
     __tablename__ = "import_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 导入目标仓库；旧任务在迁移中回填为默认 meme Vault。
+    vault_id: Mapped[int] = mapped_column(Integer, index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(30), index=True, default="queued")
     total_entries: Mapped[int] = mapped_column(Integer, default=0)

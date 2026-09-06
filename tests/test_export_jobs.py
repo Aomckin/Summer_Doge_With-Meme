@@ -17,6 +17,7 @@ from app.services.export_job_service import (
 )
 from app.services.meme_service import MemeService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def image_bytes(index: int) -> bytes:
@@ -37,6 +38,7 @@ def context(tmp_path: Path):
 
 
 def seed(session, storage, count: int = 4):
+    vault = ensure_default_vault(session)
     meme_service = MemeService(session, storage)
     template = Template(name="Doge/模板", description=None)
     session.add(template); session.commit()
@@ -44,6 +46,7 @@ def seed(session, storage, count: int = 4):
     for index in range(count):
         memes.append(meme_service.create_meme(
             f"same.png", image_bytes(index), title=f"标题 {index}",
+            vault_id=vault.id,
             description="match" if index % 2 == 0 else "other",
             tags=["doge", "reaction"] if index == 0 else (["doge"] if index % 2 == 0 else ["other"]),
             template_id=template.id if index < 2 else None,
@@ -52,7 +55,7 @@ def seed(session, storage, count: int = 4):
 
 
 def create(service: ExportJobService, **overrides):
-    values = dict(scope="all", query=None, tags=[], template_id=None, organization="flat", include_manifest=True, archive_name="导出/包")
+    values = dict(vault_id=ensure_default_vault(service.session).id, scope="all", query=None, tags=[], template_id=None, organization="flat", include_manifest=True, archive_name="导出/包")
     values.update(overrides)
     return service.create_job(**values)
 

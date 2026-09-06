@@ -22,6 +22,7 @@ from app.services.meme_enrichment_service import EnrichmentConflictError, MemeEn
 from app.services.ai_settings_service import AISettingsService
 from app.services.enrichment_job_manager import EnrichmentJobManager, EnrichmentJobService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def png(color: str) -> bytes:
@@ -36,12 +37,14 @@ def context(tmp_path: Path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbs")
     with factory() as session:
+        vault = ensure_default_vault(session)
         provider = AIProvider(name="Test", protocol="openai_responses", base_url="https://example.test", enabled=True)
         model = AIModel(provider=provider, model_id="vision", display_name="Vision", supports_vision=True, enabled=True, is_active=True)
         session.add_all([provider, model])
         template = Template(name="震惊猫")
         session.add(template)
         meme = Meme(
+            vault_id=vault.id,
             title="IMG_123", description=None, original_filename="IMG_123.png",
             stored_filename="cover.png", file_path="cover.png", thumbnail_path="cover.png",
             mime_type="image/png", file_size=10, width=8, height=8, file_hash="0" * 64,
@@ -49,6 +52,7 @@ def context(tmp_path: Path):
         for position, color in enumerate(("red", "blue")):
             stored = storage.save(f"{position}.png", png(color))
             meme.images.append(MemeImage(
+                vault_id=vault.id,
                 original_filename=stored.original_filename, stored_filename=stored.stored_filename,
                 file_path=stored.file_path.name, thumbnail_path=stored.thumbnail_path.name,
                 mime_type=stored.mime_type, file_size=stored.file_size, width=stored.width,
@@ -59,7 +63,7 @@ def context(tmp_path: Path):
         session.add(meme)
         session.commit()
         meme_id, template_id, model_id = meme.id, template.id, model.id
-    return factory, storage, meme_id, template_id, model_id
+    return factory, storage, meme_id, template_id, model_id, vault
 
 
 class FakeEnrichmentClient:
@@ -79,7 +83,7 @@ class FakeEnrichmentClient:
 
 
 def test_provider_analysis_creates_one_suggestion_without_modifying_meme(tmp_path: Path) -> None:
-    factory, storage, meme_id, template_id, _ = context(tmp_path)
+    factory, storage, meme_id, template_id, _, vault = context(tmp_path)
     client = FakeEnrichmentClient()
     with factory() as session:
         service = MemeEnrichmentService(session, storage)
@@ -97,7 +101,7 @@ def test_provider_analysis_creates_one_suggestion_without_modifying_meme(tmp_pat
 
 
 def test_source_hash_is_stable_and_apply_is_transactional(tmp_path: Path) -> None:
-    factory, storage, meme_id, template_id, model_id = context(tmp_path)
+    factory, storage, meme_id, template_id, model_id, vault = context(tmp_path)
     with factory() as session:
         service = MemeEnrichmentService(session, storage)
         meme = service.get_meme(meme_id)
@@ -127,7 +131,7 @@ def test_source_hash_is_stable_and_apply_is_transactional(tmp_path: Path) -> Non
 
 
 def test_changed_meme_marks_suggestion_stale_and_protects_manual_removal(tmp_path: Path) -> None:
-    factory, storage, meme_id, _, _ = context(tmp_path)
+    factory, storage, meme_id, _, _, vault = context(tmp_path)
     with factory() as session:
         service = MemeEnrichmentService(session, storage)
         suggestion = service.create_suggestion(EnrichmentCandidate(
@@ -144,13 +148,13 @@ def test_changed_meme_marks_suggestion_stale_and_protects_manual_removal(tmp_pat
 
 
 def test_background_job_uses_shared_service_and_accumulates_tokens(tmp_path: Path, monkeypatch) -> None:
-    factory, storage, meme_id, _, _ = context(tmp_path)
+    factory, storage, meme_id, _, _, vault = context(tmp_path)
     client = FakeEnrichmentClient()
     monkeypatch.setattr(AISettingsService, "build_active_client", lambda self: client)
     key_file = tmp_path / "key"
     with factory() as session:
         job = EnrichmentJobService(session, storage, key_file).create_job(
-            scope="filename_title", query=None, tags=[], analyze_title=True,
+            vault_id=vault.id, scope="filename_title", query=None, tags=[], analyze_title=True,
             analyze_description=True, analyze_tags=True, analyze_template=True,
             max_workers=2,
         )
@@ -176,7 +180,7 @@ def test_background_job_uses_shared_service_and_accumulates_tokens(tmp_path: Pat
 
 
 def test_failed_background_job_persists_usage_and_response_summary(tmp_path: Path, monkeypatch) -> None:
-    factory, storage, _, _, _ = context(tmp_path)
+    factory, storage, _, _, _, vault = context(tmp_path)
 
     class InvalidClient:
         def analyze_enrichment(self, **kwargs):
@@ -190,7 +194,7 @@ def test_failed_background_job_persists_usage_and_response_summary(tmp_path: Pat
     key_file = tmp_path / "key"
     with factory() as session:
         job = EnrichmentJobService(session, storage, key_file).create_job(
-            scope="filename_title", query=None, tags=[], analyze_title=True,
+            vault_id=vault.id, scope="filename_title", query=None, tags=[], analyze_title=True,
             analyze_description=True, analyze_tags=True, analyze_template=True,
             max_workers=1,
         )
@@ -217,12 +221,13 @@ def test_failed_background_job_persists_usage_and_response_summary(tmp_path: Pat
 
 
 def test_id_range_scope_is_inclusive_and_validated(tmp_path: Path) -> None:
-    factory, storage, meme_id, _, _ = context(tmp_path)
+    factory, storage, meme_id, _, _, vault = context(tmp_path)
     with factory() as session:
         first = session.get(Meme, meme_id)
         assert first is not None
         for index in range(2):
             session.add(Meme(
+                vault_id=vault.id,
                 title=f"range-{index}", original_filename=f"range-{index}.png",
                 stored_filename=f"range-{index}.png", file_path=f"range-{index}.png",
                 thumbnail_path=f"range-{index}.png", mime_type="image/png",
@@ -232,12 +237,12 @@ def test_id_range_scope_is_inclusive_and_validated(tmp_path: Path) -> None:
         ids = [item.id for item in session.scalars(select(Meme).order_by(Meme.id)).all()]
         service = EnrichmentJobService(session, storage, tmp_path / "key")
         selected = service.select_memes(
-            scope="id_range", query=None, tags=[],
+            vault_id=vault.id, scope="id_range", query=None, tags=[],
             start_meme_id=ids[1], end_meme_id=ids[2],
         )
         assert [item.id for item in selected] == ids[1:3]
 
-    valid = EnrichmentJobCreate(scope="id_range", start_meme_id=10, end_meme_id=20)
+    valid = EnrichmentJobCreate(vault_id=1, scope="id_range", start_meme_id=10, end_meme_id=20)
     assert (valid.start_meme_id, valid.end_meme_id) == (10, 20)
     with pytest.raises(ValueError, match="less than or equal"):
-        EnrichmentJobCreate(scope="id_range", start_meme_id=20, end_meme_id=10)
+        EnrichmentJobCreate(vault_id=1, scope="id_range", start_meme_id=20, end_meme_id=10)

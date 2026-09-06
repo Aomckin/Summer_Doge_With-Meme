@@ -32,11 +32,13 @@ class TagService:
         include_empty: bool = False,
         q: str | None = None,
         sort: str = "name_asc",
+        vault_id: int | None = None,
     ) -> list[TagWithUsage]:
         return self.repository.list_with_usage(
             include_empty=include_empty,
             q=q,
             sort=sort,
+            vault_id=vault_id,
         )
 
     def _get_tag(self, tag_id: int) -> Tag:

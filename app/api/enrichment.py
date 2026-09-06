@@ -99,6 +99,7 @@ def create_job(payload: EnrichmentJobCreate, request: Request, service: JobServi
 @router.post("/api/enrichment-jobs/estimate", response_model=EnrichmentJobEstimate)
 def estimate_job(payload: EnrichmentJobCreate, service: JobServiceDependency) -> EnrichmentJobEstimate:
     count = service.estimate(
+        vault_id=payload.vault_id,
         scope=payload.scope, query=payload.query, tags=payload.tags,
         start_meme_id=payload.start_meme_id, end_meme_id=payload.end_meme_id,
     )

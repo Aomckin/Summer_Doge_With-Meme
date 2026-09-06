@@ -30,6 +30,7 @@ from app.services.template_service import (
 )
 from app.storage.image_storage import ImageStorage
 from app.storage.template_image_storage import TemplateImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def create_session() -> Session:
@@ -39,7 +40,9 @@ def create_session() -> Session:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)()
+    session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
+    return session
 
 
 def image_bytes() -> bytes:
@@ -262,6 +265,7 @@ def test_deleting_template_clears_meme_and_analysis_references(
     tmp_path: Path,
 ) -> None:
     session = create_session()
+    vault = ensure_default_vault(session)
     template_service = TemplateService(session)
     meme_service = MemeService(
         session,
@@ -274,6 +278,7 @@ def test_deleting_template_clears_meme_and_analysis_references(
             image_bytes(),
             title="Doge",
             template_id=template.id,
+            vault_id=vault.id,
         )
         analysis = MemeAIAnalysis(
             meme=meme,

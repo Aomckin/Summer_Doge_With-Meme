@@ -145,7 +145,11 @@ class MemeEmbeddingService:
             record.total_tokens = result.total_tokens
             record.last_error = None
             record.indexed_at = utc_now()
-        repository.bump_generation()
+        vault_id = session.scalar(
+            select(Meme.vault_id).where(Meme.id == attempt.meme_id)
+        )
+        if vault_id is not None:
+            repository.bump_generation(vault_id)
         return record
 
     def rebuild_one(

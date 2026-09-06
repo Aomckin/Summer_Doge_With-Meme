@@ -20,6 +20,7 @@ from app.api.recommendations import router as recommendation_router
 from app.api.similarity_inspection import router as similarity_inspection_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
+from app.api.vaults import router as vault_router
 from app.config import (
     AI_SETTINGS_KEY_FILE,
     FRONTEND_DIST_DIR,
@@ -42,6 +43,7 @@ from app.auth import (
     resolve_external_api_key,
 )
 from app.database import SessionLocal, create_tables
+from app.storage.vault_storage import VaultStorageService
 from app.services.import_job_service import ImportJobManager
 from app.services.export_job_service import ExportJobManager
 from app.services.embedding_job_manager import EmbeddingJobManager
@@ -99,19 +101,21 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="1.0.1",
+        version="2.0.0",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
     application.state.thumbnails_dir = resolved_thumbnails
+    application.state.vault_storage = VaultStorageService(
+        resolved_images.parent, resolved_images, resolved_thumbnails
+    )
     application.state.template_images_dir = resolved_template_images
     application.state.template_thumbnails_dir = resolved_template_thumbnails
     application.state.ai_settings_key_file = ai_settings_key_file.resolve()
     application.state.import_archives_dir = resolved_import_archives
     application.state.import_job_manager = ImportJobManager(
         SessionLocal,
-        resolved_images,
-        resolved_thumbnails,
+        application.state.vault_storage,
         resolved_import_archives,
     )
     application.state.export_archives_dir = resolved_export_archives
@@ -163,6 +167,7 @@ def create_app(
     # 各业务路由在独立模块中定义，入口文件只负责把它们挂到应用上。
     # Semantic static Meme paths must precede the dynamic /api/memes/{meme_id} route.
     application.include_router(semantic_router)
+    application.include_router(vault_router)
     application.include_router(meme_router)
     application.include_router(collection_router)
     application.include_router(import_job_router)
@@ -187,6 +192,17 @@ def create_app(
             methods=["GET"],
             include_in_schema=False,
             name="mobile-ingest",
+        )
+
+    # /v/{vault_slug} 是前端 Vault URL 状态入口；刷新时回退到 SPA 入口页。
+    main_index = resolved_frontend / "index.html"
+    if main_index.is_file():
+        application.add_api_route(
+            "/v/{vault_slug}",
+            lambda: FileResponse(main_index),
+            methods=["GET"],
+            include_in_schema=False,
+            name="vault-entry",
         )
 
     if (resolved_frontend / "index.html").is_file():

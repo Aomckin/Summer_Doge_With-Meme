@@ -14,6 +14,8 @@ class ExportJob(Base):
     __tablename__ = "export_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 导出范围所属仓库；旧任务在迁移中回填为默认 meme Vault。
+    vault_id: Mapped[int] = mapped_column(Integer, index=True)
     status: Mapped[str] = mapped_column(String(30), index=True, default="pending")
     scope: Mapped[str] = mapped_column(String(20))
     query: Mapped[str | None] = mapped_column(String(500), nullable=True)

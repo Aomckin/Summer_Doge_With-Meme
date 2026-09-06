@@ -1,4 +1,5 @@
 import type { AppState, MemeCardSize, MemeResponse } from "./types";
+import { hasCapability, profileForVault } from "./vault-profile";
 import { buildPaginationTokens, clampPage } from "./pagination";
 import { memeCopySource } from "./meme-actions";
 import { bindMemeCardTilts, storedCardMotionPreset } from "./card-tilt";
@@ -16,6 +17,8 @@ export interface EditDraft {
 export interface AppElements {
   appRoot: HTMLElement;
   topbar: HTMLElement;
+  vaultSelector: HTMLButtonElement;
+  vaultSelectorName: HTMLElement;
   appearanceBackground: HTMLElement;
   searchInput: HTMLInputElement;
   searchMode: HTMLSelectElement;
@@ -39,6 +42,7 @@ export interface AppElements {
   operationError: HTMLElement;
   templateFilters: HTMLElement;
   tagFilters: HTMLElement;
+  profileFilters: HTMLElement;
   libraryHeading: HTMLElement;
   browsingControls: HTMLElement;
   listStatus: HTMLElement;
@@ -172,6 +176,11 @@ export function mountShell(root: HTMLElement): AppElements {
             <button id="semantic-search-button" class="button button-primary semantic-submit" type="button" hidden>语义搜索</button>
           </div>
           <div class="header-actions" aria-label="主要操作">
+            <button id="vault-selector" class="vault-selector" type="button" aria-haspopup="menu" aria-expanded="false" title="切换仓库">
+              <span class="vault-selector-icon" aria-hidden="true">📦</span>
+              <span class="vault-selector-name" data-vault-name>Meme</span>
+              <span class="vault-selector-caret" aria-hidden="true">▾</span>
+            </button>
             <button id="gif-mode-button" class="button header-action header-action-secondary" type="button" aria-pressed="false">动图模式</button>
             <button id="random-button" class="button header-action header-action-secondary" type="button">随机一个</button>
             <button id="open-download" class="button header-action header-action-secondary" type="button">批量下载</button>
@@ -212,18 +221,19 @@ export function mountShell(root: HTMLElement): AppElements {
       <div id="operation-error" class="operation-error" role="alert" aria-live="assertive" hidden></div>
 
       <main class="workspace">
-        <section class="library" aria-label="Meme 资料库">
+        <section class="library" aria-label="资料库">
           <div id="library-heading" class="section-heading">
             <div>
               <p class="eyebrow">LIBRARY</p>
-              <h1>我的 Meme</h1>
+              <h1 data-library-title>我的 Meme</h1>
               <p class="library-summary">
-                <span data-meme-total>0 个 Meme</span>
+                <span data-meme-total>0</span>
                 <span data-filter-summary hidden></span>
               </p>
             </div>
           </div>
           <div class="library-filter-toolbar" aria-label="资料库筛选">
+            <div id="profile-filters" class="tag-filters profile-filters" aria-label="档案筛选" hidden></div>
             <div id="template-filters" class="tag-filters template-filters" aria-label="模板筛选"></div>
             <div id="tag-filters" class="tag-filters" aria-label="标签筛选"></div>
           </div>
@@ -263,7 +273,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <nav id="library-pagination" class="pagination" aria-label="资料库分页"></nav>
         </section>
 
-        <aside id="detail-panel" class="detail-panel" aria-label="Meme 详情"></aside>
+        <aside id="detail-panel" class="detail-panel" aria-label="详情面板"></aside>
       </main>
     </div>
 
@@ -337,9 +347,9 @@ export function mountShell(root: HTMLElement): AppElements {
       <div class="settings-shell appearance-shell">
         <header class="settings-header">
           <div>
-            <p class="eyebrow">APPEARANCE · LOCAL</p>
+            <p class="eyebrow">APPEARANCE · VAULT</p>
             <h2 id="appearance-title">外观</h2>
-            <p>调整背景、面板材质与氛围。所有设置仅保存在当前浏览器。</p>
+            <p>调整背景、面板材质与氛围。主题属于当前仓库，保存到服务器并随仓库切换。</p>
           </div>
           <div class="appearance-header-actions">
             <button class="button button-ghost" type="button" data-reset-appearance>恢复默认</button>
@@ -467,7 +477,7 @@ export function mountShell(root: HTMLElement): AppElements {
         <div class="modal-heading">
           <div>
             <p class="eyebrow">DIRECT LINKS</p>
-            <h2 id="relation-dialog-title">添加相关 Meme</h2>
+            <h2 id="relation-dialog-title">添加关联</h2>
           </div>
           <button class="icon-button" type="button" data-close-relations aria-label="关闭">×</button>
         </div>
@@ -523,6 +533,8 @@ export function mountShell(root: HTMLElement): AppElements {
   return {
     appRoot: root,
     topbar: required(root, ".topbar"),
+    vaultSelector: required(root, "#vault-selector"),
+    vaultSelectorName: required(root, "[data-vault-name]"),
     appearanceBackground: required(root, "[data-appearance-background]"),
     searchInput: required(root, "#meme-search"),
     searchMode: required(root, "#search-mode"),
@@ -546,6 +558,7 @@ export function mountShell(root: HTMLElement): AppElements {
     operationError: required(root, "#operation-error"),
     templateFilters: required(root, "#template-filters"),
     tagFilters: required(root, "#tag-filters"),
+    profileFilters: required(root, "#profile-filters"),
     libraryHeading: required(root, "#library-heading"),
     browsingControls: required(root, "#browsing-controls"),
     listStatus: required(root, "#list-status"),
@@ -877,15 +890,61 @@ function bindImageFallbacks(container: ParentNode): void {
   }
 }
 
+export function renderCapabilityGating(elements: AppElements, state: AppState): void {
+  // Capability 决定功能区块是否存在：未开启的能力直接不渲染，而不是禁用。
+  const caps = state.currentVault?.capabilities ?? {};
+  const on = (name: string): boolean => caps[name] === true;
+  const setVisible = (element: HTMLElement | null, visible: boolean): void => {
+    if (element) element.hidden = !visible;
+  };
+  setVisible(elements.randomButton, on("randomAsset"));
+  setVisible(elements.templateFilters, on("templates"));
+  setVisible(elements.profileFilters, on("favorite"));
+  setVisible(elements.openMemeMakerButton, on("templates"));
+  setVisible(elements.browseTemplatesButton, on("templates"));
+  setVisible(elements.openTemplatesButton, on("templates"));
+  setVisible(elements.openChatRecommendationButton, on("semanticSearch"));
+  setVisible(elements.openSemanticIndexButton, on("semanticSearch"));
+  setVisible(elements.openVaultInspectorButton, on("semanticSearch"));
+  setVisible(elements.openEnrichmentButton, on("aiAnalysis"));
+  const semanticOption = elements.searchMode.querySelector<HTMLOptionElement>('option[value="semantic"]');
+  if (semanticOption) semanticOption.hidden = !on("semanticSearch");
+}
+
+function renderProfileFilters(elements: AppElements, state: AppState): void {
+  const container = elements.profileFilters;
+  if (!container) return;
+  if (!hasCapability(state.currentVault, "favorite")) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  const chip = (active: boolean, label: string, attrs: string): string =>
+    `<button class="filter-chip${active ? " is-active" : ""}" type="button" ${attrs} aria-pressed="${active}">${label}</button>`;
+  container.innerHTML = `<span class="filter-kind">筛选</span><div class="filter-chip-scroll profile-chip-row">`
+    + [
+        chip(state.favoriteOnly, "收藏", 'data-profile-filter="favorite"'),
+        chip(state.orientationFilter === "landscape", "横图", 'data-profile-filter="landscape"'),
+        chip(state.orientationFilter === "portrait", "竖图", 'data-profile-filter="portrait"'),
+        chip(state.orientationFilter === "square", "方图", 'data-profile-filter="square"'),
+      ].join("")
+    + `</div>`;
+}
+
 export function renderLibrary(
   elements: AppElements,
   state: AppState,
 ): void {
   applyMemeCardSize(elements, state.cardSize);
   elements.memeGrid.setAttribute("aria-busy", String(state.loadingList));
+  const vocabulary = profileForVault(state.currentVault).vocabulary;
+  const titleNode = elements.libraryHeading.querySelector<HTMLElement>("[data-library-title]");
+  if (titleNode) titleNode.textContent = vocabulary.libraryTitle;
+  renderProfileFilters(elements, state);
   const total = new Intl.NumberFormat("zh-CN").format(state.totalMemes);
   const totalNode = elements.libraryHeading.querySelector<HTMLElement>("[data-meme-total]");
-  if (totalNode) totalNode.textContent = `${total} 个 Meme`;
+  if (totalNode) totalNode.textContent = `${total} ${vocabulary.countUnit}`;
   const filterSummary = elements.libraryHeading.querySelector<HTMLElement>("[data-filter-summary]");
   if (filterSummary) {
     const parts = [
@@ -944,7 +1003,7 @@ export function renderLibrary(
     } else if (hasActiveFilter) {
       elements.listStatus.innerHTML = `
         <div class="library-empty-state">
-          <strong>没有找到 Meme</strong>
+          <strong>没有找到 ${escapeHtml(vocabulary.assetSingular)}</strong>
           <span>换个关键词，或者清除当前筛选后再看看。</span>
           <button class="button button-secondary" type="button" data-clear-library-filters>清除筛选</button>
         </div>
@@ -952,9 +1011,9 @@ export function renderLibrary(
     } else {
       elements.listStatus.innerHTML = `
         <div class="library-empty-state">
-          <strong>Vault 还是空的</strong>
-          <span>上传第一张 Meme，开始建立你的私人收藏。</span>
-          <button class="button button-primary" type="button" data-empty-upload>上传第一张 Meme</button>
+          <strong>${escapeHtml(vocabulary.emptyTitle)}</strong>
+          <span>${escapeHtml(vocabulary.emptyHint)}</span>
+          <button class="button button-primary" type="button" data-empty-upload>${escapeHtml(vocabulary.uploadCta)}</button>
         </div>
       `;
     }
@@ -1156,6 +1215,58 @@ function detailImage(meme: MemeResponse, state: AppState): string {
   `).join("");
 }
 
+function orientationLabel(width: number, height: number): string {
+  if (height > width) return "竖图";
+  if (width > height) return "横图";
+  return "方图";
+}
+
+function profileMetadataMarkup(state: AppState): string {
+  const meme = state.selectedMeme;
+  if (!meme) return "";
+  const data = (meme.profile_metadata?.data ?? {}) as Record<string, unknown>;
+  const text = (key: string) => {
+    const value = data[key];
+    return typeof value === "string" && value.trim() ? escapeHtml(value) : "";
+  };
+  const characters = Array.isArray(data.characters) ? (data.characters as string[]) : [];
+  const rows: Array<[string, string]> = ([
+    ["作品", text("work")],
+    ["角色", characters.length ? escapeHtml(characters.join("、")) : ""],
+    ["画师", text("artist")],
+    ["收藏", typeof data.favorite_level === "number" ? "★".repeat(data.favorite_level) || "—" : ""],
+    ["来源", text("source_url")],
+  ] as Array<[string, string]>).filter(([, value]) => value);
+  const infoRows = rows
+    .map(([label, value]) => `<div class="profile-meta-row"><dt>${label}</dt><dd>${value}</dd></div>`)
+    .join("");
+  const editor = document.documentElement.dataset.authRole === "visitor"
+    ? ""
+    : `
+      <details class="profile-metadata-editor">
+        <summary>编辑作品信息</summary>
+        <form data-profile-metadata-form>
+          <label><span>作品</span><input name="work" type="text" maxlength="200" value="${text("work")}"></label>
+          <label><span>角色（逗号分隔）</span><input name="characters" type="text" value="${escapeHtml(characters.join(", "))}"></label>
+          <label><span>画师</span><input name="artist" type="text" maxlength="200" value="${text("artist")}"></label>
+          <label><span>收藏度（0-5）</span><input name="favorite_level" type="number" min="0" max="5" step="1" value="${typeof data.favorite_level === "number" ? data.favorite_level : 0}"></label>
+          <label><span>来源 URL</span><input name="source_url" type="text" maxlength="500" value="${text("source_url")}"></label>
+          <p class="form-error" role="alert" data-profile-metadata-error hidden></p>
+          <div class="modal-actions">
+            <button class="button button-primary" type="submit">保存作品信息</button>
+          </div>
+        </form>
+      </details>
+    `;
+  return `
+    <section class="detail-section profile-metadata" aria-label="作品信息">
+      <p class="detail-section-label">作品信息</p>
+      ${infoRows ? `<dl class="metadata profile-meta-list">${infoRows}</dl>` : '<p class="muted">还没有作品信息。</p>'}
+      ${editor}
+    </section>
+  `;
+}
+
 function relatedMemesMarkup(state: AppState): string {
   let content = "";
   if (state.relationsLoading) {
@@ -1193,7 +1304,7 @@ function relatedMemesMarkup(state: AppState): string {
       <div class="related-heading">
         <div>
           <p class="eyebrow">DIRECT ONLY</p>
-          <h3 id="related-memes-title">相关 Meme</h3>
+          <h3 id="related-memes-title">${profileForVault(state.currentVault).vocabulary.relatedTitle}</h3>
         </div>
         <button
           class="button button-secondary"
@@ -1212,11 +1323,11 @@ function similarMemesMarkup(state: AppState): string {
   const visible = state.similarMemes.slice(0, state.similarExpanded ? 12 : 6);
   let content: string;
   if (state.similarLoading) {
-    content = '<p class="muted">正在加载语义相似 Meme…</p>';
+    content = `<p class="muted">正在加载${profileForVault(state.currentVault).vocabulary.similarTitle}…</p>`;
   } else if (state.similarError) {
     content = `<p class="muted">${escapeHtml(state.similarError)}</p>
       ${state.similarError.includes("尚未建立") || state.similarError.includes("valid semantic")
-        ? `<button class="button button-secondary" type="button" data-rebuild-embedding ${state.rebuildingEmbedding ? "disabled" : ""}>${state.rebuildingEmbedding ? "正在建立…" : "为此 Meme 建立索引"}</button>`
+        ? `<button class="button button-secondary" type="button" data-rebuild-embedding ${state.rebuildingEmbedding ? "disabled" : ""}>${state.rebuildingEmbedding ? "正在建立…" : `${profileForVault(state.currentVault).vocabulary.rebuildIndexCta}`}</button>`
         : ""}`;
   } else if (visible.length) {
     content = `<div class="relation-list">${visible.map(({ meme, score }) => `
@@ -1226,10 +1337,10 @@ function similarMemesMarkup(state: AppState): string {
       </button>`).join("")}</div>
       ${state.similarMemes.length > 6 ? `<button class="button button-ghost" type="button" data-toggle-similar>${state.similarExpanded ? "收起" : "展开至 12 个"}</button>` : ""}`;
   } else {
-    content = '<p class="muted">没有可比较的语义相似 Meme</p>';
+    content = `<p class="muted">没有可比较的${profileForVault(state.currentVault).vocabulary.similarTitle}</p>`;
   }
   return `<section class="related-memes semantic-similar" aria-labelledby="semantic-similar-title">
-    <div class="related-heading"><div><p class="eyebrow">SEMANTIC · VECTOR</p><h3 id="semantic-similar-title">语义相似 Meme</h3></div></div>
+    <div class="related-heading"><div><p class="eyebrow">SEMANTIC · VECTOR</p><h3 id="semantic-similar-title">${profileForVault(state.currentVault).vocabulary.similarTitle}</h3></div></div>
     ${content}
   </section>`;
 }
@@ -1385,8 +1496,8 @@ export function renderDetail(
     elements.detailPanel.innerHTML = `
       <div class="detail-empty">
         <span class="detail-empty-mark" aria-hidden="true">MV</span>
-        <h2>选择一个 Meme</h2>
-        <p>从左侧资料库选择卡片，或使用“随机一个”。</p>
+        <h2>${escapeHtml(profileForVault(state.currentVault).vocabulary.selectPrompt)}</h2>
+        <p>从左侧资料库选择卡片。</p>
         ${detailError(state.actionError)}
       </div>
     `;
@@ -1401,7 +1512,7 @@ export function renderDetail(
           <div class="detail-heading">
             <div>
               <p class="eyebrow">EDITING #${meme.id}</p>
-              <h2>编辑 Meme</h2>
+              <h2>编辑${escapeHtml(profileForVault(state.currentVault).vocabulary.assetSingular)}</h2>
             </div>
           </div>
           <label>
@@ -1420,10 +1531,10 @@ export function renderDetail(
             <span>标签</span>
             <div data-edit-tag-editor></div>
           </label>
-          <label>
+          ${hasCapability(state.currentVault, "templates") ? `<label>
             <span>模板</span>
             <select name="template_id">${templateOptions(state, draft.templateId)}</select>
-          </label>
+          </label>` : ""}
           ${detailError(state.actionError)}
           <div class="detail-actions">
             <button class="button button-ghost" type="button" data-cancel-edit>取消</button>
@@ -1442,7 +1553,7 @@ export function renderDetail(
           <section class="detail-primary">
             <div class="detail-heading">
               <div>
-                <p class="eyebrow">MEME <span class="detail-id">#${meme.id}</span></p>
+                <p class="eyebrow">${escapeHtml(profileForVault(state.currentVault).vocabulary.detailEyebrow)} <span class="detail-id">#${meme.vault_asset_no ?? meme.id}</span></p>
                 <h2 data-detail-title>${escapeHtml(meme.title)}</h2>
                 <p class="detail-filename">${escapeHtml(meme.original_filename)}</p>
               </div>
@@ -1454,8 +1565,8 @@ export function renderDetail(
             <p class="detail-section-label">信息</p>
             <dl class="metadata">
               <div><dt>来源</dt><dd>${escapeHtml(meme.source || "未填写")}</dd></div>
-              <div><dt>模板</dt><dd>${escapeHtml(meme.template?.name || "未归类")}</dd></div>
-              <div><dt>尺寸</dt><dd>${meme.width} × ${meme.height}</dd></div>
+              ${hasCapability(state.currentVault, "templates") ? `<div><dt>模板</dt><dd>${escapeHtml(meme.template?.name || "未归类")}</dd></div>` : ""}
+              <div><dt>尺寸</dt><dd>${meme.width} × ${meme.height}${profileForVault(state.currentVault).capabilities.artworkMetadata ? `（${orientationLabel(meme.width, meme.height)}）` : ""}</dd></div>
               <div><dt>文件</dt><dd>${formatFileSize(meme.file_size)} · ${escapeHtml(meme.mime_type)}</dd></div>
               <div><dt>创建</dt><dd>${escapeHtml(formatDate(meme.created_at))}</dd></div>
               <div><dt>更新</dt><dd>${escapeHtml(formatDate(meme.updated_at))}</dd></div>
@@ -1470,14 +1581,15 @@ export function renderDetail(
               ${isVisitor ? "" : '<button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button><button class="button button-secondary" type="button" data-edit-meme>编辑</button>'}
             </div>
           </section>
-          ${relatedMemesMarkup(state)}
-          ${similarMemesMarkup(state)}
-          ${isVisitor ? "" : aiAnalysisMarkup(state)}
-          <div data-caption-lab-host></div>
+          ${hasCapability(state.currentVault, "artworkMetadata") ? profileMetadataMarkup(state) : ""}
+          ${hasCapability(state.currentVault, "directRelations") ? relatedMemesMarkup(state) : ""}
+          ${hasCapability(state.currentVault, "semanticSearch") ? similarMemesMarkup(state) : ""}
+          ${!isVisitor && hasCapability(state.currentVault, "aiAnalysis") ? aiAnalysisMarkup(state) : ""}
+          ${!isVisitor && hasCapability(state.currentVault, "captions") ? '<div data-caption-lab-host></div>' : ""}
           ${detailError(state.actionError)}
           ${isVisitor ? "" : `<section class="detail-danger-zone">
             <div>
-              <strong>删除 Meme</strong>
+              <strong>删除${escapeHtml(profileForVault(state.currentVault).vocabulary.assetSingular)}</strong>
               <span>此操作会同时删除资料记录与本地图片。</span>
             </div>
             <button class="button button-danger" type="button" data-delete-meme ${state.deleting ? "disabled" : ""}>

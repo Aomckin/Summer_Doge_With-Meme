@@ -66,6 +66,9 @@ class MemeResponse(MemeCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # vault_id / vault_asset_no：仓库内展示用序号；id 是内部稳定资源标识。
+    vault_id: int
+    vault_asset_no: int | None = None
     filename: str = ""
     original_filename: str
     stored_filename: str
@@ -82,6 +85,8 @@ class MemeResponse(MemeCreate):
     template: TemplateResponse | None = None
     images: list["MemeImageResponse"] = Field(default_factory=list)
     image_count: int = 1
+    # Typed Metadata：Profile 专属扩展字段（anime/photo/game_score），meme/generic 为 None。
+    profile_metadata: dict | None = None
 
 
 class MemePageResponse(BaseModel):

@@ -19,6 +19,7 @@ from app.services.meme_embedding_service import MemeEmbeddingAttempt, MemeEmbedd
 from app.services.semantic_index import SemanticIndex
 from app.services.semantic_search_service import SemanticSearchService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -160,6 +161,7 @@ def semantic_database(tmp_path: Path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
+        vault = ensure_default_vault(session)
         provider = AIProvider(
             name="provider", protocol="dashscope_multimodal_embedding",
             base_url="https://example.test", enabled=True,
@@ -170,6 +172,7 @@ def semantic_database(tmp_path: Path):
             is_embedding_active=True,
         )
         meme = Meme(
+            vault_id=vault.id,
             title="meme", description=None, original_filename="meme.png",
             stored_filename="meme.png", file_path="meme.png", thumbnail_path=None,
             mime_type="image/png", file_size=1, width=1, height=1,
@@ -186,26 +189,27 @@ def semantic_database(tmp_path: Path):
             indexed_image_count=1, total_image_count=1,
         ))
         session.commit()
-        return engine, factory, meme.id, model.id
+        return engine, factory, meme.id, model.id, vault.id
 
 
 def test_semantic_invalidation_updates_database_state(tmp_path: Path) -> None:
-    engine, factory, meme_id, _ = semantic_database(tmp_path)
+    engine, factory, meme_id, _, vault_id = semantic_database(tmp_path)
     with factory() as session:
         assert invalidate_meme_semantic_data(session, [meme_id]) == 1
         session.commit()
         repository = MemeEmbeddingRepository(session)
         assert repository.get_for_meme(meme_id).status == "stale"
-        assert repository.generation() == 1
+        assert repository.generation(vault_id) == 1
     engine.dispose()
 
 
 def test_semantic_index_detects_stale_generation(tmp_path: Path) -> None:
-    engine, factory, meme_id, model_record_id = semantic_database(tmp_path)
+    engine, factory, meme_id, model_record_id, vault_id = semantic_database(tmp_path)
     index = SemanticIndex(factory)
     vector = [1.0] + [0.0] * 1023
     assert [hit.meme_id for hit in index.search(
         vector,
+        vault_id=vault_id,
         model_record_id=model_record_id,
         model_id="qwen3-vl-embedding",
         dimension=1024,
@@ -215,6 +219,7 @@ def test_semantic_index_detects_stale_generation(tmp_path: Path) -> None:
         session.commit()
     assert index.search(
         vector,
+        vault_id=vault_id,
         model_record_id=model_record_id,
         model_id="qwen3-vl-embedding",
         dimension=1024,

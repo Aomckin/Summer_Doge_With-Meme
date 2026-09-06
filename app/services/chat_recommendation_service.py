@@ -28,6 +28,7 @@ class ChatRecommendationService:
         response_intent: str | None,
         page: int,
         page_size: int,
+        vault_id: int | None = None,
     ) -> dict[str, object]:
         return self.semantic_search.search(
             query=build_scene_query(context, response_intent),
@@ -35,4 +36,5 @@ class ChatRecommendationService:
             template_id=None,
             page=page,
             page_size=page_size,
+            vault_id=vault_id,
         )

@@ -18,6 +18,7 @@ from app.models.caption import Caption
 from app.services.caption_service import CaptionService
 from app.services.meme_service import MemeService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def request(app, method: str, path: str, **kwargs: object) -> Response:
@@ -45,8 +46,9 @@ def create_services(tmp_path: Path) -> tuple[MemeService, CaptionService, Sessio
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    vault = ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
-    return MemeService(session, storage), CaptionService(session, storage), session
+    return MemeService(session, storage), CaptionService(session, storage), session, vault
 
 
 class FakeCaptionAIClient:
@@ -68,17 +70,17 @@ class FakeCaptionAIClient:
 
 
 def test_caption_crud_is_scoped_to_meme_and_preserves_source(tmp_path: Path) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         first = meme_service.create_meme(
             "first.png",
             make_image_bytes(),
-            title="第一张",
+            title="第一张", vault_id=vault.id
         )
         second = meme_service.create_meme(
             "second.png",
             make_image_bytes("blue"),
-            title="第二张",
+            title="第二张", vault_id=vault.id
         )
 
         older = service.create_caption(
@@ -118,12 +120,12 @@ def test_caption_crud_is_scoped_to_meme_and_preserves_source(tmp_path: Path) -> 
 
 
 def test_deleting_meme_cascades_to_captions(tmp_path: Path) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         meme = meme_service.create_meme(
             "delete.png",
             make_image_bytes(),
-            title="待删除",
+            title="待删除", vault_id=vault.id
         )
         caption = service.create_caption(
             meme.id,
@@ -141,14 +143,14 @@ def test_deleting_meme_cascades_to_captions(tmp_path: Path) -> None:
 def test_generate_uses_all_ordered_images_and_normalizes_candidates(
     tmp_path: Path,
 ) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         meme = meme_service.create_meme(
             "first.png",
             make_image_bytes(),
             title="复合 Meme",
             description="上下文",
-            tags=["反应图"],
+            tags=["反应图"], vault_id=vault.id
         )
         meme_service.append_image(
             meme.id,
@@ -188,12 +190,12 @@ def test_generate_accepts_supported_candidate_counts(
     tmp_path: Path,
     count: int,
 ) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         meme = meme_service.create_meme(
             "count.png",
             make_image_bytes(),
-            title="数量",
+            title="数量", vault_id=vault.id
         )
         values = tuple(f"候选 {index}" for index in range(count))
         result = service.generate_captions(
@@ -209,12 +211,12 @@ def test_generate_accepts_supported_candidate_counts(
 def test_generate_rejects_invalid_or_insufficient_ai_results(
     tmp_path: Path,
 ) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         meme = meme_service.create_meme(
             "invalid.png",
             make_image_bytes(),
-            title="异常",
+            title="异常", vault_id=vault.id
         )
         with pytest.raises(AIInvalidResponseError, match="unique captions"):
             service.generate_captions(
@@ -227,12 +229,12 @@ def test_generate_rejects_invalid_or_insufficient_ai_results(
 
 
 def test_rewrite_rejects_blank_draft_without_calling_ai(tmp_path: Path) -> None:
-    meme_service, service, session = create_services(tmp_path)
+    meme_service, service, session, vault = create_services(tmp_path)
     try:
         meme = meme_service.create_meme(
             "rewrite.png",
             make_image_bytes(),
-            title="改写",
+            title="改写", vault_id=vault.id
         )
         client = FakeCaptionAIClient(("改写结果",))
 
@@ -251,7 +253,7 @@ def test_rewrite_rejects_blank_draft_without_calling_ai(tmp_path: Path) -> None:
 
 
 def test_caption_api_crud_and_ai_endpoints(tmp_path: Path) -> None:
-    meme_service, caption_service, session = create_services(tmp_path)
+    meme_service, caption_service, session, vault = create_services(tmp_path)
     app = create_app(
         tmp_path / "images",
         tmp_path / "thumbnails",
@@ -267,7 +269,7 @@ def test_caption_api_crud_and_ai_endpoints(tmp_path: Path) -> None:
         meme = meme_service.create_meme(
             "api.png",
             make_image_bytes(),
-            title="API",
+            title="API", vault_id=vault.id
         )
         created = request(
             app,

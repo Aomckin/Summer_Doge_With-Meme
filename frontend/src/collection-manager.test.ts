@@ -9,7 +9,7 @@ const meme = {
   image_url: "/cat.png", thumbnail_url: "/cat-thumb.png", mime_type: "image/png",
   file_size: 10, width: 10, height: 10, file_hash: "a".repeat(64),
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
-  tags: [], template: null, images: [], image_count: 1,
+  tags: [], template: null, images: [], image_count: 1, vault_id: 1, vault_asset_no: null,
 } satisfies MemeResponse;
 
 const collection = {

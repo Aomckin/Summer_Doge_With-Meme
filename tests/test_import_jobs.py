@@ -13,6 +13,8 @@ from app.models.meme import Meme
 from app.services.import_job_service import ImportJobManager, ImportJobService
 from app.services import import_job_service as import_module
 from app.storage.image_storage import ImageStorage
+from app.storage.vault_storage import VaultStorageService
+from tests.vault_helpers import ensure_default_vault
 
 
 def image_bytes(color: tuple[int, int, int]) -> bytes:
@@ -45,6 +47,7 @@ def write_zip(path: Path, members: list[tuple[str, bytes]]) -> None:
 
 def create_job(service: ImportJobService, archive: Path, *, chunk_size: int = 100):
     return service.create_job(
+        vault_id=ensure_default_vault(service.session).id,
         original_filename="memes.zip",
         archive_path=archive,
         tags=["reaction"],
@@ -160,7 +163,13 @@ def test_startup_marks_running_jobs_interrupted(tmp_path: Path) -> None:
     job.status = "running"
     session.commit()
     manager = ImportJobManager(
-        factory, service.storage.images_dir, service.storage.thumbnails_dir, service.archives_dir
+        factory,
+        VaultStorageService(
+            service.archives_dir.parent,
+            service.storage.images_dir,
+            service.storage.thumbnails_dir,
+        ),
+        service.archives_dir,
     )
     partial = service.archives_dir / "abandoned.part"
     partial.write_bytes(b"partial")

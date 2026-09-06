@@ -113,6 +113,8 @@ class EnrichmentApplyRequest(BaseModel):
 
 
 class EnrichmentJobCreate(BaseModel):
+    # v2.0 起必填：整理任务范围必须显式指定仓库，不再静默回退默认 meme Vault。
+    vault_id: int = Field(ge=1)
     scope: Literal[
         "all", "filtered", "missing_description", "missing_tags", "missing_template",
         "filename_title", "never_analyzed", "stale_suggestions", "id_range",

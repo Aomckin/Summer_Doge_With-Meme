@@ -162,6 +162,7 @@ class TagRepository:
         include_empty: bool = False,
         q: str | None = None,
         sort: str = "name_asc",
+        vault_id: int | None = None,
     ) -> list[TagWithUsage]:
         usage = func.count(MemeTag.meme_id)
         statement = (
@@ -169,6 +170,14 @@ class TagRepository:
             .outerjoin(MemeTag, MemeTag.tag_id == Tag.id)
             .group_by(Tag.id)
         )
+        if vault_id is not None:
+            # Vault 作用域：usage 只统计该仓库 Meme 的引用，未在当前仓库
+            # 使用的标签视为 empty。
+            from app.models.meme import Meme
+
+            statement = statement.join(
+                Meme, Meme.id == MemeTag.meme_id
+            ).where(Meme.vault_id == vault_id)
         query = self.normalize_name(q or "")
         if query:
             statement = statement.where(Tag.normalized_name.contains(query))

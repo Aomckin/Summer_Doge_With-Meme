@@ -12,6 +12,7 @@ from app.main import create_app
 from app.models.meme import Meme
 from app.models.tag import MemeTag, Tag
 from app.models.template import Template
+from tests.vault_helpers import ensure_default_vault
 
 
 def request(app, path: str):
@@ -24,9 +25,10 @@ def request(app, path: str):
     return asyncio.run(send())
 
 
-def build_meme(number: int) -> Meme:
+def build_meme(number: int, vault_id: int) -> Meme:
     is_gif = number == 105
     return Meme(
+        vault_id=vault_id,
         title=f"Meme {number}",
         description="猫咪描述" if number == 37 else f"描述 {number}",
         original_filename=f"{number}.{'gif' if is_gif else 'png'}",
@@ -51,13 +53,14 @@ def pagination_context(tmp_path: Path):
     )
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    vault = ensure_default_vault(session)
     cat = Tag(name="猫")
     irony = Tag(name="反讽")
     reaction_template = Template(name="反应图")
     session.add_all([cat, irony, reaction_template])
     session.flush()
     for number in range(1, 106):
-        meme = build_meme(number)
+        meme = build_meme(number, vault.id)
         if number <= 10:
             meme.template_id = reaction_template.id
         session.add(meme)

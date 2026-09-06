@@ -20,6 +20,7 @@ from app.services.embedding_vectors import serialize_vector
 from app.services.meme_enrichment_service import MemeEnrichmentService
 from app.services.meme_merge_service import MemeMergeError, MemeMergeService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 @pytest.fixture
@@ -32,7 +33,9 @@ def merge_context(tmp_path: Path):
 
 
 def add_meme(session, root: Path, title: str, image_count: int) -> Meme:
+    vault = ensure_default_vault(session)
     meme = Meme(
+        vault_id=vault.id,
         title=title,
         description=f"{title} description",
         original_filename=f"{title}-0.png",
@@ -55,6 +58,7 @@ def add_meme(session, root: Path, title: str, image_count: int) -> Meme:
         (root / thumb).write_bytes(f"thumb-{title}-{position}".encode())
         meme.images.append(
             MemeImage(
+                vault_id=vault.id,
                 original_filename=stored,
                 stored_filename=stored,
                 file_path=stored,

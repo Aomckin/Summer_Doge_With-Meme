@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.memes import get_meme_service
+from app.api.memes import get_meme_scoped_service, get_meme_service
 from app.api.semantic import get_service as get_semantic_service
 from app.database import Base
 from app.main import app
@@ -17,6 +17,7 @@ from app.models.meme import Meme
 from app.services.meme_service import MemeService
 from app.services.semantic_search_service import MemeEmbeddingUnavailableError
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 EXTERNAL_API_KEY = "external-machine-secret"
 
@@ -64,9 +65,11 @@ def external_context(tmp_path: Path):
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
     service = MemeService(session, storage)
     app.dependency_overrides[get_meme_service] = lambda: service
+    app.dependency_overrides[get_meme_scoped_service] = lambda: service
     previous_external_api_key = app.state.external_api_key
     app.state.external_api_key = EXTERNAL_API_KEY
 
@@ -82,7 +85,7 @@ def test_external_api_rejects_missing_and_wrong_bearer_key(external_context) -> 
     _, _, service = external_context
     meme = service.create_meme(
         "machine.png", image_bytes("PNG"), title="machine"
-    )
+    , vault_id=ensure_default_vault(service.session).id)
 
     for path in ("/api/memes/random", f"/api/memes/{meme.id}/image"):
         missing = request("GET", path, headers={"Authorization": ""})
@@ -156,17 +159,17 @@ def test_random_skips_record_with_missing_files(external_context, monkeypatch) -
     _, storage, service = external_context
     missing = service.create_meme(
         "missing.png", image_bytes("PNG"), title="missing"
-    )
+    , vault_id=ensure_default_vault(service.session).id)
     available = service.create_meme(
         "available.jpg", image_bytes("JPEG"), title="available"
-    )
+    , vault_id=ensure_default_vault(service.session).id)
     storage.original_path(missing.file_path).unlink()
     candidates = iter((missing, available))
     monkeypatch.setattr(
         service.repository, "get_random", lambda **kwargs: next(candidates)
     )
 
-    assert service.get_random_meme().id == available.id
+    assert service.get_random_meme(vault_id=ensure_default_vault(service.session).id).id == available.id
 
 
 def test_image_endpoint_maps_invalid_id_missing_file_and_bad_metadata(
@@ -178,7 +181,7 @@ def test_image_endpoint_maps_invalid_id_missing_file_and_bad_metadata(
 
     missing = service.create_meme(
         "missing.png", image_bytes("PNG"), title="missing"
-    )
+    , vault_id=ensure_default_vault(service.session).id)
     storage.original_path(missing.file_path).unlink()
     missing_response = request("GET", f"/api/memes/{missing.id}/image")
     assert missing_response.status_code == 410
@@ -186,7 +189,7 @@ def test_image_endpoint_maps_invalid_id_missing_file_and_bad_metadata(
 
     invalid = service.create_meme(
         "invalid.jpg", image_bytes("JPEG"), title="invalid"
-    )
+    , vault_id=ensure_default_vault(service.session).id)
     invalid.mime_type = "application/octet-stream"
     invalid.images[0].mime_type = "application/octet-stream"
     session.commit()
@@ -214,7 +217,7 @@ def test_semantic_top_five_random_returns_existing_dto_and_external_image_url(
     _, _, meme_service = external_context
     meme = meme_service.create_meme(
         "semantic.webp", image_bytes("WEBP"), title="semantic"
-    )
+    , vault_id=ensure_default_vault(meme_service.session).id)
     fake = FakeSemanticService((meme, 0.873))
     app.dependency_overrides[get_semantic_service] = lambda: fake
 

@@ -68,10 +68,10 @@ class ExportJobService:
         self.archives_dir.mkdir(parents=True, exist_ok=True)
         self.repository = ExportJobRepository(session)
 
-    def create_job(self, *, scope: str, query: str | None, tags: list[str], template_id: int | None,
+    def create_job(self, *, vault_id: int, scope: str, query: str | None, tags: list[str], template_id: int | None,
                    organization: str, include_manifest: bool, archive_name: str) -> ExportJob:
         self.cleanup_expired()
-        snapshots = self._snapshots(scope=scope, query=query, tags=tags, template_id=template_id)
+        snapshots = self._snapshots(vault_id=vault_id, scope=scope, query=query, tags=tags, template_id=template_id)
         total_images, estimated = self._estimate(snapshots, organization)
         free = shutil.disk_usage(self.archives_dir).free
         required = estimated + DISK_SAFETY_BYTES
@@ -80,6 +80,7 @@ class ExportJobService:
                 f"Insufficient disk space: estimated {estimated} bytes plus {DISK_SAFETY_BYTES} bytes safety reserve, {free} bytes available"
             )
         job = ExportJob(
+            vault_id=vault_id,
             scope=scope, query=query if scope == "filtered" else None,
             tags_json=json.dumps(tags if scope == "filtered" else [], ensure_ascii=False),
             template_id=template_id if scope == "filtered" else None,
@@ -238,8 +239,9 @@ class ExportJobService:
                 archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"), compress_type=ZIP_STORED)
         return manifest
 
-    def _snapshots(self, *, scope: str, query: str | None, tags: list[str], template_id: int | None) -> list[MemeSnapshot]:
+    def _snapshots(self, *, vault_id: int, scope: str, query: str | None, tags: list[str], template_id: int | None) -> list[MemeSnapshot]:
         memes = MemeRepository(self.session).list_all_for_export(
+            vault_id=vault_id,
             q=query if scope == "filtered" else None,
             tags=tags if scope == "filtered" else None,
             template_id=template_id if scope == "filtered" else None,

@@ -1,6 +1,16 @@
 import { APPEARANCE_PRESETS } from "./appearance-presets";
 import type { AppearanceController } from "./appearance-controller";
 import type { AppearanceSettings } from "./appearance-types";
+import type { VaultSummary } from "../types";
+
+export interface AppearanceViewContext {
+  getVault(): VaultSummary | null;
+  canEdit: boolean;
+  /** Vault 模式：上传背景保存到服务器（跟随仓库），而不是浏览器 IndexedDB。 */
+  onUploadBackground(file: File): Promise<void>;
+  onRemoveBackground(): Promise<void>;
+  onResetAppearance(): Promise<void>;
+}
 
 type NumericAppearanceKey = Exclude<{
   [Key in keyof AppearanceSettings]: AppearanceSettings[Key] extends number ? Key : never
@@ -51,6 +61,7 @@ export class AppearanceView {
     private readonly dialog: HTMLDialogElement,
     private readonly content: HTMLElement,
     private readonly controller: AppearanceController,
+    private readonly context: AppearanceViewContext | null = null,
   ) {
     this.renderShell();
     this.bindEvents();
@@ -70,6 +81,14 @@ export class AppearanceView {
 
   private renderShell(): void {
     this.content.innerHTML = `
+      <section class="appearance-section appearance-scope" aria-labelledby="appearance-scope-title">
+        <div class="appearance-section-heading">
+          <div>
+            <h3 id="appearance-scope-title">正在编辑的仓库</h3>
+            <p data-appearance-scope>外观属于当前仓库，保存到服务器；切换仓库会同步切换主题。</p>
+          </div>
+        </div>
+      </section>
       <section class="appearance-section appearance-presets" aria-labelledby="appearance-presets-title">
         <div class="appearance-section-heading">
           <div><h3 id="appearance-presets-title">快速预设</h3><p>先选一种气质，再按喜好微调。</p></div>
@@ -93,13 +112,13 @@ export class AppearanceView {
       </section>
 
       <section class="appearance-section appearance-background-section" aria-labelledby="appearance-background-title">
-        <div class="appearance-section-heading"><div><h3 id="appearance-background-title">背景</h3><p>原图保存在当前浏览器的 IndexedDB，不会上传。</p></div></div>
+        <div class="appearance-section-heading"><div><h3 id="appearance-background-title">背景</h3><p>${this.context ? "上传的背景保存在服务器、跟随当前仓库；换设备也不会丢。" : "原图保存在当前浏览器的 IndexedDB，不会上传。"}</p></div></div>
         <div class="appearance-background-picker">
           <div class="appearance-background-preview" data-appearance-preview><span>使用默认背景</span></div>
           <div class="appearance-background-actions">
             <label class="button button-secondary appearance-file-button">选择图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-appearance-file></label>
             <button class="button button-ghost" type="button" data-appearance-remove-background>移除背景</button>
-            <small>JPG / PNG / WebP / GIF，最大 25 MiB</small>
+            <small data-appearance-background-note>${this.context ? "JPG / PNG / WebP / GIF，最大 25 MiB；保存到当前仓库。" : "JPG / PNG / WebP / GIF，最大 25 MiB"}</small>
           </div>
         </div>
         ${ranges("background")}
@@ -161,7 +180,11 @@ export class AppearanceView {
       if (!file) return;
       this.showError(null);
       try {
-        await this.controller.setBackgroundImage(file);
+        if (this.context) {
+          await this.context.onUploadBackground(file);
+        } else {
+          await this.controller.setBackgroundImage(file);
+        }
       } catch (error) {
         this.showError(error instanceof Error ? error.message : "背景图片保存失败");
       } finally {
@@ -171,7 +194,11 @@ export class AppearanceView {
     this.content.querySelector<HTMLButtonElement>("[data-appearance-remove-background]")?.addEventListener("click", async () => {
       this.showError(null);
       try {
-        await this.controller.removeBackgroundImage();
+        if (this.context) {
+          await this.context.onRemoveBackground();
+        } else {
+          await this.controller.removeBackgroundImage();
+        }
       } catch (error) {
         this.showError(error instanceof Error ? error.message : "背景图片移除失败");
       }
@@ -180,7 +207,11 @@ export class AppearanceView {
       if (!confirm("恢复默认外观并移除自定义背景？")) return;
       this.showError(null);
       try {
-        await this.controller.reset();
+        if (this.context) {
+          await this.context.onResetAppearance();
+        } else {
+          await this.controller.reset();
+        }
       } catch (error) {
         this.showError(error instanceof Error ? error.message : "外观重置失败");
       }
@@ -188,6 +219,11 @@ export class AppearanceView {
   }
 
   private sync(settings: AppearanceSettings, backgroundUrl: string | null): void {
+    const vault = this.context?.getVault() ?? null;
+    const scope = this.content.querySelector<HTMLElement>("[data-appearance-scope]");
+    if (scope && vault) {
+      scope.innerHTML = `正在编辑：<strong>${escapeVaultText(vault.icon || "📦" + " " + vault.name)}</strong>${this.context?.canEdit ? "" : "（访客只读，修改不会保存）"}`;
+    }
     for (const control of RANGE_CONTROLS) {
       const input = this.content.querySelector<HTMLInputElement>(`[data-appearance-range="${control.key}"]`);
       const output = this.content.querySelector<HTMLOutputElement>(`[data-appearance-output="${control.key}"]`);
@@ -215,7 +251,14 @@ export class AppearanceView {
     }
     const remove = this.content.querySelector<HTMLButtonElement>("[data-appearance-remove-background]");
     if (remove) remove.disabled = !backgroundUrl;
+    if (this.context) {
+      // 访客只读：禁用全部编辑控件（预览仍实时跟随服务器主题）。
+      this.content.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+        "[data-appearance-preset], [data-appearance-range], [data-appearance-color], [data-appearance-hex], [data-appearance-file], [data-appearance-remove-background], [data-reset-appearance]",
+      ).forEach(element => { element.disabled = !this.context?.canEdit; });
+    }
   }
+
 
   private showError(message: string | null): void {
     const error = this.content.querySelector<HTMLElement>("[data-appearance-error]");
@@ -223,4 +266,10 @@ export class AppearanceView {
     error.hidden = !message;
     error.textContent = message ?? "";
   }
+}
+
+function escapeVaultText(value: string): string {
+  return value.replace(/[&"<>]/g, character => ({
+    "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;",
+  })[character] ?? character);
 }

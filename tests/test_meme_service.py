@@ -15,6 +15,7 @@ from app.models.meme import Meme
 from app.models.meme_image import MemeImage
 from app.models.meme_relation import MemeRelation
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def load_service_module():
@@ -44,13 +45,14 @@ def create_session() -> Session:
 def create_service(tmp_path: Path):
     module = load_service_module()
     session = create_session()
+    vault = ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
     service = module.MemeService(session, storage)
-    return module, service, session, storage
+    return module, service, session, storage, vault
 
 
 def test_create_meme_saves_files_and_database_record(tmp_path: Path) -> None:
-    _, service, session, storage = create_service(tmp_path)
+    _, service, session, storage, vault = create_service(tmp_path)
 
     try:
         meme = service.create_meme(
@@ -58,7 +60,7 @@ def test_create_meme_saves_files_and_database_record(tmp_path: Path) -> None:
             make_image_bytes(),
             title="创建测试",
             description="Service 创建流程",
-            source="test",
+            source="test", vault_id=vault.id
         )
 
         assert meme.id is not None
@@ -79,9 +81,9 @@ def test_create_meme_saves_files_and_database_record(tmp_path: Path) -> None:
 
 
 def test_append_and_reorder_images_changes_cover(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, _, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="复合")
+        meme = service.create_meme("first.png", make_image_bytes(), title="复合", vault_id=vault.id)
         second_bytes = BytesIO()
         Image.new("RGB", (320, 240), color="blue").save(second_bytes, format="PNG")
         updated = service.append_image(meme.id, "second.png", second_bytes.getvalue())
@@ -97,9 +99,9 @@ def test_append_and_reorder_images_changes_cover(tmp_path: Path) -> None:
 def test_delete_image_removes_files_and_reindexes_remaining_images(
     tmp_path: Path,
 ) -> None:
-    _, service, session, storage = create_service(tmp_path)
+    _, service, session, storage, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="复合")
+        meme = service.create_meme("first.png", make_image_bytes(), title="复合", vault_id=vault.id)
         service.append_image(meme.id, "second.png", make_image_bytes("blue"))
         updated = service.append_image(
             meme.id,
@@ -125,9 +127,9 @@ def test_delete_image_removes_files_and_reindexes_remaining_images(
 def test_delete_cover_promotes_next_image_and_rejects_deleting_last(
     tmp_path: Path,
 ) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, _, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="复合")
+        meme = service.create_meme("first.png", make_image_bytes(), title="复合", vault_id=vault.id)
         service.append_image(
             meme.id,
             "second.png",
@@ -157,9 +159,9 @@ def test_delete_cover_promotes_next_image_and_rejects_deleting_last(
 
 
 def test_invalid_reorder_is_atomic(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, _, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="复合")
+        meme = service.create_meme("first.png", make_image_bytes(), title="复合", vault_id=vault.id)
         updated = service.append_image(
             meme.id,
             "second.png",
@@ -182,18 +184,18 @@ def test_invalid_reorder_is_atomic(tmp_path: Path) -> None:
 def test_relations_are_bidirectional_direct_only_and_batch_validation_is_atomic(
     tmp_path: Path,
 ) -> None:
-    module, service, session, _ = create_service(tmp_path)
+    module, service, session, _, vault = create_service(tmp_path)
     try:
-        first = service.create_meme("first.png", make_image_bytes(), title="一")
+        first = service.create_meme("first.png", make_image_bytes(), title="一", vault_id=vault.id)
         second = service.create_meme(
             "second.png",
             make_image_bytes("blue"),
-            title="二",
+            title="二", vault_id=vault.id
         )
         third = service.create_meme(
             "third.png",
             make_image_bytes("green"),
-            title="三",
+            title="三", vault_id=vault.id
         )
 
         service.add_relations(first.id, [second.id, second.id])
@@ -225,9 +227,9 @@ def test_relations_are_bidirectional_direct_only_and_batch_validation_is_atomic(
 def test_delete_composite_meme_removes_every_file_and_incident_relation(
     tmp_path: Path,
 ) -> None:
-    _, service, session, storage = create_service(tmp_path)
+    _, service, session, storage, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="复合")
+        meme = service.create_meme("first.png", make_image_bytes(), title="复合", vault_id=vault.id)
         service.append_image(meme.id, "second.png", make_image_bytes("blue"))
         updated = service.append_image(
             meme.id,
@@ -237,7 +239,7 @@ def test_delete_composite_meme_removes_every_file_and_incident_relation(
         peer = service.create_meme(
             "peer.png",
             make_image_bytes("purple"),
-            title="关联项",
+            title="关联项", vault_id=vault.id
         )
         service.add_relations(updated.id, [peer.id])
         stored_paths = [
@@ -262,17 +264,17 @@ def test_delete_composite_meme_removes_every_file_and_incident_relation(
 
 
 def test_query_list_and_update_meme(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, _, vault = create_service(tmp_path)
 
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="原始标题",
+            title="原始标题", vault_id=vault.id
         )
 
         assert service.get_meme(meme.id) is meme
-        assert service.list_memes() == [meme]
+        assert service.list_memes(vault_id=vault.id) == [meme]
 
         updated = service.update_meme(
             meme.id,
@@ -286,10 +288,10 @@ def test_query_list_and_update_meme(tmp_path: Path) -> None:
 
 
 def test_delete_meme_removes_record_and_files(tmp_path: Path) -> None:
-    _, service, session, storage = create_service(tmp_path)
+    _, service, session, storage, vault = create_service(tmp_path)
 
     try:
-        meme = service.create_meme("delete.png", make_image_bytes(), title="删除测试")
+        meme = service.create_meme("delete.png", make_image_bytes(), title="删除测试", vault_id=vault.id)
         meme_id = meme.id
         file_path = storage.images_dir / meme.file_path
         thumbnail_path = storage.thumbnails_dir / meme.thumbnail_path
@@ -304,13 +306,13 @@ def test_delete_meme_removes_record_and_files(tmp_path: Path) -> None:
 
 
 def test_delete_meme_removes_record_when_files_are_missing(tmp_path: Path) -> None:
-    _, service, session, _ = create_service(tmp_path)
+    _, service, session, _, vault = create_service(tmp_path)
 
     try:
         meme = service.create_meme(
             "missing.png",
             make_image_bytes(),
-            title="缺图删除",
+            title="缺图删除", vault_id=vault.id
         )
         meme_id = meme.id
         service.storage.delete(meme.file_path, meme.thumbnail_path)
@@ -325,9 +327,10 @@ def test_delete_meme_removes_record_when_files_are_missing(tmp_path: Path) -> No
 def test_create_meme_removes_saved_files_when_database_write_fails(
     tmp_path: Path,
 ) -> None:
-    _, service, session, storage = create_service(tmp_path)
+    _, service, session, storage, vault = create_service(tmp_path)
     content = make_image_bytes()
     existing = Meme(
+        vault_id=vault.id,
         title="已有记录",
         description=None,
         original_filename="existing.png",
@@ -346,7 +349,7 @@ def test_create_meme_removes_saved_files_when_database_write_fails(
 
     try:
         with pytest.raises(IntegrityError):
-            service.create_meme("duplicate.png", content, title="重复图片")
+            service.create_meme("duplicate.png", content, title="重复图片", vault_id=vault.id)
 
         assert list(storage.images_dir.iterdir()) == []
         assert list(storage.thumbnails_dir.iterdir()) == []
@@ -356,8 +359,9 @@ def test_create_meme_removes_saved_files_when_database_write_fails(
 
 
 def test_get_meme_reports_missing_image_file(tmp_path: Path) -> None:
-    module, service, session, storage = create_service(tmp_path)
+    module, service, session, storage, vault = create_service(tmp_path)
     missing = Meme(
+        vault_id=vault.id,
         title="文件缺失",
         description=None,
         original_filename="missing.png",
@@ -382,9 +386,9 @@ def test_get_meme_reports_missing_image_file(tmp_path: Path) -> None:
 
 
 def test_get_meme_reports_missing_secondary_image_file(tmp_path: Path) -> None:
-    module, service, session, storage = create_service(tmp_path)
+    module, service, session, storage, vault = create_service(tmp_path)
     try:
-        meme = service.create_meme("first.png", make_image_bytes(), title="缺图")
+        meme = service.create_meme("first.png", make_image_bytes(), title="缺图", vault_id=vault.id)
         updated = service.append_image(
             meme.id,
             "second.png",
@@ -400,7 +404,7 @@ def test_get_meme_reports_missing_secondary_image_file(tmp_path: Path) -> None:
 
 
 def test_get_meme_reports_unknown_id(tmp_path: Path) -> None:
-    module, service, session, _ = create_service(tmp_path)
+    module, service, session, _, vault = create_service(tmp_path)
 
     try:
         with pytest.raises(module.MemeNotFoundError, match="999"):

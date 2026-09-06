@@ -2,6 +2,7 @@
 
 from .ai_analysis import MemeAIAnalysis
 from .ai_settings import AIModel, AIProvider
+from .asset_metadata import AssetMetadata
 from .caption import Caption
 from .collection import Collection, CollectionItem
 from .embedding_job import EmbeddingJob, EmbeddingJobItem
@@ -15,12 +16,13 @@ from .meme_relation import MemeRelation
 from .meme_similarity_ignore import MemeSimilarityIgnore
 from .tag import MemeTag, Tag
 from .template import Template
+from .vault import Vault
 
 __all__ = [
-    "AIModel", "AIProvider", "Caption", "Collection", "CollectionItem", "EmbeddingJob", "EmbeddingJobItem",
+    "AIModel", "AIProvider", "AssetMetadata", "Caption", "Collection", "CollectionItem", "EmbeddingJob", "EmbeddingJobItem",
     "EnrichmentAudit", "EnrichmentJob", "EnrichmentJobItem",
     "ExportJob", "ExportJobItem", "ImportJob", "ImportJobItem", "Meme",
     "MemeAIAnalysis", "MemeEmbedding", "MemeEnrichmentSuggestion", "MemeImage", "MemeRelation",
     "MemeSimilarityIgnore",
-    "MemeTag", "SemanticIndexState", "Tag", "Template",
+    "MemeTag", "SemanticIndexState", "Tag", "Template", "Vault",
 ]

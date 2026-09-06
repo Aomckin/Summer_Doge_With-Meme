@@ -61,6 +61,8 @@ const meme: MemeResponse = {
   template: null,
   images: [],
   image_count: 1,
+  vault_id: 1,
+  vault_asset_no: 1,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {

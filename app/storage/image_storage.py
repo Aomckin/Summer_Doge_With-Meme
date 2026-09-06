@@ -6,12 +6,12 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
-from app.config import DATA_DIR
+from app.config import DATA_DIR, DEFAULT_MAX_FILE_SIZE_MB
 
 
 # 这一层只负责“文件怎么落盘”，不接触数据库，也不决定 HTTP 状态码。
 # 这样以后即使更换数据库或 API 框架，图片保存规则仍可以单独复用。
-DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024
+DEFAULT_MAX_FILE_SIZE = DEFAULT_MAX_FILE_SIZE_MB * 1024 * 1024
 DEFAULT_THUMBNAIL_SIZE = (400, 400)
 
 # Pillow 识别出的真实图片格式，对应最终扩展名和响应所需的 MIME 类型。
@@ -187,6 +187,9 @@ class ImageStorage:
                 image.verify()
         except (UnidentifiedImageError, OSError, SyntaxError) as error:
             raise InvalidImageError("File is not a valid image") from error
+        except Image.DecompressionBombError as error:
+            # 大文件上限放开后，用像素护栏拦截超大解压体积的恶意图片。
+            raise InvalidImageError("Image exceeds the maximum supported pixel count") from error
 
         if image_format not in FORMAT_DETAILS:
             raise InvalidImageError(f"Unsupported image format: {image_format}")

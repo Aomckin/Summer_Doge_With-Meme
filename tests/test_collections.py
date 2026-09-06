@@ -13,6 +13,7 @@ from app.models.collection import Collection, CollectionItem
 from app.models.meme import Meme
 from app.models.meme_image import MemeImage
 from app.schemas.collection import CollectionCreate
+from tests.vault_helpers import ensure_default_vault
 
 
 def request(app, method: str, path: str, **kwargs) -> Response:
@@ -26,7 +27,9 @@ def request(app, method: str, path: str, **kwargs) -> Response:
 
 def add_meme(session, title: str) -> Meme:
     token = title.encode().hex().ljust(64, "0")[:64]
+    vault = ensure_default_vault(session)
     meme = Meme(
+        vault_id=vault.id,
         title=title, description=None, original_filename=f"{title}.png",
         stored_filename=f"{token}.png", file_path=f"{token}.png",
         thumbnail_path=None, mime_type="image/png", file_size=1,
@@ -35,6 +38,7 @@ def add_meme(session, title: str) -> Meme:
     session.add(meme)
     session.flush()
     meme.images.append(MemeImage(
+        vault_id=vault.id,
         original_filename=meme.original_filename, stored_filename=meme.stored_filename,
         file_path=meme.file_path, thumbnail_path=None, mime_type=meme.mime_type,
         file_size=1, width=1, height=1, file_hash=token, position=0,

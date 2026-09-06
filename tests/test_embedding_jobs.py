@@ -17,6 +17,7 @@ from app.services.embedding_job_manager import EmbeddingJobManager, EmbeddingJob
 from app.services.embedding_vectors import serialize_vector
 from app.services.semantic_index import SemanticIndex
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def image_bytes(color: str) -> bytes:
@@ -31,6 +32,7 @@ def context(tmp_path: Path):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbs")
     with factory() as session:
+        vault = ensure_default_vault(session)
         provider = AIProvider(
             name="Dash", protocol="dashscope_multimodal_embedding",
             base_url="https://example.test", api_key_ciphertext="cipher", enabled=True,
@@ -45,6 +47,7 @@ def context(tmp_path: Path):
             from app.models.meme_image import MemeImage
 
             meme = Meme(
+                vault_id=vault.id,
                 title=f"Meme {index}", description="description",
                 original_filename=stored.original_filename, stored_filename=stored.stored_filename,
                 file_path=stored.file_path.name, thumbnail_path=stored.thumbnail_path.name,
@@ -52,6 +55,7 @@ def context(tmp_path: Path):
                 height=stored.height, file_hash=stored.file_hash, source=None,
             )
             meme.images.append(MemeImage(
+                vault_id=vault.id,
                 original_filename=stored.original_filename, stored_filename=stored.stored_filename,
                 file_path=stored.file_path.name, thumbnail_path=stored.thumbnail_path.name,
                 mime_type=stored.mime_type, file_size=stored.file_size, width=stored.width,
@@ -60,7 +64,7 @@ def context(tmp_path: Path):
             session.add(meme)
         session.commit()
         model_id = model.id
-    return engine, factory, storage, model_id
+    return engine, factory, storage, model_id, vault
 
 
 class FakeClient:
@@ -83,7 +87,7 @@ class FakeClient:
 
 
 def test_job_scope_snapshots_and_failed_retry(tmp_path: Path, monkeypatch) -> None:
-    engine, factory, storage, model_id = context(tmp_path)
+    engine, factory, storage, model_id, vault = context(tmp_path)
     fake = FakeClient()
     monkeypatch.setattr(AISettingsService, "build_active_multimodal_embedding_client", lambda self: fake)
     index = SemanticIndex(factory)
@@ -103,11 +107,11 @@ def test_job_scope_snapshots_and_failed_retry(tmp_path: Path, monkeypatch) -> No
         ))
         session.commit()
         service = EmbeddingJobService(session, storage, tmp_path / "key")
-        missing = service.create_job(scope="missing_or_stale", max_workers=4)
+        missing = service.create_job(vault_id=vault.id, scope="missing_or_stale", max_workers=4)
         assert {item.meme_id for item in missing.items} == {memes[0].id, memes[2].id}
         missing.status = "cancelled"
         session.commit()
-        failed = service.create_job(scope="failed", max_workers=2)
+        failed = service.create_job(vault_id=vault.id, scope="failed", max_workers=2)
         assert [item.meme_id for item in failed.items] == [memes[1].id]
         failed.status = "completed_with_errors"
         failed.items[0].status = "failed"
@@ -118,19 +122,19 @@ def test_job_scope_snapshots_and_failed_retry(tmp_path: Path, monkeypatch) -> No
         assert retried.items[0].status == "queued"
         retried.status = "cancelled"
         session.commit()
-        all_job = service.create_job(scope="all", max_workers=1)
+        all_job = service.create_job(vault_id=vault.id, scope="all", max_workers=1)
         assert all_job.total_count == 3
     engine.dispose()
 
 
 def test_manager_uses_one_database_writer_and_one_failure_does_not_stop_others(tmp_path: Path, monkeypatch) -> None:
-    engine, factory, storage, _ = context(tmp_path)
+    engine, factory, storage, _, vault = context(tmp_path)
     fake = FakeClient(fail_title="Meme 2")
     monkeypatch.setattr(AISettingsService, "build_active_multimodal_embedding_client", lambda self: fake)
     index = SemanticIndex(factory)
     with factory() as session:
         service = EmbeddingJobService(session, storage, tmp_path / "key")
-        job = service.create_job(scope="all", max_workers=4)
+        job = service.create_job(vault_id=vault.id, scope="all", max_workers=4)
         job_id = job.id
     writer_threads: set[int] = set()
 
@@ -157,13 +161,13 @@ def test_manager_uses_one_database_writer_and_one_failure_does_not_stop_others(t
 
 
 def test_cancel_stops_submission_and_startup_recovers_running(tmp_path: Path, monkeypatch) -> None:
-    engine, factory, storage, _ = context(tmp_path)
+    engine, factory, storage, _, vault = context(tmp_path)
     fake = FakeClient()
     monkeypatch.setattr(AISettingsService, "build_active_multimodal_embedding_client", lambda self: fake)
     index = SemanticIndex(factory)
     with factory() as session:
         job = EmbeddingJobService(session, storage, tmp_path / "key").create_job(
-            scope="all", max_workers=4
+            vault_id=vault.id, scope="all", max_workers=4
         )
         job_id = job.id
     manager = EmbeddingJobManager(factory, storage.images_dir, storage.thumbnails_dir, tmp_path / "key")

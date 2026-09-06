@@ -38,6 +38,7 @@ def response_meme(meme_id: int = 1) -> SimpleNamespace:
         tags=[],
         template=None,
         images=[],
+        vault=None,
     )
 
 
@@ -100,6 +101,7 @@ def test_service_only_delegates_to_existing_semantic_search() -> None:
         "template_id": None,
         "page": 3,
         "page_size": 12,
+        "vault_id": None,
     }
 
 

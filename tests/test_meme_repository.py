@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models.meme import Meme
+from tests.vault_helpers import ensure_default_vault
 
 
 def load_repository_class():
@@ -24,8 +25,9 @@ def create_session() -> Session:
     return sessionmaker(bind=engine, expire_on_commit=False)()
 
 
-def build_meme(number: int) -> Meme:
+def build_meme(vault_id: int, number: int) -> Meme:
     return Meme(
+        vault_id=vault_id,
         title=f"Meme {number}",
         description=None,
         original_filename=f"original-{number}.png",
@@ -44,10 +46,11 @@ def build_meme(number: int) -> Meme:
 def test_create_and_get_meme_by_id() -> None:
     repository_class = load_repository_class()
     session = create_session()
+    vault = ensure_default_vault(session)
     repository = repository_class(session)
 
     try:
-        created = repository.create(build_meme(1))
+        created = repository.create(build_meme(vault.id, 1))
         found = repository.get_by_id(created.id)
 
         assert created.id is not None
@@ -60,13 +63,14 @@ def test_create_and_get_meme_by_id() -> None:
 def test_list_memes_supports_offset_and_limit() -> None:
     repository_class = load_repository_class()
     session = create_session()
+    vault = ensure_default_vault(session)
     repository = repository_class(session)
 
     try:
         for number in range(1, 4):
-            repository.create(build_meme(number))
+            repository.create(build_meme(vault.id, number))
 
-        memes = repository.list(offset=1, limit=1)
+        memes = repository.list(vault_id=vault.id, offset=1, limit=1)
 
         assert [meme.title for meme in memes] == ["Meme 2"]
     finally:
@@ -76,20 +80,21 @@ def test_list_memes_supports_offset_and_limit() -> None:
 def test_list_memes_searches_title_and_description_case_insensitively() -> None:
     repository_class = load_repository_class()
     session = create_session()
+    vault = ensure_default_vault(session)
     repository = repository_class(session)
 
     try:
-        title_match = build_meme(1)
+        title_match = build_meme(vault.id, 1)
         title_match.title = "Grumpy CAT"
-        description_match = build_meme(2)
+        description_match = build_meme(vault.id, 2)
         description_match.description = "A cat reaction"
-        unrelated = build_meme(3)
+        unrelated = build_meme(vault.id, 3)
         unrelated.title = "Dog"
         for meme in (title_match, description_match, unrelated):
             repository.create(meme)
 
-        assert repository.list(q="  cat  ") == [title_match, description_match]
-        assert repository.list(q="   ") == [
+        assert repository.list(vault_id=vault.id, q="  cat  ") == [title_match, description_match]
+        assert repository.list(vault_id=vault.id, q="   ") == [
             title_match,
             description_match,
             unrelated,
@@ -101,10 +106,11 @@ def test_list_memes_searches_title_and_description_case_insensitively() -> None:
 def test_update_meme_fields() -> None:
     repository_class = load_repository_class()
     session = create_session()
+    vault = ensure_default_vault(session)
     repository = repository_class(session)
 
     try:
-        meme = repository.create(build_meme(1))
+        meme = repository.create(build_meme(vault.id, 1))
 
         updated = repository.update(
             meme,
@@ -121,10 +127,11 @@ def test_update_meme_fields() -> None:
 def test_delete_meme() -> None:
     repository_class = load_repository_class()
     session = create_session()
+    vault = ensure_default_vault(session)
     repository = repository_class(session)
 
     try:
-        meme = repository.create(build_meme(1))
+        meme = repository.create(build_meme(vault.id, 1))
         meme_id = meme.id
 
         repository.delete(meme)

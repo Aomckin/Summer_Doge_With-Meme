@@ -59,6 +59,8 @@ function accentInk(value: string): string {
 export class AppearanceController {
   private settings: AppearanceSettings;
   private backgroundUrl: string | null = null;
+  /** 设置后，外观修改持久化到 Vault（PATCH），而不是浏览器本地存储。 */
+  private vaultPersistence: ((settings: AppearanceSettings) => Promise<void>) | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly listeners = new Set<AppearanceListener>();
   private readonly root: HTMLElement;
@@ -82,6 +84,24 @@ export class AppearanceController {
     this.urlApi = options.urlApi ?? URL;
     this.saveDelay = options.saveDelay ?? 180;
     this.settings = this.settingsStore.load();
+  }
+
+  /** 启用 Vault 主题模式：编辑保存到服务器，背景 URL 来自仓库资产。 */
+  setVaultPersistence(
+    persist: ((settings: AppearanceSettings) => Promise<void>) | null,
+  ): void {
+    this.vaultPersistence = persist;
+  }
+
+  /** 应用一套已解析的 Vault 主题（不写入本地存储）；用于切换仓库。 */
+  applyVaultTheme(settings: AppearanceSettings, backgroundUrl: string | null): void {
+    this.settings = { ...settings };
+    this.apply();
+    this.replaceBackgroundUrl(backgroundUrl);
+  }
+
+  get isVaultPersistence(): boolean {
+    return this.vaultPersistence !== null;
   }
 
   async load(): Promise<AppearanceSettings> {
@@ -141,6 +161,11 @@ export class AppearanceController {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
+    }
+    if (this.vaultPersistence) {
+      // Vault 主题：持久化到后端；失败静默保留运行时预览。
+      void this.vaultPersistence(this.getSettings());
+      return;
     }
     this.settingsStore.save(this.settings);
   }

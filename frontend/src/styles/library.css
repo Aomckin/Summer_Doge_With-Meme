@@ -55,6 +55,15 @@
   letter-spacing: 0.08em;
 }
 
+.profile-filters .filter-chip-scroll {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.profile-filters .filter-chip-scroll .filter-chip {
+  flex: 0 0 auto;
+}
+
 .filter-chip-track {
   display: grid;
   grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr) auto;
@@ -96,7 +105,16 @@
 }
 
 @media (max-width: 680px) {
-  .filter-chip-track {
+  .profile-filters .filter-chip-scroll {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.profile-filters .filter-chip-scroll .filter-chip {
+  flex: 0 0 auto;
+}
+
+.filter-chip-track {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 

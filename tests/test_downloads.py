@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import create_app
+from tests.vault_helpers import ensure_default_vault
 from app.utils.download_names import safe_download_filename, sanitize_stem, unique_archive_name
 
 
@@ -32,6 +33,7 @@ def context(tmp_path: Path):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
     app = create_app(tmp_path / "images", tmp_path / "thumbs", export_archives_dir=tmp_path / "exports")
     app.dependency_overrides[get_db] = lambda: session
     return app, session

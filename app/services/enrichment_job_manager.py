@@ -48,7 +48,7 @@ class EnrichmentJobService:
         self.key_file = key_file
         self.repository = EnrichmentRepository(session)
 
-    def create_job(self, *, scope: str, query: str | None, tags: list[str], analyze_title: bool,
+    def create_job(self, *, vault_id: int, scope: str, query: str | None, tags: list[str], analyze_title: bool,
                    analyze_description: bool, analyze_tags: bool, analyze_template: bool,
                    max_workers: int, start_meme_id: int | None = None,
                    end_meme_id: int | None = None) -> EnrichmentJob:
@@ -61,11 +61,11 @@ class EnrichmentJobService:
         if model is None:
             raise EnrichmentJobConflictError("Image analysis model is not configured")
         selected = self.select_memes(
-            scope=scope, query=query, tags=tags,
+            vault_id=vault_id, scope=scope, query=query, tags=tags,
             start_meme_id=start_meme_id, end_meme_id=end_meme_id,
         )
         job = EnrichmentJob(
-            status="pending", scope=scope, scope_query=query,
+            status="pending", vault_id=vault_id, scope=scope, scope_query=query,
             scope_tags_json=json.dumps(tags, ensure_ascii=False),
             start_meme_id=start_meme_id, end_meme_id=end_meme_id,
             provider_id=model.provider_id, model_record_id=model.id,
@@ -80,17 +80,18 @@ class EnrichmentJobService:
         self.session.commit()
         return job
 
-    def estimate(self, *, scope: str, query: str | None, tags: list[str],
+    def estimate(self, *, vault_id: int, scope: str, query: str | None, tags: list[str],
                  start_meme_id: int | None = None, end_meme_id: int | None = None) -> int:
         return len(self.select_memes(
-            scope=scope, query=query, tags=tags,
+            vault_id=vault_id, scope=scope, query=query, tags=tags,
             start_meme_id=start_meme_id, end_meme_id=end_meme_id,
         ))
 
-    def select_memes(self, *, scope: str, query: str | None, tags: list[str],
+    def select_memes(self, *, vault_id: int, scope: str, query: str | None, tags: list[str],
                      start_meme_id: int | None = None,
                      end_meme_id: int | None = None) -> list[Meme]:
         memes = MemeRepository(self.session).list_all_for_export(
+            vault_id=vault_id,
             q=query if scope == "filtered" else None,
             tags=tags if scope == "filtered" else None,
         )

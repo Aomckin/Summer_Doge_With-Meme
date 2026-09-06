@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.config import DATABASE_PATH
 from app.repositories.meme_repository import MemeRepository
+from app.services.vault_service import resolve_vault_id
 from app.repositories.tag_repository import TagRepository
 from app.repositories.template_repository import TemplateRepository
 
@@ -50,11 +51,17 @@ def export_batch(
     try:
         offset = (batch_number - 1) * batch_size
         if start_id is None:
-            memes = MemeRepository(session).list(offset=offset, limit=batch_size)
+            memes = MemeRepository(session).list(
+                vault_id=resolve_vault_id(session, None),
+                offset=offset,
+                limit=batch_size,
+            )
         else:
             memes = [
                 meme
-                for meme in MemeRepository(session).list_all_for_export()
+                for meme in MemeRepository(session).list_all_for_export(
+                    vault_id=resolve_vault_id(session, None)
+                )
                 if start_id <= meme.id <= end_id
             ]
         records: list[dict[str, object]] = []

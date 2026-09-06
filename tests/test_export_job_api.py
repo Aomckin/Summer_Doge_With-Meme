@@ -13,6 +13,7 @@ from app.main import create_app
 from app.services.export_job_service import ExportJobService
 from app.services.meme_service import MemeService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 class Manager:
@@ -32,15 +33,19 @@ def test_export_api_lifecycle_and_download_guards(tmp_path: Path) -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    vault = ensure_default_vault(session)
     images, thumbs, exports = tmp_path / "images", tmp_path / "thumbs", tmp_path / "exports"
     app = create_app(images, thumbs, export_archives_dir=exports)
     manager = Manager(); app.state.export_job_manager = manager
     app.dependency_overrides[get_db] = lambda: session
     buffer = BytesIO(); Image.new("RGB", (10, 10), "red").save(buffer, format="PNG")
-    MemeService(session, ImageStorage(images, thumbs)).create_meme("one.png", buffer.getvalue(), title="一")
+    MemeService(session, ImageStorage(images, thumbs)).create_meme(
+        "one.png", buffer.getvalue(), title="一", vault_id=vault.id
+    )
 
     created = request(app, "POST", "/api/export-jobs", json={
-        "scope": "all", "organization": "flat", "include_manifest": True, "archive_name": "全部",
+        "vault_id": vault.id, "scope": "all", "organization": "flat",
+        "include_manifest": True, "archive_name": "全部",
     })
     assert created.status_code == 202 and manager.submitted == [created.json()["id"]]
     job_id = created.json()["id"]

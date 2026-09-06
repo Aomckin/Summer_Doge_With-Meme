@@ -540,6 +540,44 @@ Meme Forge 第一阶段至此封版并进入真实使用观察期；仍不提供
 
 Phase 3 使用单进程内存 Session，服务重启会注销现有会话；没有引入用户数据库、OAuth、JWT、Redis、RBAC 权限树、复杂限流或 CAPTCHA。External API 的机器客户端独立凭据已在 v1.0.1 Hotfix 中完成。
 
+### v2.0.0：Multi-Vault 多仓库资产管理（已完成）
+
+- [x] 新增 Vault 实体与 `vaults` 表；启动迁移幂等创建默认 meme Vault、回填 `vault_id`、把全局 hash 唯一索引替换为 `(vault_id, file_hash)` 复合唯一索引，写入前自动备份。
+- [x] VaultStorageService 统一解析每仓库图片/缩略图目录；默认 meme Vault 保持 legacy 目录，不迁移既有文件。
+- [x] 全部资产查询（列表/分页/搜索/随机/导入/导出/任务候选）显式携带 vault_id；同一图片允许跨 Vault 存在，仓库内去重不变。
+- [x] 语义索引按 Vault 分片加载与失效，`semantic_index_state` 每仓库独立代次；每 Vault 查询缓存 key 含 vault。
+- [x] 新增 Vault CRUD、Vault 作用域资产/标签/语义搜索端点与 Vault 媒体路由；非空仓库删除需显式 force，默认仓库受保护；跨 Vault 访问与合并被拒绝。
+- [x] 旧 `/api/memes/*` 与 External API 兼容层默认绑定 meme Vault，Maibot 等消费者无需修改。
+- [x] 前端 Vault Selector、新建/删除仓库对话框与 `/v/{slug}` URL 状态；切换仓库重置全部浏览状态。
+- [x] 多 Vault 隔离专项测试（查询/删除/关键词/向量/hash/合并边界）与既有测试适配全部通过。
+
+v2.0 明确不做：云同步、跨 Vault 联合搜索、模板/收藏集的 Vault 归属拆分（保持全局词典）、多用户权限、对象存储。优先级是“隔离正确 > 数据安全 > 旧功能兼容 > UI 美化”。
+
+### v2.0.1：Vault Profile / Typed Asset（已完成）
+
+- [x] Vault `profile` 字段（meme/anime/photo/game_score/generic）与迁移回填；Capability 矩阵按 Profile 定义并随响应下发。
+- [x] `asset_metadata` Typed Metadata 架构（JSON + 字段约束），anime 完整落地：作品/角色/画师/来源/收藏度/方向，详情面板手工编辑。
+- [x] anime 上传/导入管线自动预填方向；orientation/favorite 服务端过滤与元数据关键词搜索（与标题描述 OR）。
+- [x] 前端词汇表去 Meme 化：标题/空态/详情/相关/相似/索引 CTA/删除等全部按 Profile 渲染；未开启 Capability 的区块直接不存在。
+- [x] 验收测试：anime 无 Meme 词汇泄漏、generic 无 Profile 专属控件、meme 体验不变。
+- [x] 本阶段未做：photo/game_score 专属 UI 与自动识别（角色/画师/OCR）、AI Prompt 分 Profile 路由、跨仓库能力配置覆盖。
+
+### v2.0.2：Per-Vault Appearance / Theme System（已完成）
+
+- [x] `vaults.appearance_json` 持久化每仓库主题（复用 AppearanceSettings 形态 + backgroundAssetId）；PATCH API 校验并保存。
+- [x] 主题优先级 Vault 自定义 > Profile 默认 > 全局默认；创建仓库自动应用 Profile 默认预设（meme 午夜 / anime 梦境 / photo 清爽 / generic 默认）。
+- [x] 切换仓库时数据、Profile、词汇与外观同步应用（主题来自已加载的 Vault 响应，无闪烁）；刷新后主题保持（服务器端存储）。
+- [x] 独立上传背景图（不绑定业务 Asset）：`data/backgrounds/vault-{id}/` 每仓持久化，上传/展示/删除 API，删除仓库时清理；沿用现有外观系统上传交互。
+- [x] 外观对话框显示"正在编辑的仓库"，上传背景直接保存到服务器（替代 IndexedDB，换设备保持）；访客只读。
+- [x] 本阶段未做：自定义 CSS、视频背景、粒子、每仓字体上传、主题市场。
+
+### v2.0.3：Vault Asset Number（已完成）
+
+- [x] `memes.vault_asset_no` + UNIQUE(vault_id, vault_asset_no)；`vaults.next_asset_no` 计数器在创建事务内原子分配，删除不复用。
+- [x] 迁移按 id 顺序分仓回填 1..N 并初始化计数器；ZIP/多文件导入连续分配。
+- [x] API 返回 vault_id + vault_asset_no；前端详情序号改用 vault_asset_no，不再显示全局主键。
+- [x] 测试：跨仓独立编号、两仓 #1 并存、同仓重复拒绝、删除不复用、ZIP 100 张连续无重复、迁移回填。
+
 ### Phase 3 后续候选：公开访问与部署增强（尚未排期）
 
 > v1.0.0 Phase 3 已提供私人/小范围受邀访问边界。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
@@ -654,7 +692,7 @@ data/thumbnails/*
 - [x] 完成多图 Meme 沉浸式顺序浏览；封面节点复用，关闭后恢复原 DOM 且不重载布局。
 - [x] 完成五档 Card Motion、Card Size / Aspect Ratio 系数、Magnetic Follow 和 drunk 环境物理，并进入 Feature Freeze。
 
-当前状态：v1.0.0 Phase 3 Visitor/Admin Access Gate、Session、全量 API/媒体权限审计与 Visitor 只读 UI 均已完成；提交基线为当前 `HEAD`
+当前状态：v2.0.0 Multi-Vault 已完成（Vault 实体、vault_id 隔离、VaultStorage、per-Vault 语义索引、Vault API/媒体路由、旧接口兼容层、前端 Vault Selector 与 /v/{slug} URL 状态）；提交基线为 `v2.0` 分支当前 `HEAD`
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite
@@ -663,4 +701,4 @@ ORM：SQLAlchemy
 图片存储：本地文件系统
 测试：Vitest + jsdom + Pytest
 AI：OpenAI Responses API + OpenAI 兼容 Chat Completions + 有序多图元数据建议 + Provider/Luna 统一审核池 + 持久化批量任务 + 文案生成/改写 + 网页厂商/模型配置 + 模板视觉匹配
-下一步：由用户确定新的唯一主目标。当前不默认实现用户账户、分享 Token、机器 API 独立凭据、多进程 Session、公网部署、社交平台接入、虚拟化或新的卡片特效。
+下一步：由用户确定新的唯一主目标。当前不默认实现跨 Vault 联合搜索、模板/收藏集 Vault 归属拆分、用户账户、分享 Token、多进程 Session、公网部署、社交平台接入或新的卡片特效。

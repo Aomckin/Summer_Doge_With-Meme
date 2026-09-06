@@ -22,6 +22,7 @@ from app.models.ai_analysis import MemeAIAnalysis
 from app.models.meme import Meme
 from app.models.tag import MemeTag
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 class FakeAIClient:
@@ -70,6 +71,7 @@ def api_context(tmp_path: Path):
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
     images_dir = tmp_path / "images"
     thumbnails_dir = tmp_path / "thumbnails"
     app = main_module.create_app(images_dir, thumbnails_dir)

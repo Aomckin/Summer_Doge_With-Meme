@@ -51,9 +51,13 @@ class SemanticSearchService:
     def active_model(self):
         return AISettingsRepository(self.session).active_embedding_model()
 
-    def status(self) -> dict[str, object]:
+    def status(self, *, vault_id: int | None = None) -> dict[str, object]:
+        from app.services.vault_service import resolve_vault_id
+
+        resolved_vault = resolve_vault_id(self.session, vault_id)
         model = self.active_model()
         counts = self.embedding_repository.count_status(
+            vault_id=resolved_vault,
             model_record_id=model.id if model else None,
             model_id=model.model_id if model else None,
             dimension=EMBEDDING_DIMENSION,
@@ -99,16 +103,21 @@ class SemanticSearchService:
         page: int,
         page_size: int,
         template_id: int | None = None,
+        vault_id: int | None = None,
     ) -> dict[str, object]:
+        from app.services.vault_service import resolve_vault_id
+
+        resolved_vault = resolve_vault_id(self.session, vault_id)
         model = self.active_model()
         if model is None:
             raise MemeEmbeddingUnavailableError("Semantic embedding model is not configured")
         normalized_query = query.strip()
         normalized_tags = tuple(sorted({tag.strip().lower() for tag in tags if tag.strip()}))
         key = (
+            resolved_vault,
             model.id,
             model.model_id,
-            self.semantic_index.generation,
+            self.semantic_index.generation(resolved_vault),
             normalized_query,
             normalized_tags,
             template_id,
@@ -129,11 +138,13 @@ class SemanticSearchService:
                 allowed = {
                     meme.id
                     for meme in MemeRepository(self.session).list_all_for_export(
+                        vault_id=resolved_vault,
                         tags=normalized_tags, template_id=template_id
                     )
                 }
             hits = self.semantic_index.search(
                 vector,
+                vault_id=resolved_vault,
                 model_record_id=model.id,
                 model_id=model.model_id,
                 dimension=EMBEDDING_DIMENSION,
@@ -147,6 +158,7 @@ class SemanticSearchService:
         page_hits = hits[start : start + page_size]
         memes = self._memes_for_hits(page_hits)
         counts = self.embedding_repository.count_status(
+            vault_id=resolved_vault,
             model_record_id=model.id,
             model_id=model.model_id,
             dimension=EMBEDDING_DIMENSION,
@@ -169,6 +181,7 @@ class SemanticSearchService:
         query: str,
         tags: list[str] | None = None,
         template_id: int | None = None,
+        vault_id: int | None = None,
     ) -> tuple[Meme, float] | None:
         """Choose one usable Meme from the locally ranked Top 5."""
         result = self.search(
@@ -177,6 +190,7 @@ class SemanticSearchService:
             template_id=template_id,
             page=1,
             page_size=5,
+            vault_id=vault_id,
         )
         total = int(result["total"])
         if total == 0:
@@ -201,7 +215,8 @@ class SemanticSearchService:
         return random.choice(candidates) if candidates else None
 
     def similar(self, meme_id: int, *, limit: int) -> list[tuple[Meme, float]]:
-        if self.session.get(Meme, meme_id) is None:
+        meme = self.session.get(Meme, meme_id)
+        if meme is None:
             raise LookupError(f"Meme {meme_id} does not exist")
         model = self.active_model()
         record = self.embedding_repository.get_for_meme(meme_id)
@@ -219,6 +234,7 @@ class SemanticSearchService:
         vector = deserialize_vector(record.vector_blob, dimension=record.dimension)
         hits = self.semantic_index.search(
             vector,
+            vault_id=meme.vault_id,
             model_record_id=model.id,
             model_id=model.model_id,
             dimension=record.dimension,

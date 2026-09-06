@@ -27,6 +27,9 @@ class MemeMergeService:
             raise LookupError(f"Target Meme {target_meme_id} does not exist")
         if source is None:
             raise LookupError(f"Source Meme {source_meme_id} does not exist")
+        if target.vault_id != source.vault_id:
+            # 跨 Vault 合并会把资产混入其他仓库，明确禁止。
+            raise MemeMergeError("Target and source Meme must belong to the same vault")
         if not target.images or not source.images:
             raise MemeMergeError("Both Meme records must contain at least one image")
 

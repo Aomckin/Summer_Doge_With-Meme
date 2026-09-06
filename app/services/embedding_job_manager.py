@@ -55,7 +55,7 @@ class EmbeddingJobService:
         self.key_file = key_file
         self.repository = EmbeddingJobRepository(session)
 
-    def create_job(self, *, scope: str, max_workers: int) -> EmbeddingJob:
+    def create_job(self, *, vault_id: int, scope: str, max_workers: int) -> EmbeddingJob:
         if self.repository.running() is not None:
             raise EmbeddingJobConflictError("An embedding job is already active")
         model = AISettingsService(
@@ -67,7 +67,7 @@ class EmbeddingJobService:
         AISettingsService(
             self.session, self.key_file
         ).build_active_multimodal_embedding_client()
-        statement = select(Meme).order_by(Meme.id)
+        statement = select(Meme).where(Meme.vault_id == vault_id).order_by(Meme.id)
         memes = list(self.session.scalars(statement))
         selected: list[Meme] = []
         embeddings = MemeEmbeddingRepository(self.session)
@@ -83,6 +83,7 @@ class EmbeddingJobService:
                 selected.append(meme)
         job = EmbeddingJob(
             status="pending",
+            vault_id=vault_id,
             scope=scope,
             model_record_id=model.id,
             model_id_snapshot=model.model_id,

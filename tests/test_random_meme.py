@@ -14,6 +14,7 @@ from app.database import Base
 from app.main import app
 from app.services.meme_service import MemeService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def make_image_bytes(color: str, image_format: str = "PNG") -> bytes:
@@ -42,6 +43,7 @@ def random_context(tmp_path: Path):
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
     service = MemeService(session, storage)
     app.dependency_overrides[get_meme_service] = lambda: service

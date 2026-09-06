@@ -93,6 +93,8 @@ def test_meme_schemas_validate_input_and_orm_output() -> None:
     )
     response = schema_module.MemeResponse(
         id=1,
+            vault_id=1,
+            vault_asset_no=1,
         **create_data.model_dump(),
         original_filename="original.webp",
         stored_filename="stored.webp",

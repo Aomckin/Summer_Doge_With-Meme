@@ -16,6 +16,7 @@ from app.services.embedding_config import EMBEDDING_KIND
 from app.services.embedding_vectors import serialize_vector
 from app.services.semantic_index import SemanticIndex
 from app.services.similarity_inspection_service import SimilarityInspectionService
+from tests.vault_helpers import ensure_default_vault
 
 
 @pytest.fixture
@@ -24,6 +25,7 @@ def context(tmp_path: Path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
+        ensure_default_vault(session)
         provider = AIProvider(
             name="DashScope",
             protocol="dashscope_multimodal_embedding",
@@ -50,6 +52,7 @@ def context(tmp_path: Path):
 def add_meme(session, title: str) -> Meme:
     suffix = title.encode().hex()[:40].ljust(40, "0")
     meme = Meme(
+        vault_id=ensure_default_vault(session).id,
         title=title,
         description=None,
         original_filename=f"{title}.png",

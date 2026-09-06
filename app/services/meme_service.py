@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.ai.client import (
@@ -24,6 +24,8 @@ from app.repositories.ai_analysis_repository import AIAnalysisRepository
 from app.repositories.meme_repository import MemeRepository
 from app.repositories.tag_repository import TagRepository
 from app.repositories.template_repository import TemplateRepository
+from app.models.vault import Vault
+from app.repositories.vault_repository import VaultRepository
 from app.storage.image_storage import ImageStorage, StoredImage, ValidatedImage
 from app.storage.template_image_storage import TemplateImageStorage
 from app.services.template_matching import rank_visual_templates
@@ -98,6 +100,7 @@ class MemeService:
         original_filename: str,
         content: bytes,
         *,
+        vault_id: int,
         title: str,
         description: str | None = None,
         source: str | None = None,
@@ -110,6 +113,7 @@ class MemeService:
             meme, stored = self.create_meme_no_commit(
                 original_filename,
                 validated,
+                vault_id=vault_id,
                 title=title,
                 description=description,
                 source=source,
@@ -130,6 +134,7 @@ class MemeService:
         original_filename: str,
         validated: ValidatedImage,
         *,
+        vault_id: int,
         title: str,
         description: str | None = None,
         source: str | None = None,
@@ -138,17 +143,28 @@ class MemeService:
         check_duplicate: bool = True,
     ) -> tuple[Meme, StoredImage]:
         """Create and flush one Meme while leaving commit/rollback to the caller."""
+        if VaultRepository(self.session).get_by_id(vault_id) is None:
+            raise ValueError(f"Vault {vault_id} does not exist")
         if (
             template_id is not None
             and self.template_repository.get_by_id(template_id) is None
         ):
             raise ValueError(f"Template {template_id} does not exist")
-        if check_duplicate and self.repository.get_by_file_hash(validated.file_hash) is not None:
-            raise DuplicateImageError("Image already exists")
+        if check_duplicate and self.repository.get_by_file_hash(vault_id, validated.file_hash) is not None:
+            raise DuplicateImageError("Image already exists in this vault")
+        # 仓库内独立序号：在同一事务内原子递增 Vault 计数器并取回本次序号。
+        vault_asset_no = self.session.execute(
+            update(Vault)
+            .where(Vault.id == vault_id)
+            .values(next_asset_no=Vault.next_asset_no + 1)
+            .returning(Vault.next_asset_no - 1)
+        ).scalar_one()
         # 查重完成后才生成缩略图，避免为重复图片执行 Pillow 缩放。
         stored = self.storage.save_validated(original_filename, validated)
         # ORM 对象只保存元数据和磁盘路径，图片二进制本身不塞进数据库。
         meme = Meme(
+            vault_id=vault_id,
+            vault_asset_no=vault_asset_no,
             title=title,
             description=description,
             original_filename=stored.original_filename,
@@ -165,6 +181,7 @@ class MemeService:
         )
         meme.images.append(
             MemeImage(
+                vault_id=vault_id,
                 original_filename=stored.original_filename,
                 stored_filename=stored.stored_filename,
                 file_path=stored.file_path.name,
@@ -191,6 +208,7 @@ class MemeService:
         stored = self.storage.save(original_filename, content)
         image = MemeImage(
             meme_id=meme.id,
+            vault_id=meme.vault_id,
             original_filename=stored.original_filename,
             stored_filename=stored.stored_filename,
             file_path=stored.file_path.name,
@@ -310,10 +328,13 @@ class MemeService:
         ):
             setattr(meme, field, getattr(cover, field))
 
-    def get_meme(self, meme_id: int) -> Meme:
+    def get_meme(self, meme_id: int, *, vault_id: int | None = None) -> Meme:
         meme = self.repository.get_by_id(meme_id)
         if meme is None:
             raise MemeNotFoundError(f"Meme {meme_id} does not exist")
+        # Vault 作用域路由必须确认资产确实属于当前仓库，防止伪造 ID 跨仓访问。
+        if vault_id is not None and meme.vault_id != vault_id:
+            raise MemeNotFoundError(f"Meme {meme_id} does not exist in vault {vault_id}")
 
         # 找到数据库记录还不够；对外返回前也要确认对应文件仍然存在。
         self._ensure_files_exist(meme)
@@ -322,26 +343,35 @@ class MemeService:
     def list_memes(
         self,
         *,
+        vault_id: int,
         offset: int = 0,
         limit: int = 100,
         tags: Sequence[str] | None = None,
         q: str | None = None,
         template_id: int | None = None,
         gif_only: bool = False,
+        orientation: str | None = None,
+        favorite: bool = False,
+        search_metadata: bool = False,
     ) -> list[Meme]:
         # 查询细节由 Repository 封装，Service 只传递业务参数。
         return self.repository.list(
+            vault_id=vault_id,
             offset=offset,
             limit=limit,
             tags=tags,
             q=q,
             template_id=template_id,
             gif_only=gif_only,
+            orientation=orientation,
+            favorite=favorite,
+            search_metadata=search_metadata,
         )
 
     def list_meme_page(
         self,
         *,
+        vault_id: int,
         page: int = 1,
         page_size: int = 24,
         tags: Sequence[str] | None = None,
@@ -350,6 +380,9 @@ class MemeService:
         gif_only: bool = False,
         sort: str = "default",
         shuffle_seed: int | None = None,
+        orientation: str | None = None,
+        favorite: bool = False,
+        search_metadata: bool = False,
     ) -> MemePage:
         if page < 1:
             raise ValueError("page must be at least 1")
@@ -368,11 +401,14 @@ class MemeService:
             effective_seed = shuffle_seed
 
         total = self.repository.count_filtered(
-            tags=tags, q=q, template_id=template_id, gif_only=gif_only
+            vault_id=vault_id,
+            tags=tags, q=q, template_id=template_id, gif_only=gif_only,
+            orientation=orientation, favorite=favorite, search_metadata=search_metadata,
         )
         total_pages = (total + page_size - 1) // page_size
         effective_page = min(page, total_pages) if total_pages else 1
         items = self.repository.list_page(
+            vault_id=vault_id,
             offset=(effective_page - 1) * page_size,
             limit=page_size,
             tags=tags,
@@ -381,6 +417,9 @@ class MemeService:
             gif_only=gif_only,
             sort=sort,
             shuffle_seed=effective_seed,
+            orientation=orientation,
+            favorite=favorite,
+            search_metadata=search_metadata,
         )
         return MemePage(
             items=items,
@@ -442,18 +481,24 @@ class MemeService:
     def get_random_meme(
         self,
         *,
+        vault_id: int,
         tags: Sequence[str] | None = None,
         template_id: int | None = None,
         gif_only: bool = False,
+        orientation: str | None = None,
+        favorite: bool = False,
     ) -> Meme:
         # Repository 负责随机元数据查询；缺失磁盘文件的记录不会泄漏给消费者。
         unavailable_ids: list[int] = []
         while True:
             meme = self.repository.get_random(
+                vault_id=vault_id,
                 tags=tags,
                 template_id=template_id,
                 gif_only=gif_only,
                 exclude_ids=unavailable_ids,
+                orientation=orientation,
+                favorite=favorite,
             )
             if meme is None:
                 detail = (
@@ -604,11 +649,13 @@ class MemeService:
             raise
         return meme
 
-    def delete_meme(self, meme_id: int) -> None:
+    def delete_meme(self, meme_id: int, *, vault_id: int | None = None) -> None:
         # 删除的目标是清理记录；即使磁盘文件已丢失，也不能阻止数据库删除。
         meme = self.repository.get_by_id(meme_id)
         if meme is None:
             raise MemeNotFoundError(f"Meme {meme_id} does not exist")
+        if vault_id is not None and meme.vault_id != vault_id:
+            raise MemeNotFoundError(f"Meme {meme_id} does not exist in vault {vault_id}")
         # ORM 对象删除后不应再依赖它取路径，所以提前保存普通字符串。
         stored_files = [
             (image.file_path, image.thumbnail_path)

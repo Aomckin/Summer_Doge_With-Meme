@@ -16,6 +16,7 @@ from app.models.tag import MemeTag, Tag
 from app.services.meme_service import MemeService
 from app.services.tag_service import TagService
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 def load_tag_components():
@@ -70,9 +71,11 @@ def tag_context(tmp_path: Path):
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
     service = MemeService(session, storage)
     main.app.dependency_overrides[meme_api.get_meme_service] = lambda: service
+    main.app.dependency_overrides[meme_api.get_meme_scoped_service] = lambda: service
     main.app.dependency_overrides[get_db] = lambda: session
 
     yield main.app, session, model_module

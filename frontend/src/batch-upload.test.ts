@@ -73,6 +73,8 @@ function meme(id: number, title: string): MemeResponse {
     template: null,
     images: [],
     image_count: 1,
+    vault_id: 1,
+    vault_asset_no: id,
   };
 }
 

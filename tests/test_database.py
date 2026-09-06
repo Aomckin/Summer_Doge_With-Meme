@@ -9,6 +9,7 @@ from app.models.meme import Meme
 from app.models.meme_image import MemeImage
 from app.models.meme_relation import MemeRelation
 from app.models.tag import MemeTag, Tag  # noqa: F401
+from tests.vault_helpers import ensure_default_vault
 
 
 def load_database_module():
@@ -49,8 +50,52 @@ def test_database_dependency_closes_its_session() -> None:
 def test_legacy_meme_image_backfill_is_idempotent(tmp_path: Path) -> None:
     database_path = tmp_path / "legacy.db"
     engine = create_engine(f"sqlite:///{database_path.as_posix()}")
-    Base.metadata.create_all(bind=engine)
+    # 模拟 v1 旧库：只建 memes / meme_images，且没有 vault_id 列。
     with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE memes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                original_filename VARCHAR(255) NOT NULL,
+                stored_filename VARCHAR(255) NOT NULL,
+                file_path VARCHAR(512) NOT NULL,
+                thumbnail_path VARCHAR(512),
+                mime_type VARCHAR(100) NOT NULL,
+                file_size INTEGER NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                file_hash VARCHAR(64) NOT NULL,
+                source VARCHAR(50),
+                template_id INTEGER,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+            """
+        ))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX ix_memes_file_hash ON memes (file_hash)"
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE meme_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meme_id INTEGER NOT NULL REFERENCES memes(id) ON DELETE CASCADE,
+                original_filename VARCHAR(255) NOT NULL,
+                stored_filename VARCHAR(255) NOT NULL,
+                file_path VARCHAR(512) NOT NULL,
+                thumbnail_path VARCHAR(512),
+                mime_type VARCHAR(100) NOT NULL,
+                file_size INTEGER NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                file_hash VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                created_at DATETIME
+            )
+            """
+        ))
         connection.execute(
             text(
                 """
@@ -84,9 +129,11 @@ def test_sqlite_foreign_keys_are_enabled_and_raw_delete_cascades() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(bind=engine)
     with Session(engine) as session:
+        vault = ensure_default_vault(session)
         memes = []
         for index in (1, 2):
             meme = Meme(
+                vault_id=vault.id,
                 title=f"Meme {index}",
                 description=None,
                 original_filename=f"{index}.png",
@@ -102,6 +149,7 @@ def test_sqlite_foreign_keys_are_enabled_and_raw_delete_cascades() -> None:
             )
             meme.images.append(
                 MemeImage(
+                    vault_id=vault.id,
                     original_filename=f"{index}.png",
                     stored_filename=f"image-{index}.png",
                     file_path=f"{index}.png",

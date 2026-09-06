@@ -116,6 +116,7 @@ export class BatchUploadController {
   private nextId = 0;
   private running = false;
   private stopRequested = false;
+  private uploadVaultId: number | undefined;
   private locked = false;
 
   constructor(private readonly options: BatchUploadOptions) {
@@ -244,10 +245,12 @@ export class BatchUploadController {
     }
   }
 
-  open(templates: TemplateResponse[], availableTags: TagResponse[] = []): void {
+  open(templates: TemplateResponse[], availableTags: TagResponse[] = [], vaultId?: number): void {
     if (!this.importJob && !this.running) {
       this.reset();
     }
+    // 上传目标仓库随当前 Vault 切换；undefined 表示默认 meme Vault。
+    this.uploadVaultId = vaultId;
     this.setTemplates(templates);
     this.tagEditor.setAvailableTags(availableTags);
     this.render();
@@ -657,6 +660,7 @@ export class BatchUploadController {
         await this.options.uploadMeme({
           file: item.file,
           title: item.title.trim(),
+          vaultId: this.uploadVaultId,
           ...metadata,
         });
         item.status = "success";

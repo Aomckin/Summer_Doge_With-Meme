@@ -1,8 +1,47 @@
 # Meme Vault 代码现状速览
 
-> 提交基线：v1.0.1 External API Machine Authentication Hotfix（当前 `HEAD`）；最后更新于 2026-08-21。本文只描述已经落地的代码；接手顺序与冻结边界见 [`NEXT_CONVERSATION_HANDOFF.md`](NEXT_CONVERSATION_HANDOFF.md)。
+> 提交基线：`v2.0` 分支 Multi-Vault（Core + Profile + Appearance + Asset Number）；最后更新于 2026-09-06。本文只描述已经落地的代码。
 
-## 当前能力
+## v2.0.3 Vault Asset Number（已完成）
+
+- `memes.vault_asset_no` + `vaults.next_asset_no`：每个 Vault 拥有从 1 开始的独立资产序号，UNIQUE(vault_id, vault_asset_no) 数据库约束；同一序号允许存在于不同 Vault。
+- 分配在创建事务内对 Vault 计数器原子 `UPDATE ... RETURNING`，普通上传与 ZIP 批量导入（逐项分配，一批内连续无重复）共用同一路径；删除不复用旧编号（计数器只前进）。
+- 启动迁移：为存量数据按 id 顺序分仓回填 1..N（窗口函数），`next_asset_no` 初始化为各仓 max+1。
+- API 返回 `vault_id` 与 `vault_asset_no`；`id` 继续作为内部稳定资源标识，内部路由仍用全局 id，`vault_asset_no` 仅用于展示。
+- 前端详情序号（MEME #x / IMAGE #x）显示 `vault_asset_no`，不再泄漏全局主键。
+
+## v2.0.2 Per-Vault Appearance（已完成）
+
+- `vaults.appearance_json` 保存每仓库视觉主题，形态复用前端 `AppearanceSettings`（presetId、强调色/染色、背景压暗/模糊/饱和、面板不透明度/材质模糊/饱和、染色/颗粒/暗角/柔光）；`app/vault_themes.py` 负责预设、字段校验与解析。
+- 主题优先级：Vault 自定义 > Profile 默认预设 > 全局默认。Profile 默认：meme→midnight、anime→dreamy、photo→clean、game_score→midnight、generic→default；创建仓库时自动生效（appearance_json 为 NULL 时动态解析）。
+- `PATCH /api/vaults/{id}/appearance`（Admin）整体保存并校验（未知字段/颜色/范围 422）；所有 Vault 响应携带已解析 `appearance` 与解析后的 `background_image_url`，切换仓库时前端同步应用，无主题闪烁。
+- 背景图与业务 Asset 完全分离：`PATCH/GET/DELETE /api/vaults/{id}/background-image` 独立上传、展示与清除（≤25 MiB，JPG/PNG/WebP/GIF），文件保存在 `data/backgrounds/vault-{id}/`；删除仓库时一并清理。删除背景或文件缺失时 `background_image_url` 解析为 None，前端回退默认背景。URL 带 `?v=<文件名>` 版本参数（每次上传文件名不同），替换背景后浏览器立即拉取新图，无需手动刷新。
+- 前端：`AppearanceController.setVaultPersistence` 把外观修改从浏览器本地存储切到 Vault PATCH（访客只读）；`applyVaultTheme` 在 start/switchVault 同步应用；外观对话框显示"正在编辑的仓库"，上传的背景走服务器持久化（不再依赖 IndexedDB，换设备保持）。
+
+## v2.0.1 Vault Profile / Typed Asset（已完成）
+
+- `vaults` 新增 `profile` 列（meme/anime/photo/game_score/generic），启动迁移按 legacy `type` 映射回填（meme→meme、image/game→generic、photo→photo），meme slug 强制 meme；`type` 保留为兼容字段。Profile 创建时可指定、后续可通过 PATCH 切换，能力随之变化。
+- `app/vault_profiles.py` 是 Profile 唯一定义点：`PROFILE_CAPABILITIES`（meme：semanticSearch/directRelations/aiAnalysis/randomAsset/templates/captions；anime：+favorite/artworkMetadata 无 templates/captions；photo：albums/timeline/eventMetadata；game_score：scoreMetadata/timeline/statistics；generic：空）与各 Profile 的 Typed Metadata 字段约束（anime：work/characters/artist/source_url/favorite_level/orientation/rating）。
+- 新表 `asset_metadata`：`meme_id` 主键级联删除 + `profile` + JSON `data`，`Meme.asset_metadata` selectin 关系；`MemeResponse.profile_metadata` 随详情返回（meme/generic 为 None）。`PATCH /api/vaults/{id}/memes/{mid}/metadata` 手工编辑（未知字段/越界 422）。
+- 上传/ZIP 导入管线：带 Typed Metadata 的仓库在资产创建后自动预填初始元数据（anime 预填 orientation=portrait/landscape/square）。
+- Vault 作用域列表/分页/随机新增 `orientation`（按宽高比较）与 `favorite`（json_extract favorite_level>=1）过滤；带 Typed Metadata 的仓库关键词搜索把 `asset_metadata.data` LIKE 作为标题/描述的 OR 分支，meme 仓不受影响。
+- 前端 `vault-profile.ts` 提供 per-Profile 词汇表（assetSingular/libraryTitle/空态/相关/相似/建立索引/删除等）与 Capability 读取；`renderCapabilityGating` 按能力直接隐藏区块（随机按钮、语义搜索选项、模板筛选、Meme 制作器/场景召唤/语义索引/宝库巡检/元数据整理入口、批量上传模板、编辑表单模板选择、详情 AI/关联/相似/文案区块），不是禁用。详情面板新增 Anime"作品信息"展示与手工编辑表单；筛选区新增 收藏/横图/竖图/方图 chips。
+- 验收测试：`vault-profile.test.ts` 覆盖 anime 无 Meme 词汇泄漏（library/网格/详情/筛选范围）、generic 不泄漏任何 Profile 专属控件、meme 保持完整体验。
+
+## v2.0.0 Multi-Vault（已完成）
+
+- 新增顶层实体 `Vault`（`vaults` 表）：`name`、`slug`（URL/目录标识，创建后不可修改）、`type`、`description`、`icon`、`storage_path`、`config` 与时间戳。默认 meme Vault（slug=`meme`）承载 v2.0 之前的全部数据。
+- `memes` 与 `meme_images` 新增非空 `vault_id`；hash 唯一性从全局唯一索引改为 `(vault_id, file_hash)` 复合唯一索引，同一图片允许跨 Vault 存在，去重只在仓库内生效。启动迁移以 `DROP INDEX` + `CREATE UNIQUE INDEX IF NOT EXISTS` 完成索引替换，不重建表、不移动文件；写入型升级前自动在 `data/backups/` 留存最多 3 份 `pre-vault-migration-*.db` 备份。
+- 任务类接口（`POST /api/import-jobs|export-jobs|embedding-jobs|enrichment-jobs` 及 estimate）的 `vault_id` 为必填：缺失直接返回 422，不回退默认 meme Vault；前端在创建任务时总是显式携带当前仓库 id。旧 `/api/memes` 浏览与上传保持默认 meme Vault 兼容。
+- 单图大小上限默认 100MB（`DEFAULT_MAX_FILE_SIZE_MB`）；每个 Vault 可在 `config` 中覆盖 `max_file_size_mb`（1–1024），由 `VaultStorageService.storage_for` 解析并注入该仓库的 `ImageStorage`，普通上传与 ZIP 导入的逐图校验共用同一上限；`VaultResponse`/创建/编辑 API 暴露 `max_file_size_mb`，前端仓库对话框可直接调整。大文件放开后 `ImageStorage` 增加 Pillow 解压炸弹（像素上限）防护，超限按 415 拒绝。
+- `VaultStorageService`（`app/storage/vault_storage.py`）是 Vault 与磁盘目录的唯一映射点：legacy meme Vault 继续使用 `data/images`/`data/thumbnails`，新 Vault 使用 `data/vaults/{slug}/images|thumbnails`；slug 经目录名与路径边界双重校验。业务代码不得自行拼接 uploads/thumbnails 路径。
+- 所有 Repository/Service 资产查询显式携带 `vault_id`：`MemeRepository.list/list_page/count_filtered/list_all_for_export/get_random/get_by_file_hash` 均要求 vault_id；`MemeService.create_meme/create_meme_no_commit/list_memes/list_meme_page/get_random_meme` 必填 `vault_id`，`get_meme/delete_meme` 提供可选归属校验。导入/导出/Embedding/Enrichment Job 的候选与目标均按 vault 过滤。
+- 语义索引按 Vault 分片：`SemanticIndex` 以 per-vault 条目缓存矩阵（LRU 上限 8），`MemeEmbeddingRepository.compatible_ready/generation/count_status` 全部按 vault 过滤；`semantic_index_state` 由单行改为每 Vault 一行 generation，`DerivedDataInvalidation` 只递增受影响 Meme 所属仓库的代次；`SemanticSearchService.search` 携带 vault_id 并把 vault 计入查询缓存 key。`similar()` 用 meme 自身 vault。
+- 新增 `app/api/vaults.py`：Vault CRUD（非空删除需 `?force=true`，默认 meme Vault 禁止删除并返回 409）、Vault 作用域资产端点（`/api/vaults/{id}/memes` 列表/分页/上传/随机/详情/编辑/删除、`/tags`、`/semantic-search`）与动态媒体路由 `/media/vaults/{slug}/images|thumbnails/{filename}`（路径经 VaultStorageService 边界校验）。跨 Vault 访问资产一律 404。
+- 媒体 URL 按 Vault 生成：mapper 读取 `meme.vault`（selectin 批量加载），legacy 仓库继续输出 `/media/images|thumbnails/...`，独立仓库输出 `/media/vaults/{slug}/...`。
+- 兼容层：旧 `/api/memes/*` 与 External API 行为不变，内部显式解析默认 meme Vault；详情路由依赖按目标 Meme 所属 Vault 动态解析存储目录，跨仓文件操作不会落错目录；`MemeMergeService` 拒绝跨 Vault 合并；Mobile Ingest 继续固定投喂 meme Vault。
+- 前端：顶栏新增 Vault Selector（切换/新建仓库，Admin 可管理删除）；`VaultManagerController`（`vault-manager.ts`）维护仓库列表、创建对话框与强制删除确认；`/v/{slug}` URL 状态（pushState/popstate/刷新恢复，后端 `/v/{vault_slug}` 回退到 SPA 入口）；切换仓库时重置搜索/筛选/分页/选中/沉浸状态并重新加载；非 meme 仓库的列表、语义搜索、标签与上传走 vault 作用域端点，meme 仓库继续走原接口保持行为不变。
+- 权限：`/api/vaults` 遵循既有默认规则（GET→登录可读，写操作→Admin），未改 auth 策略表。
 
 - v1.0 Phase 2 整体视觉重构已完成：App Shell 建立 Primary / Secondary / Management 信息层级；统一 Design Tokens、Typography、Radius、Surface、Button、Input、Border、Shadow 和 Motion；Library / Card、Inspector / Dialog、Immersive、系统状态、响应式与可访问性使用同一套安静、内容优先的视觉语言。
 - v1.0 Phase 3 Visitor/Admin Access Gate 已完成：Access Key 只换取不透明 Session；业务 API、私有媒体和 Swagger 统一鉴权；Visitor 保留完整浏览与单图下载，mutation、批量导出和管理能力仅限 Admin。

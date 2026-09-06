@@ -11,6 +11,7 @@ from app.models.meme_image import MemeImage
 from app.models.tag import MemeTag, Tag
 from app.models.enrichment import MemeEnrichmentSuggestion
 from scripts.tag_maintenance.__main__ import build_parser
+from tests.vault_helpers import ensure_default_vault
 from scripts.tag_maintenance.exporter import export_batch
 from scripts.tag_maintenance.importer import import_candidates, load_candidates
 from scripts.tag_maintenance.ui import _image_path, render_page
@@ -31,6 +32,7 @@ def seed_meme(
 ) -> Meme:
     first_name = f"meme-{number}-0.png"
     meme = Meme(
+        vault_id=ensure_default_vault(session).id,
         title=f"Meme {number}",
         description=f"Description {number}",
         original_filename=first_name,
@@ -47,6 +49,7 @@ def seed_meme(
         name = f"meme-{number}-{position}.png"
         meme.images.append(
             MemeImage(
+                vault_id=ensure_default_vault(session).id,
                 original_filename=name,
                 stored_filename=name,
                 file_path=name,

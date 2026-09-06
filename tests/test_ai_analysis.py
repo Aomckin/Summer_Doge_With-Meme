@@ -22,6 +22,7 @@ from app.services.meme_service import (
     MemeService,
 )
 from app.storage.image_storage import ImageStorage
+from tests.vault_helpers import ensure_default_vault
 
 
 class FakeAIClient:
@@ -76,7 +77,7 @@ def make_image_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def create_service(tmp_path: Path) -> tuple[MemeService, Session]:
+def create_service(tmp_path: Path) -> tuple[MemeService, Session, object]:
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -84,8 +85,9 @@ def create_service(tmp_path: Path) -> tuple[MemeService, Session]:
     )
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    vault = ensure_default_vault(session)
     storage = ImageStorage(tmp_path / "images", tmp_path / "thumbnails")
-    return MemeService(session, storage), session
+    return MemeService(session, storage), session, vault
 
 
 def ai_result() -> AIImageResult:
@@ -107,14 +109,14 @@ def ai_result() -> AIImageResult:
 def test_analysis_records_model_and_suggestions_without_applying_them(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
             title="AI 测试",
             description="用户描述",
-            tags=["funny"],
+            tags=["funny"], vault_id=vault.id
         )
         client = FakeAIClient(ai_result())
 
@@ -145,13 +147,13 @@ def test_analysis_records_model_and_suggestions_without_applying_them(
 def test_analysis_sends_the_complete_ordered_image_group_once(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "first.png",
             make_image_bytes(),
             title="多图 AI",
-            description="用户描述",
+            description="用户描述", vault_id=vault.id
         )
         second = BytesIO()
         Image.new("RGB", (320, 240), color="blue").save(second, format="PNG")
@@ -188,12 +190,12 @@ def test_analysis_sends_the_complete_ordered_image_group_once(
 def test_analysis_requires_at_least_two_unique_suggestions(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="AI 测试",
+            title="AI 测试", vault_id=vault.id
         )
         result = AIImageResult(
             model_name="gpt-5.6-luna-snapshot",
@@ -214,14 +216,14 @@ def test_analysis_requires_at_least_two_unique_suggestions(
 def test_confirmation_adds_ai_tags_and_optionally_applies_description(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
             title="AI 测试",
             description=None,
-            tags=["funny"],
+            tags=["funny"], vault_id=vault.id
         )
         analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
 
@@ -254,12 +256,12 @@ def test_confirmation_adds_ai_tags_and_optionally_applies_description(
 def test_confirmation_applies_suggested_title_only_when_requested(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="原始标题",
+            title="原始标题", vault_id=vault.id
         )
         analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
 
@@ -279,12 +281,12 @@ def test_confirmation_applies_suggested_title_only_when_requested(
 def test_confirmation_rejects_applying_title_from_legacy_analysis(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="原始标题",
+            title="原始标题", vault_id=vault.id
         )
         analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
         analysis.suggested_title = None
@@ -303,12 +305,12 @@ def test_confirmation_rejects_applying_title_from_legacy_analysis(
 
 
 def test_confirmation_rejects_tag_not_present_in_analysis(tmp_path: Path) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="AI 测试",
+            title="AI 测试", vault_id=vault.id
         )
         analysis = service.analyze_meme(meme.id, FakeAIClient(ai_result()))
 
@@ -326,7 +328,7 @@ def test_confirmation_rejects_tag_not_present_in_analysis(tmp_path: Path) -> Non
 def test_ai_template_match_is_validated_and_applied_only_on_confirmation(
     tmp_path: Path,
 ) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         doge = Template(name="Doge", description="经典柴犬")
         wojak = Template(name="Wojak")
@@ -335,7 +337,7 @@ def test_ai_template_match_is_validated_and_applied_only_on_confirmation(
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="AI 模板测试",
+            title="AI 模板测试", vault_id=vault.id
         )
         result = AIImageResult(
             model_name="fake",
@@ -372,12 +374,12 @@ def test_ai_template_match_is_validated_and_applied_only_on_confirmation(
 
 
 def test_ai_template_match_rejects_id_outside_candidates(tmp_path: Path) -> None:
-    service, session = create_service(tmp_path)
+    service, session, vault = create_service(tmp_path)
     try:
         meme = service.create_meme(
             "example.png",
             make_image_bytes(),
-            title="AI 模板测试",
+            title="AI 模板测试", vault_id=vault.id
         )
         result = AIImageResult(
             model_name="fake",

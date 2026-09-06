@@ -9,11 +9,46 @@ export interface TagResponse {
 
 export type TagSort = "name_asc" | "name_desc" | "usage_asc" | "usage_desc";
 
+export interface VaultSummary {
+  id: number;
+  name: string;
+  slug: string;
+  type: string;
+  /** 领域档案：决定 UI 词汇、能力开关与扩展元数据结构。 */
+  profile: string;
+  capabilities: Record<string, boolean>;
+  /** 已解析的仓库视觉主题（自定义优先，其次 Profile 默认预设）。 */
+  appearance: Record<string, unknown>;
+  background_image_url: string | null;
+  description: string | null;
+  icon: string | null;
+  meme_count: number;
+  max_file_size_mb: number;
+}
+
+export interface VaultCreateInput {
+  name: string;
+  slug: string;
+  profile?: string;
+  description?: string | null;
+  icon?: string | null;
+  max_file_size_mb?: number;
+}
+
+export interface VaultUpdateInput {
+  name?: string;
+  description?: string | null;
+  icon?: string | null;
+  max_file_size_mb?: number;
+  profile?: string;
+}
+
 export interface ListTagsOptions {
   includeEmpty?: boolean;
   q?: string;
   sort?: TagSort;
   signal?: AbortSignal;
+  vaultId?: number;
 }
 
 export interface TagCleanupResponse {
@@ -46,6 +81,9 @@ export interface TemplateUpdatePayload {
 
 export interface MemeResponse {
   id: number;
+  /** 所属仓库；vault_asset_no 是仓库内展示序号，id 是内部稳定资源标识。 */
+  vault_id: number;
+  vault_asset_no: number | null;
   title: string;
   description: string | null;
   source: string | null;
@@ -64,6 +102,7 @@ export interface MemeResponse {
   template: TemplateResponse | null;
   images: MemeImageResponse[];
   image_count: number;
+  profile_metadata?: { profile: string; data: Record<string, unknown> } | null;
 }
 
 export interface MemeImageResponse {
@@ -96,6 +135,8 @@ export interface UploadMemeInput {
   source?: string;
   tags?: string[];
   template_id?: number | null;
+  // 提供时上传到指定 Vault；省略时走默认 meme Vault 兼容接口。
+  vaultId?: number;
 }
 
 export interface AITagSuggestionResponse {
@@ -130,6 +171,8 @@ export interface CreateImportJobInput {
   template_id: number | null;
   source: string;
   chunk_size: number;
+  // 提供时导入到指定 Vault；省略时走默认 meme Vault。
+  vaultId?: number;
 }
 
 export type ImportJobStatus =
@@ -190,6 +233,8 @@ export interface CreateExportJobInput {
   organization: ExportOrganization;
   include_manifest: true;
   archive_name: string;
+  // 提供时导出范围限定在指定 Vault；省略时走默认 meme Vault。
+  vaultId?: number;
 }
 
 export interface ExportJobResponse {
@@ -380,6 +425,7 @@ export interface ListMemesOptions {
   templateId?: number | null;
   gifOnly?: boolean;
   signal?: AbortSignal;
+  vaultId?: number;
 }
 
 export type EnrichmentField = "title" | "description" | "add_tags" | "remove_tags" | "template";
@@ -403,6 +449,8 @@ export interface EnrichmentJobCreateInput {
   start_meme_id: number | null; end_meme_id: number | null;
   analyze_title: boolean; analyze_description: boolean; analyze_tags: boolean; analyze_template: boolean;
   max_workers: 1 | 2 | 4 | 8;
+  // 运行时由 app 层注入当前仓库 id；后端对缺失 vault_id 直接 422。
+  vault_id?: number;
 }
 
 export interface EnrichmentJobResponse {
@@ -438,6 +486,8 @@ export interface MemePageResponse {
   shuffle_seed: number | null;
 }
 
+export type OrientationFilter = "portrait" | "landscape" | "square";
+
 export interface ListMemePageOptions {
   page: number;
   pageSize: MemePageSize;
@@ -448,6 +498,9 @@ export interface ListMemePageOptions {
   sort: MemeListSort;
   shuffleSeed?: number | null;
   signal?: AbortSignal;
+  vaultId?: number;
+  orientation?: OrientationFilter | null;
+  favorite?: boolean;
 }
 
 export type SearchMode = "keyword" | "semantic";
@@ -475,6 +528,7 @@ export interface SemanticSearchInput {
   page: number;
   page_size: MemePageSize;
   signal?: AbortSignal;
+  vaultId?: number;
 }
 
 export interface ChatRecommendationInput {
@@ -585,6 +639,10 @@ export interface MemeEmbeddingStatus {
 }
 
 export interface AppState {
+  vaults: VaultSummary[];
+  currentVault: VaultSummary | null;
+  orientationFilter: OrientationFilter | null;
+  favoriteOnly: boolean;
   searchMode: SearchMode;
   semanticSubmittedQuery: string;
   semanticScores: Record<number, number>;

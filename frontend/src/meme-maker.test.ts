@@ -25,6 +25,8 @@ function meme(id = 8): MemeResponse {
     mime_type: "image/png", file_size: 10, width: 800, height: 600,
     file_hash: "hash", created_at: "2026-01-01", updated_at: "2026-01-01",
     tags: [], template: staticTemplate, images: [], image_count: 1,
+    vault_id: 1,
+    vault_asset_no: id,
   };
 }
 

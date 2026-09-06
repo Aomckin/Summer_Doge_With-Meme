@@ -24,6 +24,9 @@ import type {
   ListMemePageOptions,
   ListMemesOptions,
   ListTagsOptions,
+  VaultCreateInput,
+  VaultSummary,
+  VaultUpdateInput,
   MemeResponse,
   MemePageResponse,
   MemeUpdatePayload,
@@ -135,7 +138,10 @@ export function enrichMeme(id: number): Promise<EnrichmentSuggestionResponse> {
 }
 
 export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSearchResponse> {
-  return requestJson<SemanticSearchResponse>("/api/semantic-search", {
+  const path = input.vaultId != null
+    ? `/api/vaults/${input.vaultId}/semantic-search`
+    : "/api/semantic-search";
+  return requestJson<SemanticSearchResponse>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -147,6 +153,65 @@ export function semanticSearch(input: SemanticSearchInput): Promise<SemanticSear
     }),
     signal: input.signal,
   });
+}
+
+export function listVaults(): Promise<VaultSummary[]> {
+  return requestJson<VaultSummary[]>("/api/vaults");
+}
+
+export function createVault(input: VaultCreateInput): Promise<VaultSummary> {
+  return requestJson<VaultSummary>("/api/vaults", jsonRequest("POST", input));
+}
+
+export function updateVaultBackgroundImage(id: number, file: File): Promise<VaultSummary> {
+  const body = new FormData();
+  body.append("file", file);
+  return requestJson<VaultSummary>(`/api/vaults/${id}/background-image`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export function deleteVaultBackgroundImage(id: number): Promise<VaultSummary> {
+  return requestJson<VaultSummary>(`/api/vaults/${id}/background-image`, {
+    method: "DELETE",
+  });
+}
+
+export function updateVaultAppearance(
+  id: number,
+  appearance: Record<string, unknown>,
+): Promise<VaultSummary> {
+  return requestJson<VaultSummary>(
+    `/api/vaults/${id}/appearance`,
+    jsonRequest("PATCH", { appearance }),
+  );
+}
+
+export function updateVault(
+  id: number,
+  input: VaultUpdateInput,
+): Promise<VaultSummary> {
+  return requestJson<VaultSummary>(
+    `/api/vaults/${id}`,
+    jsonRequest("PATCH", input),
+  );
+}
+
+export function deleteVault(id: number, force = false): Promise<void> {
+  const suffix = force ? "?force=true" : "";
+  return requestJson<void>(`/api/vaults/${id}${suffix}`, { method: "DELETE" });
+}
+
+export function updateVaultAssetMetadata(
+  vaultId: number,
+  memeId: number,
+  data: Record<string, unknown>,
+): Promise<MemeResponse> {
+  return requestJson<MemeResponse>(
+    `/api/vaults/${vaultId}/memes/${memeId}/metadata`,
+    jsonRequest("PATCH", { data }),
+  );
 }
 
 export function recommendChatMemes(
@@ -212,10 +277,14 @@ export function getSemanticIndexStatus(): Promise<SemanticIndexStatus> {
   return requestJson<SemanticIndexStatus>("/api/semantic-index/status");
 }
 
-export function createEmbeddingJob(scope: EmbeddingJobScope, maxWorkers: number): Promise<EmbeddingJobResponse> {
+export function createEmbeddingJob(
+  scope: EmbeddingJobScope,
+  maxWorkers: number,
+  vaultId?: number,
+): Promise<EmbeddingJobResponse> {
   return requestJson<EmbeddingJobResponse>("/api/embedding-jobs", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scope, max_workers: maxWorkers }),
+    body: JSON.stringify({ scope, max_workers: maxWorkers, vault_id: vaultId }),
   });
 }
 
@@ -257,6 +326,9 @@ export async function createImportJob(
   form.append("template_id", input.template_id?.toString() ?? "");
   form.append("source", input.source);
   form.append("chunk_size", input.chunk_size.toString());
+  if (input.vaultId != null) {
+    form.append("vault_id", String(input.vaultId));
+  }
   return requestJson<ImportJobResponse>("/api/import-jobs", {
     method: "POST",
     body: form,
@@ -301,8 +373,11 @@ export async function deleteImportJob(id: number): Promise<void> {
 }
 
 export function createExportJob(input: CreateExportJobInput): Promise<ExportJobResponse> {
+  const { vaultId, ...payload } = input;
   return requestJson<ExportJobResponse>("/api/export-jobs", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(vaultId != null ? { ...payload, vault_id: vaultId } : payload),
   });
 }
 
@@ -417,7 +492,10 @@ export function listMemes(options: ListMemesOptions): Promise<MemeResponse[]> {
   if (options.templateId) params.set("template_id", String(options.templateId));
   if (options.gifOnly) params.set("gif_only", "true");
 
-  return requestJson<MemeResponse[]>(`/api/memes?${params}`, {
+  const base = options.vaultId != null
+    ? `/api/vaults/${options.vaultId}/memes`
+    : "/api/memes";
+  return requestJson<MemeResponse[]>(`${base}?${params}`, {
     signal: options.signal,
   });
 }
@@ -429,7 +507,10 @@ export function listTags(options: ListTagsOptions = {}): Promise<TagResponse[]> 
   if (query) params.set("q", query);
   if (options.sort) params.set("sort", options.sort);
   const suffix = params.size ? `?${params}` : "";
-  return requestJson<TagResponse[]>(`/api/tags${suffix}`, {
+  const base = options.vaultId != null
+    ? `/api/vaults/${options.vaultId}/tags`
+    : "/api/tags";
+  return requestJson<TagResponse[]>(`${base}${suffix}`, {
     signal: options.signal,
   });
 }
@@ -465,10 +546,15 @@ export function listMemePage(
   for (const tag of options.tags ?? []) params.append("tags", tag);
   if (options.templateId) params.set("template_id", String(options.templateId));
   if (options.gifOnly) params.set("gif_only", "true");
+  if (options.orientation) params.set("orientation", options.orientation);
+  if (options.favorite) params.set("favorite", "true");
   if (options.sort === "shuffle" && options.shuffleSeed !== null && options.shuffleSeed !== undefined) {
     params.set("shuffle_seed", String(options.shuffleSeed));
   }
-  return requestJson<MemePageResponse>(`/api/memes/page?${params}`, {
+  const base = options.vaultId != null
+    ? `/api/vaults/${options.vaultId}/memes/page`
+    : "/api/memes/page";
+  return requestJson<MemePageResponse>(`${base}?${params}`, {
     signal: options.signal,
   });
 }
@@ -556,6 +642,7 @@ export function getRandomMeme(
   templateId: number | null = null,
   gifOnly = false,
   signal?: AbortSignal,
+  vaultId?: number,
 ): Promise<MemeResponse> {
   const params = new URLSearchParams();
   for (const tag of normalizeTags(tags)) {
@@ -564,7 +651,10 @@ export function getRandomMeme(
   if (templateId) params.set("template_id", String(templateId));
   if (gifOnly) params.set("gif_only", "true");
   const query = params.size ? `?${params}` : "";
-  return requestJson<MemeResponse>(`/api/memes/library-random${query}`, { signal });
+  const base = vaultId != null
+    ? `/api/vaults/${vaultId}/memes/random`
+    : "/api/memes/library-random";
+  return requestJson<MemeResponse>(`${base}${query}`, { signal });
 }
 
 export function uploadMeme(input: UploadMemeInput): Promise<MemeResponse> {
@@ -588,7 +678,10 @@ export function uploadMeme(input: UploadMemeInput): Promise<MemeResponse> {
     body.append("template_id", String(input.template_id));
   }
 
-  return requestJson<MemeResponse>("/api/memes", {
+  const path = input.vaultId != null
+    ? `/api/vaults/${input.vaultId}/memes`
+    : "/api/memes";
+  return requestJson<MemeResponse>(path, {
     method: "POST",
     body,
   });

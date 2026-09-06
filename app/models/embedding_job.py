@@ -12,6 +12,8 @@ class EmbeddingJob(Base):
     __tablename__ = "embedding_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 任务候选 Meme 所属仓库；旧任务在迁移中回填为默认 meme Vault。
+    vault_id: Mapped[int] = mapped_column(Integer, index=True)
     status: Mapped[str] = mapped_column(String(30), index=True, default="pending")
     scope: Mapped[str] = mapped_column(String(30))
     model_record_id: Mapped[int] = mapped_column(ForeignKey("ai_models.id", ondelete="RESTRICT"), index=True)

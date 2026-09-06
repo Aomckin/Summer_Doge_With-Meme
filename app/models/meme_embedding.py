@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -51,6 +51,11 @@ class MemeEmbedding(Base):
 
 class SemanticIndexState(Base):
     __tablename__ = "semantic_index_state"
+    # 每个 Vault 一行派生数据代次；旧库的单行在迁移中回填到默认 Vault。
+    __table_args__ = (
+        UniqueConstraint("vault_id", name="uq_semantic_index_state_vault"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    vault_id: Mapped[int] = mapped_column(Integer, index=True)
     generation: Mapped[int] = mapped_column(Integer, default=0)

@@ -4,6 +4,14 @@
 >
 > A local-first personal Meme library for semantic search, visual organization, and immersive browsing.
 
+## Video Demo / 视频展示
+
+<video src="docs/images/展示Demo.mp4" controls width="100%">
+  Your browser does not support embedded video.
+</video>
+
+[打开或下载完整 Demo 视频](docs/images/展示Demo.mp4)
+
 ![Meme Vault Library（Meme Vault 资料库）](docs/images/library.png)
 
 **Collect, search, organize and wander through your personal Meme Vault.**

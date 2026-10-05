@@ -14,7 +14,7 @@
 
 - `vaults.appearance_json` 保存每仓库视觉主题，形态复用前端 `AppearanceSettings`（presetId、强调色/染色、背景压暗/模糊/饱和、面板不透明度/材质模糊/饱和、染色/颗粒/暗角/柔光）；`app/vault_themes.py` 负责预设、字段校验与解析。
 - 主题优先级：Vault 自定义 > Profile 默认预设 > 全局默认。Profile 默认：meme→midnight、anime→dreamy、photo→clean、game_score→midnight、generic→default；创建仓库时自动生效（appearance_json 为 NULL 时动态解析）。
-- `PATCH /api/vaults/{id}/appearance`（Admin）整体保存并校验（未知字段/颜色/范围 422）；所有 Vault 响应携带已解析 `appearance` 与解析后的 `background_image_url`，切换仓库时前端同步应用，无主题闪烁。
+- `PATCH /api/vaults/{id}/appearance`（Admin）保存并校验视觉参数（未知字段/颜色/范围 422），保留独立上传的背景文件引用；响应中的 `appearance` 不暴露文件名，只返回 `background_image_url`。切换仓库时前端同步应用主题，无主题闪烁。
 - 背景图与业务 Asset 完全分离：`PATCH/GET/DELETE /api/vaults/{id}/background-image` 独立上传、展示与清除（≤25 MiB，JPG/PNG/WebP/GIF），文件保存在 `data/backgrounds/vault-{id}/`；删除仓库时一并清理。删除背景或文件缺失时 `background_image_url` 解析为 None，前端回退默认背景。URL 带 `?v=<文件名>` 版本参数（每次上传文件名不同），替换背景后浏览器立即拉取新图，无需手动刷新。
 - 前端：`AppearanceController.setVaultPersistence` 把外观修改从浏览器本地存储切到 Vault PATCH（访客只读）；`applyVaultTheme` 在 start/switchVault 同步应用；外观对话框显示"正在编辑的仓库"，上传的背景走服务器持久化（不再依赖 IndexedDB，换设备保持）。
 

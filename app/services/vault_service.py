@@ -217,14 +217,26 @@ class VaultService:
 
     def resolved_appearance(self, vault: Vault) -> dict[str, object]:
         """Vault 自定义主题优先，其次 Profile 默认预设。"""
-        return resolve_appearance(vault.appearance_json, vault.profile or "generic")
+        appearance = resolve_appearance(vault.appearance_json, vault.profile or "generic")
+        # 背景文件名是服务器管理的引用；客户端只需要独立的背景 URL。
+        appearance.pop("backgroundUploadFile", None)
+        return appearance
 
     def update_appearance(self, vault_id: int, data: object) -> Vault:
-        """整体替换 Vault 自定义主题；字段与取值由 vault_themes 校验。"""
+        """替换视觉参数，同时保留独立上传的背景文件引用。"""
         import json
 
         vault = self.get_vault(vault_id)
         cleaned = normalize_appearance_payload(data)
+        try:
+            current = json.loads(vault.appearance_json or "{}")
+        except ValueError:
+            current = {}
+        filename = current.get("backgroundUploadFile") if isinstance(current, dict) else None
+        # 只有背景上传/删除接口可以改变该引用，旧客户端回传的值不生效。
+        cleaned.pop("backgroundUploadFile", None)
+        if isinstance(filename, str) and filename:
+            cleaned["backgroundUploadFile"] = filename
         try:
             vault.appearance_json = json.dumps(cleaned, ensure_ascii=False)
             self.session.flush()

@@ -175,6 +175,41 @@ def test_background_upload_is_persistent_and_replaces_previous(api_context):
     assert reread is not None and reread == second["background_image_url"]
 
 
+def test_background_survives_appearance_changes(api_context):
+    app, _session, _default, _tmp = api_context
+    anime_id = make_anime_vault(app)
+    uploaded = request(
+        app, "PATCH", f"/api/vaults/{anime_id}/background-image",
+        files={"file": ("bg.png", png_bytes(), "image/png")},
+    ).json()
+    background_url = uploaded["background_image_url"]
+    assert background_url
+    assert "backgroundUploadFile" not in uploaded["appearance"]
+
+    changed = request(
+        app, "PATCH", f"/api/vaults/{anime_id}/appearance",
+        json={"appearance": {"presetId": "glass", "backgroundBlur": 12}},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["background_image_url"] == background_url
+    assert "backgroundUploadFile" not in changed.json()["appearance"]
+    reread = request(app, "GET", f"/api/vaults/{anime_id}").json()
+    assert reread["background_image_url"] == background_url
+    assert request(app, "GET", background_url).status_code == 200
+
+    attempted = request(
+        app, "PATCH", f"/api/vaults/{anime_id}/appearance",
+        json={"appearance": {"accentColor": "#8fd6ff", "backgroundUploadFile": None}},
+    )
+    assert attempted.status_code == 200
+    assert attempted.json()["background_image_url"] == background_url
+
+    deleted = request(app, "DELETE", f"/api/vaults/{anime_id}/background-image")
+    assert deleted.status_code == 200
+    assert deleted.json()["background_image_url"] is None
+    assert request(app, "GET", background_url).status_code == 404
+
+
 def test_vault_deletion_cleans_background_files(api_context):
     app, session, _default, tmp_path = api_context
     anime_id = make_anime_vault(app)

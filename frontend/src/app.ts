@@ -86,8 +86,8 @@ import type {
   CollectionSummary, CollectionDetail, CollectionPayload, MemeCollectionsResponse,
   VaultCreateInput, VaultUpdateInput, VaultSummary,
 } from "./types";
-import { BatchUploadController } from "./batch-upload";
-import { BatchDownloadController } from "./batch-download";
+import type { BatchUploadController } from "./batch-upload";
+import type { BatchDownloadController } from "./batch-download";
 import { TagEditor } from "./tag-editor";
 import {
   TagManagerController,
@@ -97,9 +97,9 @@ import {
   CaptionLabController,
   type CaptionLabApi,
 } from "./caption-lab";
-import {
+import type {
   AISettingsController,
-  type AISettingsApi,
+  AISettingsApi,
 } from "./settings";
 import {
   type AppElements,
@@ -126,9 +126,9 @@ import {
 } from "./ui";
 import { clampPage } from "./pagination";
 import { SemanticIndexManager } from "./semantic-index-manager";
-import { EnrichmentWorkbenchController } from "./enrichment-workbench";
+import type { EnrichmentWorkbenchController } from "./enrichment-workbench";
 import { ChatRecommendationController } from "./chat-recommendation";
-import { VaultInspectorController } from "./vault-inspector";
+import type { VaultInspectorController } from "./vault-inspector";
 import { CollectionManagerController } from "./collection-manager";
 import { AppearanceController } from "./appearance/appearance-controller";
 import { DEFAULT_APPEARANCE_SETTINGS } from "./appearance/appearance-types";
@@ -143,8 +143,9 @@ import {
   InfiniteFeedController,
   type InfiniteFeedPage,
 } from "./immersive/immersive-feed";
-import { MemeMakerController, type MemeVaultImageInput } from "./meme-maker";
+import type { MemeMakerController, MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
+import { showToast } from "./toast";
 import { installSearchableTemplateSelectors } from "./searchable-template-select";
 import { AppShellController } from "./app-shell";
 import {
@@ -152,6 +153,8 @@ import {
   isCardMotionPresetName,
   saveCardMotionPreset,
   storedCardMotionPreset,
+  unbindMemeCardTilts,
+  stopDrunkPhysics,
 } from "./card-tilt";
 import { capabilitiesFor, type Capabilities } from "./auth";
 import { VaultManagerController } from "./vault-manager";
@@ -432,7 +435,8 @@ export class MemeVaultApp {
   private viewerMeme: MemeResponse | null = null;
   private draggedImageId: number | null = null;
   private relationRemovalToken: symbol | null = null;
-  private readonly settings: AISettingsController;
+  private settingsInstance: AISettingsController | null = null;
+  private settingsLoading: Promise<AISettingsController> | null = null;
   private readonly appearance: AppearanceController;
   private readonly immersive: ImmersiveController;
   private readonly immersiveRandom: ImmersiveRandomNavigator;
@@ -443,18 +447,26 @@ export class MemeVaultApp {
   private immersiveFeedMemes: MemeResponse[] = [];
   private immersiveFeedScores: Record<number, number> = {};
   private normalPageNeedsReload = false;
-  private readonly batchUpload: BatchUploadController;
-  private readonly batchDownload: BatchDownloadController;
+  private batchUploadInstance: BatchUploadController | null = null;
+  private batchUploadLoading: Promise<BatchUploadController> | null = null;
+  private batchDownloadInstance: BatchDownloadController | null = null;
+  private batchDownloadLoading: Promise<BatchDownloadController> | null = null;
   private readonly captionLab: CaptionLabController;
   private readonly tagManager: TagManagerController;
   private readonly semanticIndexManager: SemanticIndexManager;
-  private readonly enrichmentWorkbench: EnrichmentWorkbenchController;
+  private enrichmentWorkbenchInstance: EnrichmentWorkbenchController | null = null;
+  private enrichmentWorkbenchLoading: Promise<EnrichmentWorkbenchController> | null = null;
+  private vaultInspectorInstance: VaultInspectorController | null = null;
+  private vaultInspectorLoading: Promise<VaultInspectorController> | null = null;
   private readonly collectionManager: CollectionManagerController;
-  private readonly memeMaker: MemeMakerController;
+  private memeMakerInstance: MemeMakerController | null = null;
+  private memeMakerLoading: Promise<MemeMakerController> | null = null;
   private editTagEditor: TagEditor | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
   private readonly vaultManager: VaultManagerController;
+  private readonly appShell: AppShellController;
+  private readonly abortController = new AbortController();
 
   constructor(
     root: HTMLElement,
@@ -489,8 +501,8 @@ export class MemeVaultApp {
     );
     window.addEventListener("popstate", () => {
       void this.applyVaultFromLocation();
-    });
-    new AppShellController({
+    }, { signal: this.abortController.signal });
+    this.appShell = new AppShellController({
       root: this.elements.appRoot,
       searchInput: this.elements.searchInput,
       managementMenu: this.elements.managementMenu,
@@ -571,7 +583,7 @@ export class MemeVaultApp {
           this.immersiveFeedScores,
         );
       },
-      onStateChange: state => renderInfiniteFeedState(this.elements, state),
+      onStateChange: state => renderInfiniteFeedState(this.elements, state, this.state.currentVault),
       errorMessage: readableError,
     });
     new FreeGalleryLayoutTuner(
@@ -660,45 +672,14 @@ export class MemeVaultApp {
         },
       },
     );
-    new VaultInspectorController(
-      this.elements.openVaultInspectorButton,
-      {
-        inspect: input => (this.api.inspectMemeSimilarity ?? inspectMemeSimilarity)(input),
-        ignore: (left, right) => (this.api.ignoreMemeSimilarity ?? ignoreMemeSimilarity)(left, right),
-        relate: (id, relatedIds) => this.api.addMemeRelations(id, relatedIds),
-        merge: (targetId, sourceId) => (this.api.mergeMemes ?? mergeMemes)(targetId, sourceId),
-        deleteMeme: id => this.api.deleteMeme(id),
-      },
-      {
-        openViewer: meme => {
-          this.viewerMeme = meme;
-          this.viewerIndex = 0;
-          openImageViewer(this.elements, meme, 0);
-        },
-        onMerge: async (target, sourceId) => {
-          const index = this.state.memes.findIndex(item => item.id === target.id);
-          if (index >= 0) this.state.memes[index] = target;
-          this.state.memes = this.state.memes.filter(item => item.id !== sourceId);
-          if (this.state.selectedMeme?.id === sourceId || this.state.selectedMeme?.id === target.id) {
-            this.selectMeme(target);
-          }
-          await Promise.all([this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh()]);
-          renderLibrary(this.elements, this.state);
-        },
-        onDelete: async memeId => {
-          this.state.memes = this.state.memes.filter(item => item.id !== memeId);
-          this.state.totalMemes = Math.max(0, this.state.totalMemes - 1);
-          if (this.state.selectedMeme?.id === memeId) {
-            this.captionLab.clear();
-            this.state.selectedMeme = null;
-          }
-          await Promise.all([this.refreshTags(), this.semanticIndexManager.refresh()]);
-          if (!this.state.memes.length && this.state.totalMemes > 0) await this.reloadMemes();
-          else renderLibrary(this.elements, this.state);
-          renderDetail(this.elements, this.state, false, null);
-        },
-      },
-    );
+    this.elements.openVaultInspectorButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
+      if (this.vaultInspectorInstance) {
+        this.vaultInspectorInstance.open();
+      } else {
+        void this.getVaultInspector().then(inspector => inspector.open());
+      }
+    });
     this.semanticIndexManager = new SemanticIndexManager(
       this.elements.openSemanticIndexButton,
       {
@@ -717,77 +698,24 @@ export class MemeVaultApp {
         deleteJob: id => (this.api.deleteEmbeddingJob ?? deleteEmbeddingJob)(id),
       },
     );
-    this.enrichmentWorkbench = new EnrichmentWorkbenchController(
-      this.elements.openEnrichmentButton,
-      {
-        createJob: input => createEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
-        estimateJob: input => estimateEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
-        getJob: id => getEnrichmentJob(id),
-        cancelJob: id => cancelEnrichmentJob(id),
-        retryFailed: id => retryFailedEnrichmentJob(id),
-        listSuggestions: (status, source) => listEnrichmentSuggestions(status, source),
-        applySuggestion: (id, fields, allowStale) => applyEnrichmentSuggestion(id, fields, allowStale),
-        rejectSuggestion: id => rejectEnrichmentSuggestion(id),
-        reanalyzeSuggestion: id => reanalyzeEnrichmentSuggestion(id),
-        getMeme: id => getMeme(id),
-        listTemplates: () => this.api.listTemplates(),
-      },
-      async memeId => {
-        if (this.state.selectedMeme?.id === memeId) {
-          this.replaceMeme(await getMeme(memeId));
-        }
-        await Promise.all([
-          this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh(),
-        ]);
-        renderTags(this.elements, this.state);
-        renderLibrary(this.elements, this.state);
-        renderDetail(this.elements, this.state, this.editing, this.editDraft);
-      },
-      () => ({ query: this.state.query, tags: [...this.state.selectedTags] }),
-    );
-    this.settings = new AISettingsController(this.elements, this.api);
-    this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
-    this.memeMaker = new MemeMakerController(
-      this.elements.openMemeMakerButton,
-      {
-        listTemplates: () => this.api.listTemplates(),
-        listMemes: options => this.api.listMemes(options),
-        uploadMeme: input => this.api.uploadMeme(input),
-      },
-      {
-        onSaved: async () => {
-          await Promise.all([
-            this.reloadMemes(), this.refreshTags(), this.refreshTemplates(),
-            this.semanticIndexManager.refresh(),
-          ]);
-        },
-      },
-    );
-    this.batchUpload = new BatchUploadController({
-      uploadMeme: (input) => this.api.uploadMeme(input),
-      // 任务类接口必须显式携带仓库：后端对缺失 vault_id 直接报错，不再回退默认仓。
-      createImportJob: (input) => this.api.createImportJob({ ...input, vaultId: this.requireVaultId() }),
-      getImportJob: (id) => this.api.getImportJob(id),
-      listImportJobItems: (id, offset, limit, status) =>
-        this.api.listImportJobItems(id, offset, limit, status),
-      cancelImportJob: (id) => this.api.cancelImportJob(id),
-      retryFailedImportJob: (id) => this.api.retryFailedImportJob(id),
-      deleteImportJob: (id) => this.api.deleteImportJob(id),
-      onComplete: async () => {
-        await Promise.all([
-          this.reloadMemes(),
-          this.refreshTags(),
-          this.refreshTemplates(),
-          this.semanticIndexManager.refresh(),
-        ]);
-      },
+    this.elements.openEnrichmentButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
+      const params = { query: this.state.query, tags: [...this.state.selectedTags] };
+      if (this.enrichmentWorkbenchInstance) {
+        this.enrichmentWorkbenchInstance.open(params);
+      } else {
+        void this.getEnrichmentWorkbench().then(workbench => {
+          workbench.open(params);
+        });
+      }
     });
-    this.batchDownload = new BatchDownloadController({
-      createExportJob: input => this.api.createExportJob({ ...input, vaultId: this.requireVaultId() }),
-      getExportJob: id => this.api.getExportJob(id),
-      listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
-      cancelExportJob: id => this.api.cancelExportJob(id),
-      deleteExportJob: id => this.api.deleteExportJob(id),
+    this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
+    this.elements.openMemeMakerButton.addEventListener("click", () => {
+      if (this.memeMakerInstance) {
+        this.memeMakerInstance.open();
+      } else {
+        void this.getMemeMaker().then(maker => maker.open());
+      }
     });
     this.tagManager = new TagManagerController(this.api, {
       onMutation: (mutation) => {
@@ -834,7 +762,218 @@ export class MemeVaultApp {
       this.reloadMemes(),
       this.refreshTags(),
       this.refreshTemplates(),
+      this.preloadHeavyControllers(),
     ]);
+  }
+
+  private async preloadHeavyControllers(): Promise<void> {
+    if (!this.capabilities.canWrite && !this.capabilities.canManageSettings && !this.capabilities.canBatchDownload) {
+      return;
+    }
+    const tasks: Promise<unknown>[] = [];
+    if (this.capabilities.canWrite) {
+      tasks.push(this.getBatchUpload(), this.getMemeMaker(), this.getVaultInspector(), this.getEnrichmentWorkbench());
+    }
+    if (this.capabilities.canManageSettings) {
+      tasks.push(this.getSettings());
+    }
+    if (this.capabilities.canBatchDownload) {
+      tasks.push(this.getBatchDownload());
+    }
+    await Promise.all(tasks);
+  }
+
+  private async getSettings(): Promise<AISettingsController> {
+    if (this.settingsInstance) return this.settingsInstance;
+    if (this.settingsLoading) return this.settingsLoading;
+    this.settingsLoading = (async () => {
+      const { AISettingsController } = await import("./settings");
+      this.settingsInstance = new AISettingsController(this.elements, this.api);
+      return this.settingsInstance;
+    })();
+    return this.settingsLoading;
+  }
+
+  private async getBatchUpload(): Promise<BatchUploadController> {
+    if (this.batchUploadInstance) return this.batchUploadInstance;
+    if (this.batchUploadLoading) return this.batchUploadLoading;
+    this.batchUploadLoading = (async () => {
+      const { BatchUploadController } = await import("./batch-upload");
+      this.batchUploadInstance = new BatchUploadController({
+        uploadMeme: (input) => this.api.uploadMeme(input),
+        createImportJob: (input) => this.api.createImportJob({ ...input, vaultId: this.requireVaultId() }),
+        getImportJob: (id) => this.api.getImportJob(id),
+        listImportJobItems: (id, offset, limit, status) =>
+          this.api.listImportJobItems(id, offset, limit, status),
+        cancelImportJob: (id) => this.api.cancelImportJob(id),
+        retryFailedImportJob: (id) => this.api.retryFailedImportJob(id),
+        deleteImportJob: (id) => this.api.deleteImportJob(id),
+        onComplete: async () => {
+          await Promise.all([
+            this.reloadMemes(),
+            this.refreshTags(),
+            this.refreshTemplates(),
+            this.semanticIndexManager.refresh(),
+          ]);
+        },
+      });
+      return this.batchUploadInstance;
+    })();
+    return this.batchUploadLoading;
+  }
+
+  private async getBatchDownload(): Promise<BatchDownloadController> {
+    if (this.batchDownloadInstance) return this.batchDownloadInstance;
+    if (this.batchDownloadLoading) return this.batchDownloadLoading;
+    this.batchDownloadLoading = (async () => {
+      const { BatchDownloadController } = await import("./batch-download");
+      this.batchDownloadInstance = new BatchDownloadController({
+        createExportJob: input => this.api.createExportJob({ ...input, vaultId: this.requireVaultId() }),
+        getExportJob: id => this.api.getExportJob(id),
+        listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
+        cancelExportJob: id => this.api.cancelExportJob(id),
+        deleteExportJob: id => this.api.deleteExportJob(id),
+      });
+      return this.batchDownloadInstance;
+    })();
+    return this.batchDownloadLoading;
+  }
+
+  private async getEnrichmentWorkbench(): Promise<EnrichmentWorkbenchController> {
+    if (this.enrichmentWorkbenchInstance) return this.enrichmentWorkbenchInstance;
+    if (this.enrichmentWorkbenchLoading) return this.enrichmentWorkbenchLoading;
+    this.enrichmentWorkbenchLoading = (async () => {
+      const { EnrichmentWorkbenchController } = await import("./enrichment-workbench");
+      this.enrichmentWorkbenchInstance = new EnrichmentWorkbenchController(
+        this.elements.openEnrichmentButton,
+        {
+          createJob: input => createEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
+          estimateJob: input => estimateEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
+          getJob: id => getEnrichmentJob(id),
+          cancelJob: id => cancelEnrichmentJob(id),
+          retryFailed: id => retryFailedEnrichmentJob(id),
+          listSuggestions: (status, source) => listEnrichmentSuggestions(status, source),
+          applySuggestion: (id, fields, allowStale) => applyEnrichmentSuggestion(id, fields, allowStale),
+          rejectSuggestion: id => rejectEnrichmentSuggestion(id),
+          reanalyzeSuggestion: id => reanalyzeEnrichmentSuggestion(id),
+          getMeme: id => getMeme(id),
+          listTemplates: () => this.api.listTemplates(),
+        },
+        async memeId => {
+          if (this.state.selectedMeme?.id === memeId) {
+            this.replaceMeme(await getMeme(memeId));
+          }
+          await Promise.all([
+            this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh(),
+          ]);
+          renderTags(this.elements, this.state);
+          renderLibrary(this.elements, this.state);
+          renderDetail(this.elements, this.state, this.editing, this.editDraft);
+        },
+        () => ({ query: this.state.query, tags: [...this.state.selectedTags] }),
+      );
+      return this.enrichmentWorkbenchInstance;
+    })();
+    return this.enrichmentWorkbenchLoading;
+  }
+
+  private async getVaultInspector(): Promise<VaultInspectorController> {
+    if (this.vaultInspectorInstance) return this.vaultInspectorInstance;
+    if (this.vaultInspectorLoading) return this.vaultInspectorLoading;
+    this.vaultInspectorLoading = (async () => {
+      const { VaultInspectorController } = await import("./vault-inspector");
+      this.vaultInspectorInstance = new VaultInspectorController(
+        this.elements.openVaultInspectorButton,
+        {
+          inspect: input => (this.api.inspectMemeSimilarity ?? inspectMemeSimilarity)(input),
+          ignore: (left, right) => (this.api.ignoreMemeSimilarity ?? ignoreMemeSimilarity)(left, right),
+          relate: (id, relatedIds) => this.api.addMemeRelations(id, relatedIds),
+          merge: (targetId, sourceId) => (this.api.mergeMemes ?? mergeMemes)(targetId, sourceId),
+          deleteMeme: id => this.api.deleteMeme(id),
+        },
+        {
+          openViewer: meme => {
+            this.viewerMeme = meme;
+            this.viewerIndex = 0;
+            openImageViewer(this.elements, meme, 0);
+          },
+          onMerge: async (target, sourceId) => {
+            const index = this.state.memes.findIndex(item => item.id === target.id);
+            if (index >= 0) this.state.memes[index] = target;
+            this.state.memes = this.state.memes.filter(item => item.id !== sourceId);
+            if (this.state.selectedMeme?.id === sourceId || this.state.selectedMeme?.id === target.id) {
+              this.selectMeme(target);
+            }
+            await Promise.all([this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh()]);
+            renderLibrary(this.elements, this.state);
+          },
+          onDelete: async memeId => {
+            this.state.memes = this.state.memes.filter(item => item.id !== memeId);
+            this.state.totalMemes = Math.max(0, this.state.totalMemes - 1);
+            if (this.state.selectedMeme?.id === memeId) {
+              this.captionLab.clear();
+              this.state.selectedMeme = null;
+            }
+            await Promise.all([this.refreshTags(), this.semanticIndexManager.refresh()]);
+            if (!this.state.memes.length && this.state.totalMemes > 0) await this.reloadMemes();
+            else renderLibrary(this.elements, this.state);
+            renderDetail(this.elements, this.state, false, null);
+          },
+        },
+      );
+      return this.vaultInspectorInstance;
+    })();
+    return this.vaultInspectorLoading;
+  }
+
+  private async getMemeMaker(): Promise<MemeMakerController> {
+    if (this.memeMakerInstance) return this.memeMakerInstance;
+    if (this.memeMakerLoading) return this.memeMakerLoading;
+    this.memeMakerLoading = (async () => {
+      const { MemeMakerController } = await import("./meme-maker");
+      this.memeMakerInstance = new MemeMakerController(
+        this.elements.openMemeMakerButton,
+        {
+          listTemplates: () => this.api.listTemplates(),
+          listMemes: options => this.api.listMemes(options),
+          uploadMeme: input => this.api.uploadMeme(input),
+        },
+        {
+          onSaved: async () => {
+            await Promise.all([
+              this.reloadMemes(), this.refreshTags(), this.refreshTemplates(),
+              this.semanticIndexManager.refresh(),
+            ]);
+          },
+        },
+      );
+      return this.memeMakerInstance;
+    })();
+    return this.memeMakerLoading;
+  }
+
+  destroy(): void {
+    this.abortController.abort();
+    this.listController?.abort();
+    this.similarController?.abort();
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    this.appShell.destroy();
+    this.vaultManager.destroy();
+    this.captionLab.destroy();
+    this.enrichmentWorkbenchInstance?.destroy();
+    this.enrichmentWorkbenchInstance = null;
+    this.vaultInspectorInstance = null;
+    this.settingsInstance = null;
+    this.batchUploadInstance = null;
+    this.batchDownloadInstance = null;
+    this.memeMakerInstance = null;
+    this.immersiveFeed.destroy();
+    this.immersiveOccupancyGrid.destroy();
+    unbindMemeCardTilts(this.elements.memeGrid);
+    stopDrunkPhysics(this.elements.memeGrid);
   }
 
   /** 背景图变更（上传/删除）：更新当前仓库的主题数据并立即应用。 */
@@ -905,6 +1044,7 @@ export class MemeVaultApp {
       );
       // replaceMeme 原地更新 state.memes、selectedMeme 与详情面板。
       this.replaceMeme(updated);
+      showToast("作品信息已保存", "success");
     } catch (error) {
       if (errorElement) {
         errorElement.textContent = readableError(error);
@@ -1272,14 +1412,24 @@ export class MemeVaultApp {
     });
     this.elements.openUploadButton.addEventListener("click", () => {
       if (!this.capabilities.canWrite) return;
-      this.batchUpload.open(
-        this.hasCapability("templates") ? this.state.availableTemplates : [],
-        this.state.availableTags,
-        this.vaultIdParam(),
-      );
+      const tpls = this.hasCapability("templates") ? this.state.availableTemplates : [];
+      const tags = this.state.availableTags;
+      const vId = this.vaultIdParam();
+      if (this.batchUploadInstance) {
+        this.batchUploadInstance.open(tpls, tags, vId);
+      } else {
+        void this.getBatchUpload().then(upload => {
+          upload.open(tpls, tags, vId);
+        });
+      }
     });
     this.elements.openSettingsButton.addEventListener("click", () => {
-      this.settings.open();
+      if (!this.capabilities.canManageSettings) return;
+      if (this.settingsInstance) {
+        this.settingsInstance.open();
+      } else {
+        void this.getSettings().then(settings => settings.open());
+      }
     });
     this.elements.openTemplatesButton.addEventListener("click", () => {
       this.openTemplateManager();
@@ -1305,11 +1455,18 @@ export class MemeVaultApp {
     });
     this.elements.openDownloadButton.addEventListener("click", () => {
       if (!this.capabilities.canBatchDownload) return;
-      this.batchDownload.open({
+      const filter = {
         query: this.state.query,
         tags: this.state.selectedTags,
         templateId: this.state.selectedTemplateId,
-      });
+      };
+      if (this.batchDownloadInstance) {
+        this.batchDownloadInstance.open(filter);
+      } else {
+        void this.getBatchDownload().then(download => {
+          download.open(filter);
+        });
+      }
     });
     this.elements.templateForm
       .querySelector<HTMLInputElement>('[name="reference_image"]')
@@ -1589,12 +1746,16 @@ export class MemeVaultApp {
         height: image?.height ?? meme.height,
       };
       closeViewer();
-      void this.memeMaker.openWithVaultImage(input);
+      if (this.memeMakerInstance) {
+        this.memeMakerInstance.openWithVaultImage(input);
+      } else {
+        void this.getMemeMaker().then(maker => maker.openWithVaultImage(input));
+      }
     });
     document.addEventListener("keydown", (event) => {
       if (this.elements.imageViewerDialog.open && event.key === "ArrowLeft") moveViewer(-1);
       if (this.elements.imageViewerDialog.open && event.key === "ArrowRight") moveViewer(1);
-    });
+    }, { signal: this.abortController.signal });
     this.elements.imageViewerImage.addEventListener("error", () => {
       this.elements.imageViewerImage.hidden = true;
       this.elements.imageViewerFrame.classList.add("is-broken");
@@ -1648,7 +1809,7 @@ export class MemeVaultApp {
           this.state.applyAITemplate = false;
         }
       }
-      this.batchUpload.setTemplates(this.state.availableTemplates);
+      this.batchUploadInstance?.setTemplates(this.state.availableTemplates);
       renderTemplateFilters(this.elements, this.state);
       renderDetail(
         this.elements,
@@ -2061,6 +2222,7 @@ export class MemeVaultApp {
     if (this.state.loadingList || this.state.totalPages === 0 || !Number.isInteger(page)) return;
     const target = clampPage(page, this.state.totalPages);
     if (target === this.state.page) return;
+    if (!this.confirmDiscardUnsavedChanges()) return;
     this.state.page = target;
     await this.reloadMemes(true);
   }
@@ -2068,7 +2230,7 @@ export class MemeVaultApp {
   private async refreshTags(): Promise<void> {
     try {
       this.state.availableTags = await this.api.listTags({ vaultId: this.vaultIdParam() });
-      this.batchUpload.setAvailableTags(this.state.availableTags);
+      this.batchUploadInstance?.setAvailableTags(this.state.availableTags);
       this.editTagEditor?.setAvailableTags(this.state.availableTags);
       renderTags(this.elements, this.state);
     } catch (error) {
@@ -2083,6 +2245,11 @@ export class MemeVaultApp {
   }
 
   private selectMeme(meme: MemeResponse): void {
+    if (this.state.selectedMeme && this.state.selectedMeme.id !== meme.id) {
+      if (!this.confirmDiscardUnsavedChanges()) {
+        return;
+      }
+    }
     if (!this.captionLab.setMeme(meme.id)) {
       return;
     }
@@ -2301,6 +2468,7 @@ export class MemeVaultApp {
       this.state.selectedRelationIds = [];
       this.state.relationQuery = "";
       this.elements.relationDialog.close();
+      showToast(`已添加 ${ids.length} 个关联`, "success");
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
         this.state.relationError = readableError(error);
@@ -2329,6 +2497,7 @@ export class MemeVaultApp {
           (item) => item.id !== relatedId,
         );
       }
+      showToast("已移除关联", "info");
     } catch (error) {
       if (this.state.selectedMeme?.id === meme.id) {
         this.state.relationError = readableError(error);
@@ -2345,6 +2514,9 @@ export class MemeVaultApp {
 
   private async randomize(): Promise<void> {
     if (this.state.randomizing) {
+      return;
+    }
+    if (!this.confirmDiscardUnsavedChanges()) {
       return;
     }
     this.state.randomizing = true;
@@ -2411,6 +2583,75 @@ export class MemeVaultApp {
     renderDetail(this.elements, this.state, false, null);
   }
 
+  private isDetailDirty(): boolean {
+    if (this.editing && this.state.selectedMeme) {
+      const form = this.elements.detailPanel.querySelector<HTMLFormElement>("#edit-form, [data-edit-form]");
+      if (form) {
+        const meme = this.state.selectedMeme;
+        const title = value(form, "title").trim();
+        const description = value(form, "description").trim();
+        const source = value(form, "source").trim();
+        const templateId = value(form, "template_id");
+        const origTemplateId = meme.template ? String(meme.template.id) : "";
+        const tags = (this.editTagEditor?.getTags() ?? this.editDraft?.tags ?? []).slice().sort().join("\0");
+        const origTags = meme.tags.map((tag) => tag.name).sort().join("\0");
+
+        if (
+          title !== meme.title ||
+          description !== (meme.description ?? "").trim() ||
+          source !== (meme.source ?? "").trim() ||
+          templateId !== origTemplateId ||
+          tags !== origTags
+        ) {
+          return true;
+        }
+      }
+    }
+
+    if (this.state.selectedMeme) {
+      const metaForm = this.elements.detailPanel.querySelector<HTMLFormElement>("form[data-profile-metadata-form]");
+      if (metaForm) {
+        const details = metaForm.closest("details");
+        if (details?.open) {
+          const data = (this.state.selectedMeme.profile_metadata?.data ?? {}) as Record<string, unknown>;
+          const work = (metaForm.querySelector<HTMLInputElement>('input[name="work"]')?.value ?? "").trim();
+          const origWork = String(data.work ?? "").trim();
+          const chars = (metaForm.querySelector<HTMLInputElement>('input[name="characters"]')?.value ?? "").trim();
+          const origChars = (Array.isArray(data.characters) ? (data.characters as string[]).join(", ") : "").trim();
+          const artist = (metaForm.querySelector<HTMLInputElement>('input[name="artist"]')?.value ?? "").trim();
+          const origArtist = String(data.artist ?? "").trim();
+          const fav = Number(metaForm.querySelector<HTMLInputElement>('input[name="favorite_level"]')?.value ?? 0);
+          const origFav = typeof data.favorite_level === "number" ? data.favorite_level : 0;
+          const srcUrl = (metaForm.querySelector<HTMLInputElement>('input[name="source_url"]')?.value ?? "").trim();
+          const origSrcUrl = String(data.source_url ?? "").trim();
+
+          if (
+            work !== origWork ||
+            chars !== origChars ||
+            artist !== origArtist ||
+            fav !== origFav ||
+            srcUrl !== origSrcUrl
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private confirmDiscardUnsavedChanges(): boolean {
+    if (!this.isDetailDirty()) return true;
+    const confirmed = window.confirm("当前内容有未保存的修改，确定放弃并离开吗？");
+    if (confirmed) {
+      if (this.editing) {
+        this.cancelEdit();
+      }
+    }
+    return confirmed;
+  }
+
   private async submitEdit(form: HTMLFormElement): Promise<void> {
     const meme = this.state.selectedMeme;
     if (!meme || this.state.saving) {
@@ -2473,6 +2714,7 @@ export class MemeVaultApp {
         this.editDraft = null;
         this.editTagEditor = null;
       }
+      showToast("保存成功", "success");
       await this.refreshTags();
       if (tagsChanged) {
         this.state.page = 1;
@@ -2616,7 +2858,8 @@ export class MemeVaultApp {
       if (this.api.enrichMeme) {
         const suggestion = await this.api.enrichMeme(meme.id);
         if (this.state.selectedMeme?.id === meme.id) {
-          await this.enrichmentWorkbench.openSuggestion(suggestion);
+          const workbench = await this.getEnrichmentWorkbench();
+          await workbench.openSuggestion(suggestion);
         }
         return;
       }

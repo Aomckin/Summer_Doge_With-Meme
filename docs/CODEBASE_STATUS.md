@@ -1,6 +1,19 @@
 # Meme Vault 代码现状速览
 
-> 提交基线：`v2.0` 分支 Multi-Vault（Core + Profile + Appearance + Asset Number）；最后更新于 2026-09-06。本文只描述已经落地的代码。
+> 提交基线：`v2.0` 分支 Multi-Vault（Core + Profile + Appearance + Asset Number + Frontend Architecture & UX Governance）；最后更新于 2026-10-16。本文只描述已经落地的代码。
+
+## v2.0.4 前端架构治理与体验优化（已完成）
+
+- **生命周期安全与防内存泄漏（P1）**：`MemeVaultApp` 增加统一 `destroy()` 契约，支持销毁所有子控制器（AppShell、VaultManager、CaptionLab、EnrichmentWorkbench、InfiniteFeed 等）并终止正在进行的网络请求和定时器；登出/重进 Vault 时自动清理旧应用实例；卡片换页与重绘时通过 `unbindMemeCardTilts` 与 `stopDrunkPhysics` 显式解绑并取消物理/缓动动画帧。
+- **用户体验与交互安全增强（P2）**：
+  - 新增全局非阻塞 Toast 通知系统（`toast.ts` + `toast.css`），操作反馈（如复制、关联、牌组归属）平滑呈现且具备无障碍 `role="status"` 与退出过渡。
+  - 详情面板增加未保存表单编辑保护（Dirty Guard），在切换卡片、翻页或随机漫游时弹出放弃确认对话框，防止编辑内容意外丢失。
+  - 语义搜索提供输入框与按钮的显式提交引导（`按 Enter ↵ 检索`），与关键词防抖搜索完全隔离。
+  - 深入去硬编码 "Meme"，所有画廊加载、无限滚动流、可关联列表、空状态等位置动态使用 `vocabulary.*`。
+  - 修正 Mobile Ingest 413 错误文案为“文件超过仓库单图大小限制”。
+- **动态导入与首屏打包瘦身（P2）**：将高开销且低频的 6 大控制器（MemeMakerController、EnrichmentWorkbenchController、VaultInspectorController、AISettingsController、BatchUploadController、BatchDownloadController）改为按需 dynamic `import()`。构建产物主包 JS 由 411.15 kB 暴降至 257.16 kB（gzip 65.78 kB，瘦身约 38%）；访客不触碰管理入口，完全不会加载管理代码。
+- **输入体验与 DOM 细粒度更新（P2）**：`TagEditor` 解耦输入框 DOM 与下拉联想列表，打字和中文输入法 IME 合成（`compositionstart`/`compositionend`）期间保持 `<input>` 节点与焦点稳定，彻底消除整树重绘与光标跳动。
+- **样式解耦与规范归档（P3）**：拆解 3,500 行的 `main.css` 巨石文件，按功能域拆分出独立样式模块 `toast.css`、`meme-maker.css`、`enrichment.css`、`vault-inspector.css`、`batch.css`，所有类名与 Design Tokens 100% 保持原有权重与兼容性。
 
 ## v2.0.3 Vault Asset Number（已完成）
 
@@ -99,6 +112,8 @@
 - 前端 `batch-download.ts` 独立维护范围、组织方式、轮询、恢复、失败分页、取消、直接 ZIP 下载和删除；关闭弹窗停止轮询但不取消后端。
 
 ## 技术结构
+
+- Windows 本地启动入口 `run-meme-vault.cmd` 为当前 PowerShell 进程设置执行策略并调用 `run-meme-vault.ps1`；脚本使用 `.venv` Python 启动 Uvicorn，在应用初始化前检查端口范围与可绑定性，并检查 Uvicorn 退出码，失败时保留错误窗口。`-NoPauseOnError` 用于非交互调用，不改变系统执行策略。
 
 ```text
 app/

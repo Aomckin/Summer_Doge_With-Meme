@@ -46,7 +46,7 @@ function formatBytes(bytes: number): string {
 function failureMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 409) return "图片已存在于主库";
-    if (error.status === 413) return "文件超过 10 MB 大小限制";
+    if (error.status === 413) return "文件超过仓库单图大小限制";
     if (error.status === 415) return "不是有效图片，或格式不受支持";
     return error.message;
   }

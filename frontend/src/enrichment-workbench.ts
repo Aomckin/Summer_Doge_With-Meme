@@ -54,6 +54,7 @@ export class EnrichmentWorkbenchController {
     analyze_description: true, analyze_tags: true, analyze_template: true,
     max_workers: 2,
   };
+  private readonly abortController = new AbortController();
 
   constructor(
     trigger: HTMLButtonElement,
@@ -65,14 +66,21 @@ export class EnrichmentWorkbenchController {
     this.dialog.className = "settings-dialog enrichment-dialog";
     this.dialog.setAttribute("aria-label", "元数据整理");
     document.body.append(this.dialog);
-    trigger.addEventListener("click", () => this.open(this.contextProvider()));
-    this.dialog.addEventListener("click", event => this.handleClick(event));
-    this.dialog.addEventListener("change", event => this.handleChange(event));
-    this.dialog.addEventListener("submit", event => this.handleSubmit(event));
-    this.dialog.addEventListener("close", () => this.stopPolling());
-    this.dialog.addEventListener("compositionstart", () => { this.composing = true; });
-    this.dialog.addEventListener("compositionend", () => { this.composing = false; });
-    document.addEventListener("keydown", event => this.handleShortcut(event));
+    const signal = this.abortController.signal;
+    trigger.addEventListener("click", () => this.open(this.contextProvider()), { signal });
+    this.dialog.addEventListener("click", event => this.handleClick(event), { signal });
+    this.dialog.addEventListener("change", event => this.handleChange(event), { signal });
+    this.dialog.addEventListener("submit", event => this.handleSubmit(event), { signal });
+    this.dialog.addEventListener("close", () => this.stopPolling(), { signal });
+    this.dialog.addEventListener("compositionstart", () => { this.composing = true; }, { signal });
+    this.dialog.addEventListener("compositionend", () => { this.composing = false; }, { signal });
+    document.addEventListener("keydown", event => this.handleShortcut(event), { signal });
+  }
+
+  destroy(): void {
+    this.stopPolling();
+    this.abortController.abort();
+    this.dialog.remove();
   }
 
   open(context: EnrichmentContext): void {

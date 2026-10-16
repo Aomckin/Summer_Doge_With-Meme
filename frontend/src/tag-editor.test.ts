@@ -125,4 +125,53 @@ describe("TagEditor", () => {
     type("新标签").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(editor.getTags()).toEqual(["新标签"]);
   });
+
+  it("preserves input DOM node and cursor position across continuous keystrokes", () => {
+    const { editor } = create(["既存标签"]);
+    addButton().click();
+    const initialInput = currentInput();
+
+    // Type first character
+    initialInput.value = "a";
+    initialInput.setSelectionRange(1, 1);
+    initialInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(currentInput()).toBe(initialInput);
+    expect(currentInput().selectionStart).toBe(1);
+
+    // Type second character
+    initialInput.value = "ab";
+    initialInput.setSelectionRange(2, 2);
+    initialInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(currentInput()).toBe(initialInput);
+    expect(currentInput().selectionStart).toBe(2);
+
+    initialInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(editor.getTags()).toEqual(["既存标签", "ab"]);
+  });
+
+  it("handles native IME compositionstart and compositionend lifecycle without node destruction", () => {
+    const { editor } = create();
+    addButton().click();
+    const input = currentInput();
+
+    // IME starts composition
+    input.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+    input.value = "beijing";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // Pressing Enter while composing should not commit
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(editor.getTags()).toEqual([]);
+    expect(currentInput()).toBe(input);
+
+    // IME finishes composition
+    input.value = "北京";
+    input.dispatchEvent(new Event("compositionend", { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Now Enter commits
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(editor.getTags()).toEqual(["北京"]);
+  });
 });

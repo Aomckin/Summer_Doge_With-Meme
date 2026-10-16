@@ -10,6 +10,11 @@ import {
 } from "./auth";
 import "./styles/tokens.css";
 import "./styles/main.css";
+import "./styles/toast.css";
+import "./styles/meme-maker.css";
+import "./styles/enrichment.css";
+import "./styles/vault-inspector.css";
+import "./styles/batch.css";
 import "./styles/appearance.css";
 import "./styles/shell.css";
 import "./styles/library.css";
@@ -24,10 +29,15 @@ if (!root) {
 }
 
 let renderingGate = false;
+let currentApplication: MemeVaultApp | null = null;
 
 function showGate(message = ""): void {
   if (renderingGate) return;
   renderingGate = true;
+  if (currentApplication) {
+    currentApplication.destroy();
+    currentApplication = null;
+  }
   document.documentElement.removeAttribute("data-auth-role");
   renderAccessGate(root!, state => {
     renderingGate = false;
@@ -40,9 +50,14 @@ async function startVault(state: AuthState): Promise<void> {
     showGate();
     return;
   }
+  if (currentApplication) {
+    currentApplication.destroy();
+    currentApplication = null;
+  }
   const role = state.role;
   document.documentElement.dataset.authRole = role;
   const application = new MemeVaultApp(root!, undefined, capabilitiesFor(role));
+  currentApplication = application;
   mountRoleControls(root!, role, () => {
     void logout().finally(() => showGate());
   });

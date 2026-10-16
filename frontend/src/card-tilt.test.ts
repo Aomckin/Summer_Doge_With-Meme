@@ -10,6 +10,8 @@ import {
   cardTiltProfile,
   saveCardMotionPreset,
   storedCardMotionPreset,
+  unbindMemeCardTilts,
+  stopDrunkPhysics,
 } from "./card-tilt";
 
 function createCard(width = 1000, height = 1000, imageCount = 1): HTMLElement {
@@ -350,5 +352,34 @@ describe("bindMemeCardTilts", () => {
     container.dataset.cardSize = "extra-large";
     applyCardMotionPreset(container, "normal", environment);
     expect(card.style.getPropertyValue("--card-lift-y")).toBe("-24px");
+  });
+
+  it("unbinds cards and cancels timers and frames cleanly", () => {
+    const container = document.createElement("section");
+    const card = createCard();
+    container.append(card);
+    let cancelled = false;
+    bindMemeCardTilts(container, {
+      finePointer: true,
+      reducedMotion: false,
+      requestFrame: () => 42,
+      cancelFrame: (handle) => {
+        if (handle === 42) cancelled = true;
+      },
+      preset: "normal",
+    });
+    expect(card.dataset.cardTilt).toBe("ready");
+
+    // Trigger enter and move to start tracking
+    card.dispatchEvent(new Event("pointerenter"));
+    card.dispatchEvent(new MouseEvent("pointermove", { clientX: 50, clientY: 50 }));
+
+    unbindMemeCardTilts(container);
+    expect(card.dataset.cardTilt).toBeUndefined();
+    expect(card.classList.contains("is-card-lifted")).toBe(false);
+    expect(cancelled).toBe(true);
+
+    // Also verify stopDrunkPhysics safely handles container without errors
+    stopDrunkPhysics(container);
   });
 });

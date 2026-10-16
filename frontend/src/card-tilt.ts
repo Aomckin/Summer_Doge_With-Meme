@@ -275,6 +275,12 @@ export function bindCardTilt(
   return cleanup;
 }
 
+export function unbindMemeCardTilts(container: ParentNode): void {
+  for (const card of container.querySelectorAll<HTMLElement>(".meme-card[data-meme-id]")) {
+    boundCards.get(card)?.();
+  }
+}
+
 export function bindMemeCardTilts(
   container: ParentNode,
   environment: CardTiltEnvironment = {},
@@ -329,4 +335,9 @@ function syncDrunkPhysics(
     cancelFrame: environment.cancelFrame,
   });
   if (controller.start()) drunkControllers.set(container, controller);
+}
+
+export function stopDrunkPhysics(container: HTMLElement): void {
+  drunkControllers.get(container)?.stop();
+  drunkControllers.delete(container);
 }

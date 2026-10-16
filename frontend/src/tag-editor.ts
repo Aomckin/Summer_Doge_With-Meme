@@ -20,6 +20,12 @@ export class TagEditor {
   private inputValue = "";
   private error: string | null = null;
   private disabled: boolean;
+  private isComposing = false;
+
+  private chipsContainer!: HTMLDivElement;
+  private inputElement: HTMLInputElement | null = null;
+  private suggestionsList: HTMLDivElement | null = null;
+  private errorElement: HTMLParagraphElement | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -45,7 +51,11 @@ export class TagEditor {
 
   setAvailableTags(tags: TagResponse[]): void {
     this.availableTags = tags;
-    this.render();
+    if (this.editing) {
+      this.updateSuggestions();
+    } else {
+      this.render();
+    }
   }
 
   setDisabled(disabled: boolean): void {
@@ -62,12 +72,16 @@ export class TagEditor {
     this.editing = true;
     this.inputValue = "";
     this.error = null;
-    this.render(true);
+    this.render();
+    if (this.inputElement) {
+      this.inputElement.focus();
+    }
   }
 
   private cancelInput(): void {
     this.editing = false;
     this.inputValue = "";
+    this.isComposing = false;
     this.error = null;
     this.render();
   }
@@ -80,13 +94,13 @@ export class TagEditor {
     }
     if (displayName.length > 100) {
       this.error = "标签名称不能超过 100 个字符。";
-      this.render(true);
+      this.renderError();
       return;
     }
     const key = normalizedKey(displayName);
     if (!key || this.tags.some((tag) => normalizedKey(tag) === key)) {
       this.error = "这个标签已经添加。";
-      this.render(true);
+      this.renderError();
       return;
     }
     this.tags.push(displayName);
@@ -110,13 +124,135 @@ export class TagEditor {
       .slice(0, 8);
   }
 
-  private render(focus = false): void {
+  private updateSuggestions(): void {
+    const suggestions = this.suggestions();
+    if (suggestions.length === 0) {
+      if (this.suggestionsList) {
+        this.suggestionsList.remove();
+        this.suggestionsList = null;
+      }
+      return;
+    }
+
+    if (!this.suggestionsList) {
+      this.suggestionsList = document.createElement("div");
+      this.suggestionsList.className = "tag-editor-suggestions";
+      this.suggestionsList.setAttribute("role", "listbox");
+      this.chipsContainer.append(this.suggestionsList);
+    }
+
+    this.suggestionsList.replaceChildren();
+    for (const suggestion of suggestions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "option");
+      button.textContent = `${suggestion.name} · ${suggestion.usage_count}`;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => this.commit(suggestion.name));
+      this.suggestionsList.append(button);
+    }
+  }
+
+  private clearError(): void {
+    if (this.errorElement) {
+      this.errorElement.remove();
+      this.errorElement = null;
+    }
+    this.error = null;
+  }
+
+  private renderError(): void {
+    if (!this.error) {
+      this.clearError();
+      return;
+    }
+    if (!this.errorElement) {
+      this.errorElement = document.createElement("p");
+      this.errorElement.className = "tag-editor-error";
+      this.errorElement.setAttribute("role", "alert");
+      this.container.append(this.errorElement);
+    }
+    this.errorElement.textContent = this.error;
+  }
+
+  private mountInputSlot(): void {
+    const editor = document.createElement("span");
+    editor.className = "tag-editor-input-slot";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 100;
+    input.placeholder = "输入标签……";
+    input.value = this.inputValue;
+    input.setAttribute("aria-label", "输入标签");
+
+    input.addEventListener("compositionstart", () => {
+      this.isComposing = true;
+    });
+
+    input.addEventListener("compositionend", () => {
+      this.isComposing = false;
+      this.inputValue = input.value;
+      this.updateSuggestions();
+    });
+
+    input.addEventListener("input", (event) => {
+      this.inputValue = input.value;
+      this.clearError();
+      const composing =
+        this.isComposing ||
+        (event instanceof InputEvent && event.isComposing);
+      if (!composing) {
+        this.updateSuggestions();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing && !this.isComposing) {
+        event.preventDefault();
+        this.commit(input.value);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelInput();
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      if (!this.isComposing) {
+        this.commit(input.value);
+      }
+    });
+
+    editor.append(input);
+
+    for (const [label, action] of [
+      ["确认", () => this.commit(input.value)],
+      ["取消", () => this.cancelInput()],
+    ] as const) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", action);
+      editor.append(button);
+    }
+
+    this.inputElement = input;
+    this.chipsContainer.append(editor);
+  }
+
+  private render(): void {
     this.container.replaceChildren();
     this.container.className = "tag-editor";
     this.container.setAttribute("aria-label", this.options.label ?? "标签编辑器");
 
-    const chips = document.createElement("div");
-    chips.className = "tag-editor-chips";
+    this.inputElement = null;
+    this.suggestionsList = null;
+    this.errorElement = null;
+
+    this.chipsContainer = document.createElement("div");
+    this.chipsContainer.className = "tag-editor-chips";
+
     for (const [index, tag] of this.tags.entries()) {
       const chip = document.createElement("span");
       chip.className = "tag-editor-chip";
@@ -133,64 +269,12 @@ export class TagEditor {
         this.render();
       });
       chip.append(remove);
-      chips.append(chip);
+      this.chipsContainer.append(chip);
     }
 
     if (this.editing) {
-      const editor = document.createElement("span");
-      editor.className = "tag-editor-input-slot";
-      const input = document.createElement("input");
-      input.type = "text";
-      input.maxLength = 100;
-      input.placeholder = "输入标签……";
-      input.value = this.inputValue;
-      input.setAttribute("aria-label", "输入标签");
-      input.addEventListener("input", (event) => {
-        this.inputValue = input.value;
-        this.error = null;
-        if (!(event instanceof InputEvent) || !event.isComposing) this.render(true);
-      });
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.isComposing) {
-          event.preventDefault();
-          this.commit(input.value);
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          this.cancelInput();
-        }
-      });
-      input.addEventListener("blur", () => this.commit(input.value));
-      editor.append(input);
-      for (const [label, action] of [
-        ["确认", () => this.commit(input.value)],
-        ["取消", () => this.cancelInput()],
-      ] as const) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = label;
-        button.addEventListener("mousedown", (event) => event.preventDefault());
-        button.addEventListener("click", action);
-        editor.append(button);
-      }
-      chips.append(editor);
-
-      const suggestions = this.suggestions();
-      if (suggestions.length) {
-        const list = document.createElement("div");
-        list.className = "tag-editor-suggestions";
-        list.setAttribute("role", "listbox");
-        for (const suggestion of suggestions) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.setAttribute("role", "option");
-          button.textContent = `${suggestion.name} · ${suggestion.usage_count}`;
-          button.addEventListener("mousedown", (event) => event.preventDefault());
-          button.addEventListener("click", () => this.commit(suggestion.name));
-          list.append(button);
-        }
-        chips.append(list);
-      }
-      if (focus) queueMicrotask(() => input.focus());
+      this.mountInputSlot();
+      this.updateSuggestions();
     } else {
       const add = document.createElement("button");
       add.type = "button";
@@ -199,15 +283,10 @@ export class TagEditor {
       add.disabled = this.disabled;
       add.setAttribute("aria-label", "添加标签");
       add.addEventListener("click", () => this.addInput());
-      chips.append(add);
+      this.chipsContainer.append(add);
     }
-    this.container.append(chips);
-    if (this.error) {
-      const error = document.createElement("p");
-      error.className = "tag-editor-error";
-      error.setAttribute("role", "alert");
-      error.textContent = this.error;
-      this.container.append(error);
-    }
+
+    this.container.append(this.chipsContainer);
+    this.renderError();
   }
 }

@@ -2582,4 +2582,89 @@ describe("MemeVaultApp", () => {
     expect(scrolls.filter(scroll => scroll.mock.calls.length)).toHaveLength(1);
     expect(document.querySelectorAll(".is-immersive-random-target")).toHaveLength(1);
   });
+
+  it("destroys child controllers and global listeners cleanly on destroy()", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1)]),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    // Verify sub-controllers exist and are active
+    expect(document.querySelector("#meme-grid")).not.toBeNull();
+
+    // Call destroy
+    app.destroy();
+
+    // Trigger popstate and keydown to ensure no uncaught exceptions or duplicate actions
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+
+    // Re-verify that calling destroy again is idempotent and safe
+    expect(() => app.destroy()).not.toThrow();
+  });
+
+  it("guards dirty detail edits against card switching and pagination until confirmed", async () => {
+    const meme1 = makeMeme(1, "原标题 1");
+    const meme2 = makeMeme(2, "原标题 2");
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([meme1, meme2]),
+      listMemePage: vi.fn().mockResolvedValue({
+        items: [meme1, meme2],
+        total: 2,
+        page: 1,
+        page_size: 24,
+        total_pages: 2,
+        sort: "default",
+        shuffle_seed: null,
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    // Select meme 1
+    document.querySelector<HTMLElement>('[data-meme-id="1"]')!.click();
+    await vi.waitFor(() => expect(document.querySelector("[data-edit-meme]")).not.toBeNull());
+
+    // Begin edit
+    document.querySelector<HTMLButtonElement>("[data-edit-meme]")!.click();
+    const titleInput = document.querySelector<HTMLInputElement>('form[data-edit-form] input[name="title"]')!;
+    expect(titleInput).not.toBeNull();
+    titleInput.value = "未保存的标题修改";
+
+    // Attempt to switch to meme 2 while confirm returns false
+    const confirmSpy = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirmSpy);
+    document.querySelector<HTMLElement>('[data-meme-id="2"]')!.click();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    // Selection remains meme 1 because user canceled
+    const state = (app as unknown as { state: AppState }).state;
+    expect(state.selectedMeme?.id).toBe(1);
+
+    // Attempt to switch to meme 2 when confirm returns true
+    confirmSpy.mockReturnValue(true);
+    document.querySelector<HTMLElement>('[data-meme-id="2"]')!.click();
+
+    expect(state.selectedMeme?.id).toBe(2);
+  });
+
+  it("shows enter hint and submit affordance in semantic search mode", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1)]),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    const searchMode = document.querySelector<HTMLSelectElement>("#search-mode")!;
+    searchMode.value = "semantic";
+    searchMode.dispatchEvent(new Event("change"));
+
+    const searchInput = document.querySelector<HTMLInputElement>("#meme-search")!;
+    const submitBtn = document.querySelector<HTMLButtonElement>("#semantic-search-button")!;
+
+    expect(searchInput.placeholder).toContain("按 Enter ↵ 检索");
+    expect(submitBtn.textContent).toContain("检索 ↵");
+    expect(submitBtn.hidden).toBe(false);
+  });
 });

@@ -94,6 +94,7 @@ export class CaptionLabController {
   private showAll = false;
   private epoch = 0;
   private requestController: AbortController | null = null;
+  private readonly abortController = new AbortController();
   private readonly confirmDiscard: (message: string) => boolean;
   private readonly copyText: (value: string) => Promise<void>;
 
@@ -111,22 +112,29 @@ export class CaptionLabController {
         }
         return navigator.clipboard.writeText(value);
       });
+    const signal = this.abortController.signal;
     this.panel.addEventListener("click", (event) => {
       void this.handleClick(event);
-    });
-    this.panel.addEventListener("input", (event) => this.handleField(event));
-    this.panel.addEventListener("change", (event) => this.handleField(event));
+    }, { signal });
+    this.panel.addEventListener("input", (event) => this.handleField(event), { signal });
+    this.panel.addEventListener("change", (event) => this.handleField(event), { signal });
     this.panel.addEventListener(
       "toggle",
       (event) => this.handleToggle(event),
-      true,
+      { capture: true, signal },
     );
-    this.panel.addEventListener("meme-detail-rendered", () => this.mount());
+    this.panel.addEventListener("meme-detail-rendered", () => this.mount(), { signal });
     window.addEventListener("beforeunload", (event) => {
       if (!this.hasUnsavedDraft()) return;
       event.preventDefault();
       event.returnValue = "";
-    });
+    }, { signal });
+  }
+
+  destroy(): void {
+    this.abortController.abort();
+    this.requestController?.abort();
+    this.requestController = null;
   }
 
   setMeme(memeId: number | null): boolean {

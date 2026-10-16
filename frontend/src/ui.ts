@@ -1,8 +1,8 @@
-import type { AppState, MemeCardSize, MemeResponse } from "./types";
+import type { AppState, MemeCardSize, MemeResponse, VaultSummary } from "./types";
 import { hasCapability, profileForVault } from "./vault-profile";
 import { buildPaginationTokens, clampPage } from "./pagination";
 import { memeCopySource } from "./meme-actions";
-import { bindMemeCardTilts, storedCardMotionPreset } from "./card-tilt";
+import { bindMemeCardTilts, storedCardMotionPreset, unbindMemeCardTilts } from "./card-tilt";
 import type { InfiniteFeedState } from "./immersive/immersive-feed";
 import { probeAuthAfterMediaError } from "./api";
 
@@ -961,8 +961,9 @@ export function renderLibrary(
   const reshuffle = elements.browsingControls.querySelector<HTMLButtonElement>("[data-reshuffle]");
   elements.searchMode.value = state.searchMode;
   elements.semanticSearchButton.hidden = state.searchMode !== "semantic";
+  elements.semanticSearchButton.textContent = "检索 ↵";
   elements.searchInput.placeholder = state.searchMode === "semantic"
-    ? "描述想找的场景、情绪或用途…"
+    ? "描述想找的场景、情绪或用途（按 Enter ↵ 检索）…"
     : "搜索你的 Vault…";
   if (sort) {
     sort.value = state.listSort;
@@ -977,9 +978,10 @@ export function renderLibrary(
     reshuffle.hidden = state.searchMode === "semantic" || state.listSort !== "shuffle";
     reshuffle.disabled = state.loadingList;
   }
+  unbindMemeCardTilts(elements.memeGrid);
   if (state.loadingList) {
     elements.listStatus.innerHTML =
-      '<span class="status-line"><span class="spinner"></span>正在加载 Meme…</span>';
+      `<span class="status-line"><span class="spinner"></span>正在加载 ${escapeHtml(vocabulary.assetPlural)}…</span>`;
     elements.memeGrid.innerHTML = Array.from(
       { length: 8 },
       () => '<div class="meme-card skeleton" aria-hidden="true"></div>',
@@ -1050,6 +1052,7 @@ export function renderImmersiveFeed(
   selectedMemeId: number | null,
   scores: Readonly<Record<number, number>> = {},
 ): void {
+  unbindMemeCardTilts(elements.memeGrid);
   const cardSize = (elements.memeGrid.dataset.cardSize as MemeCardSize | undefined) ?? "medium";
   elements.memeGrid.innerHTML = memes.map(meme => memeCardMarkup(
     meme,
@@ -1088,7 +1091,9 @@ export function appendImmersiveFeed(
 export function renderInfiniteFeedState(
   elements: AppElements,
   state: Readonly<InfiniteFeedState>,
+  vault: VaultSummary | null = null,
 ): void {
+  const vocabulary = profileForVault(vault).vocabulary;
   elements.immersiveFeedSentinel.hidden = !state.hasMore || Boolean(state.error)
     || (state.offset === 0 && state.loading);
   if (state.error) {
@@ -1098,10 +1103,10 @@ export function renderInfiniteFeedState(
     `;
   } else if (state.loading) {
     elements.immersiveFeedStatus.innerHTML = state.offset
-      ? '<span class="status-line"><span class="infinite-feed-pulse" aria-hidden="true"></span>继续翻找 Meme…</span>'
+      ? `<span class="status-line"><span class="infinite-feed-pulse" aria-hidden="true"></span>继续翻找 ${escapeHtml(vocabulary.assetPlural)}…</span>`
       : '<span class="status-line"><span class="infinite-feed-pulse" aria-hidden="true"></span>正在打开沉浸宝库…</span>';
   } else if (state.offset === 0 && !state.hasMore) {
-    elements.immersiveFeedStatus.textContent = "这里暂时没有 Meme。";
+    elements.immersiveFeedStatus.textContent = `这里暂时没有 ${vocabulary.assetPlural}。`;
   } else if (!state.hasMore) {
     elements.immersiveFeedStatus.textContent = "已经翻到 Vault 最深处了。";
   } else {
@@ -1131,6 +1136,7 @@ export function renderMemeCard(
   if (currentItem.dataset.galleryOrder) {
     replacement.dataset.galleryOrder = currentItem.dataset.galleryOrder;
   }
+  unbindMemeCardTilts(currentItem);
   currentItem.replaceWith(replacement);
   bindImageFallbacks(replacement);
   bindMemeCardTilts(elements.memeGrid);
@@ -1508,7 +1514,7 @@ export function renderDetail(
     elements.detailPanel.innerHTML = `
       <div class="detail-scroll">
         ${detailImage(meme, state)}
-        <form id="edit-form" class="edit-form">
+        <form id="edit-form" class="edit-form" data-edit-form>
           <div class="detail-heading">
             <div>
               <p class="eyebrow">EDITING #${meme.id}</p>
@@ -1698,7 +1704,7 @@ export function renderRelationDialog(
         </span>
       </label>
     `).join("")
-    : `<p class="muted relation-empty">没有符合条件的可关联 Meme。</p>`;
+    : `<p class="muted relation-empty">没有符合条件的可关联 ${escapeHtml(profileForVault(state.currentVault).vocabulary.assetPlural)}。</p>`;
   elements.relationSave.disabled =
     state.relationsSaving || state.selectedRelationIds.length === 0;
   elements.relationSave.textContent = state.relationsSaving

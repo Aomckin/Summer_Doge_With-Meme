@@ -1,3 +1,4 @@
+import { showToast } from "./toast";
 import type { MemeImageResponse, MemeResponse } from "./types";
 
 export type CopyErrorCode =
@@ -122,6 +123,7 @@ export async function copyImageToClipboard(
 let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function showMemeActionFeedback(message: string, error = false): void {
+  showToast(message, error ? "error" : "success");
   let toast = document.querySelector<HTMLElement>("[data-meme-action-feedback]");
   if (!toast) {
     toast = document.createElement("div");

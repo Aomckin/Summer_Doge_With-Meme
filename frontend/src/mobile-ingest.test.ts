@@ -121,4 +121,17 @@ describe("MobileIngestController", () => {
     expect(root.textContent).toContain("无法连接 Meme Vault");
     expect(root.textContent).not.toContain("正在上传…");
   });
+
+  it("reports warehouse image size limit on 413 status", async () => {
+    const uploadMeme = vi
+      .fn<(input: UploadMemeInput) => Promise<MemeResponse>>()
+      .mockRejectedValue(new ApiError(413, "payload too large"));
+    const controller = new MobileIngestController(root, { uploadMeme });
+    controller.selectFiles([file("giant.png")]);
+
+    await controller.upload();
+
+    expect(controller.snapshot().status).toBe("failure");
+    expect(root.textContent).toContain("文件超过仓库单图大小限制");
+  });
 });

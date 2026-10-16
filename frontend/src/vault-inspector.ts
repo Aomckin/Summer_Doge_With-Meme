@@ -5,6 +5,7 @@ import type {
   SimilarityInspectionResponse,
 } from "./types";
 import { escapeHtml } from "./ui";
+import { showToast } from "./toast";
 
 export interface VaultInspectorApi {
   inspect(input: SimilarityInspectionInput): Promise<SimilarityInspectionResponse>;
@@ -170,6 +171,7 @@ export class VaultInspectorController {
       await this.api.relate(pair.meme_a.id, [pair.meme_b.id]);
       this.removeCurrent();
       this.notice = "已建立现有弱关联。";
+      showToast("已建立弱关联", "success");
     });
   }
 

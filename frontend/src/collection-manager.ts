@@ -7,6 +7,7 @@ import type {
   MemeResponse,
 } from "./types";
 import { escapeHtml, memeCardMarkup } from "./ui";
+import { showToast } from "./toast";
 
 export interface CollectionApi {
   list(signal?: AbortSignal): Promise<CollectionSummary[]>;
@@ -229,7 +230,7 @@ export class CollectionManagerController {
     if (!this.detail) return;
     const collectionId = this.detail.id;
     this.busy = true; this.renderManager();
-    try { await this.api.removeMeme(collectionId, memeId); await this.openDetail(collectionId); }
+    try { await this.api.removeMeme(collectionId, memeId); await this.openDetail(collectionId); showToast("已从牌组移除", "info"); }
     catch (error) { this.busy = false; this.error = message(error); this.renderManager(); }
   }
 
@@ -253,6 +254,7 @@ export class CollectionManagerController {
       const result = await this.api.replaceMemberships(meme.id, ids);
       this.memberships = new Set(result.collection_ids);
       this.membershipDialog.close();
+      showToast("已更新牌组归属", "success");
     } catch (error) { this.busy = false; this.error = message(error); this.renderMembership(); }
   }
 }

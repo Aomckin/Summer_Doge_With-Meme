@@ -22,7 +22,7 @@ Meme Vault 解决的是一个很朴素的问题：当 Meme 收藏不断增长，
 
 `Local-first（本地优先）` · `Semantic Search（语义搜索）` · `Immersive Browsing（沉浸浏览）` · `Visitor / Admin（访客 / 管理员）` · `Read-only External API（只读外部 API）`
 
-**Current release / 当前版本：v2.0 — Multi-Vault（含 Vault Profile 与 Per-Vault Appearance）**
+**Current release / 当前版本：v2.0.4 — 前端架构治理与体验优化（含 Multi-Vault、按需动态加载与原生 Toast 体系）**
 
 ## Screenshots / 界面截图
 
@@ -183,8 +183,12 @@ python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8002
 已有环境和前端构建时，也可以一键启动后端：
 
 ```powershell
-.\run-meme-vault.ps1
+.\run-meme-vault.cmd
 ```
+
+Windows 可以直接双击 `run-meme-vault.cmd`。它使用项目虚拟环境，只为本次 PowerShell 进程设置 `ExecutionPolicy Bypass`，不修改系统执行策略；启动失败会显示错误并等待按键，避免窗口闪退。默认端口为 8002；若被其他程序占用，脚本在应用初始化前提示错误，可用 `.\run-meme-vault.cmd -Port 8003` 指定其他空闲端口。
+
+也可以在已有终端中运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run-meme-vault.ps1`。脚本失败默认等待回车；自动化调用可加 `-NoPauseOnError`，失败时返回退出码 1。执行策略为 `Restricted` 时，直接执行 `.ps1` 会在脚本执行前被拦截，此时使用 `.cmd` 入口。
 
 前端开发时，可以分别启动后端和 Vite Dev Server（Vite 开发服务器）：
 

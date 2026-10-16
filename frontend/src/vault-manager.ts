@@ -37,6 +37,7 @@ const PROFILE_OPTIONS: Array<{ value: string; label: string }> = VAULT_PROFILE_N
 export class VaultManagerController {
   private readonly dropdown = document.createElement("div");
   private readonly dialog = document.createElement("dialog");
+  private readonly abortController = new AbortController();
   private vaults: VaultSummary[] = [];
   private current: VaultSummary | null = null;
   private dropdownOpen = false;
@@ -54,6 +55,7 @@ export class VaultManagerController {
     this.dialog.className = "settings-dialog vault-dialog";
     this.dialog.dataset.vaultDialog = "";
     document.body.append(this.dropdown, this.dialog);
+    const signal = this.abortController.signal;
     this.opener.addEventListener("click", event => {
       event.stopPropagation();
       if (this.dropdownOpen) {
@@ -61,10 +63,10 @@ export class VaultManagerController {
       } else {
         void this.openDropdown();
       }
-    });
-    this.dropdown.addEventListener("click", event => void this.handleDropdownClick(event));
-    this.dialog.addEventListener("click", event => this.handleDialogClick(event));
-    this.dialog.addEventListener("submit", event => void this.handleCreate(event));
+    }, { signal });
+    this.dropdown.addEventListener("click", event => void this.handleDropdownClick(event), { signal });
+    this.dialog.addEventListener("click", event => this.handleDialogClick(event), { signal });
+    this.dialog.addEventListener("submit", event => void this.handleCreate(event), { signal });
     document.addEventListener("click", event => {
       if (
         this.dropdownOpen
@@ -74,12 +76,19 @@ export class VaultManagerController {
       ) {
         this.closeDropdown();
       }
-    });
+    }, { signal });
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && this.dropdownOpen) {
         this.closeDropdown();
       }
-    });
+    }, { signal });
+  }
+
+  destroy(): void {
+    this.closeDropdown();
+    this.abortController.abort();
+    this.dropdown.remove();
+    this.dialog.remove();
   }
 
   get vaultList(): VaultSummary[] {

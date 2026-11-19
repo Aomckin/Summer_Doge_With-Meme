@@ -9,8 +9,8 @@
 ## 1. 开始工作前的阅读顺序
 
 1. 本文：恢复版本基线、冻结边界、关键状态和接手步骤。
-2. [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md)：确认当前代码已经具备什么，以及主要调用链。
-3. [`PROJECT_PLAN.md`](PROJECT_PLAN.md)：了解长期路线；其中未勾选内容只是候选，不是自动授权的 Phase 3 Scope。
+2. [`CODEBASE_STATUS.md`](../CODEBASE_STATUS.md)：确认当前代码已经具备什么，以及主要调用链。
+3. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md)：了解长期路线；其中未勾选内容只是候选，不是自动授权的 Phase 3 Scope。
 4. 与具体任务直接相关的模块和测试。
 
 不要再使用旧的 v0.3.3 / v0.4 handoff 作为当前事实来源。它们只保留历史设计上下文。
@@ -35,7 +35,7 @@ Phase 3 完成提交没有创建 Git Tag，也没有推送远端。正式发布�
 - 默认后端端口已统一为 `8002`，包括 README、Vite 开发代理、External API 文档和 Phase 4 任务书附件。
 - Web API、媒体、下载、Viewer、Immersive 与 Infinite Feed 已确认使用同源相对 URL，没有客户端可见的 localhost 后端硬编码。
 - Production Cookie、三项 Secret fail-fast、CORS、Swagger、静态媒体和日志已完成首轮审计与自动化复验。
-- Quick Tunnel 保持人工工具；启动命令和验收矩阵见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
+- Quick Tunnel 保持人工工具；启动命令和验收矩阵见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](../audits/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 - 当前停点是等待用户执行 Quick Tunnel 真外网验收。验收通过前不要进入 Phase 4C，也不要代替用户操作 Cloudflare 账号、域名、DNS、Named Tunnel 或 Service。
 - External API 已使用独立 Bearer Key；Web Random 已迁移到 Session 专用 `/api/memes/library-random`。
 
@@ -209,7 +209,7 @@ Phase 2 如果修改持久化结构，必须提供兼容读取、sanitize 和默
 - External Meme API 已有独立机器 Access Key；多客户端 Key 轮换、速率限制与分享 Token 仍未实现。
 - 当前没有用户账户数据库、租户、对象存储、云数据库或多进程 Session 同步。
 
-更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](CODEBASE_STATUS.md) 为准。
+更完整的数据模型、API 和事务调用链以 [`CODEBASE_STATUS.md`](../CODEBASE_STATUS.md) 为准。
 
 ## 8. Phase 3 完成状态
 
@@ -272,7 +272,7 @@ git diff --check
 ## 11. Phase 3 完成后的新对话建议起手式
 
 ```text
-请先阅读 README.md、docs/NEXT_CONVERSATION_HANDOFF.md、
+请先阅读 README.md、docs/archive/NEXT_CONVERSATION_HANDOFF.md、
 docs/CODEBASE_STATUS.md 和 docs/PROJECT_PLAN.md。
 
 当前基线是 Meme Vault v1.0.1 External API Machine Authentication Hotfix（当前 HEAD）。

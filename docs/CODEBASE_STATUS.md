@@ -474,7 +474,7 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8002`。修改前
 - Quick Tunnel 由部署者手工运行；Uvicorn 只监听 `127.0.0.1:8002`，并仅信任 `127.0.0.1` 的代理头。
 - Production 继续要求三项 Access Secret 并启用 Secure Cookie；HttpOnly、SameSite=Strict、媒体认证、Visitor/Admin 权限和 Admin-only Swagger 保持不变。
 - 未启用全局 CORS，没有新增 WebSocket/SSE、路由器端口转发、本地 TLS、Cloudflare Access、Tunnel Token 配置或自动 DNS。
-- 完整证据、人工命令与后续停点见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
+- 完整证据、人工命令与后续停点见 [`PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md`](audits/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 
 ## v1.0.1 External API Machine Authentication
 
@@ -545,7 +545,7 @@ Vite 默认把 `/api` 和 `/media` 代理到 `http://127.0.0.1:8002`。修改前
 - `/media/images`、`/media/thumbnails`、`/media/template-images`、`/media/template-thumbnails` 统一受 Session 保护。
 - 前端 `auth.ts` 在创建 `MemeVaultApp` 前完成身份恢复；`api.ts` 对业务 401 和媒体认证失效发送统一回门事件。
 - Visitor UI 隐藏 Admin-only Header、Management、Inspector mutation、Caption mutation、Relation mutation、Forge 与复合 ZIP；单图复制、原图和单图下载保留。
-- 完整端点矩阵及安全审计见 [`PHASE3_PERMISSION_AUDIT.md`](PHASE3_PERMISSION_AUDIT.md)。
+- 完整端点矩阵及安全审计见 [`PHASE3_PERMISSION_AUDIT.md`](audits/PHASE3_PERMISSION_AUDIT.md)。
 
 ## v1.0.0 Free Gallery 布局边界
 

@@ -238,7 +238,7 @@ Admin（管理员）           ──► Full Management（完整管理）
 | Visitor / 访客 | 浏览、关键词与语义搜索、沉浸浏览、随机浏览、单图下载 |
 | Admin / 管理员 | Visitor 的全部能力，以及上传、编辑、删除、批量导入导出、ZIP、AI / 索引 / 管理设置 |
 
-浏览器认证使用进程内 HttpOnly Session（仅 HTTP 会话）。私有原图、缩略图和模板媒体也在同一认证边界内。完整路由矩阵见 [Permission Audit / 权限审计](docs/PHASE3_PERMISSION_AUDIT.md)。
+浏览器认证使用进程内 HttpOnly Session（仅 HTTP 会话）。私有原图、缩略图和模板媒体也在同一认证边界内。完整路由矩阵见 [Permission Audit / 权限审计](docs/audits/PHASE3_PERMISSION_AUDIT.md)。
 
 ## Temporary Friend Sharing / 临时好友分享
 
@@ -264,13 +264,13 @@ Share URL + Visitor Key（分享网址与访客密钥）
 Stop cloudflared（关闭后入口失效）
 ```
 
-公网临时访问的媒体加载速度受部署主机上行带宽和网络链路影响，大图及 GIF 首次加载可能较慢。更完整的边界和检查项见 [Public Deployment Audit / 公网部署审计](docs/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
+公网临时访问的媒体加载速度受部署主机上行带宽和网络链路影响，大图及 GIF 首次加载可能较慢。更完整的边界和检查项见 [Public Deployment Audit / 公网部署审计](docs/audits/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)。
 
 ## External API / 外部 API
 
 Meme Vault 提供 Read-only External API（只读外部 API），可信客户端可获取随机 Meme，或通过自然语言进行语义检索；这为 Maibot 等外部客户端提供了集成入口。
 
-External API 始终使用独立的 `Authorization: Bearer <EXTERNAL_API_KEY>` 机器认证，不接受 Visitor/Admin Session Cookie，也禁止复用 Visitor/Admin Key。该凭据只开放 Random、Semantic 与响应中的 External Media；Upload、Edit、Delete、Batch/ZIP 和 Settings 仍不可用。端点、参数与错误语义见 [External API Documentation / 外部 API 文档](docs/external-api.md)。
+External API 始终使用独立的 `Authorization: Bearer <EXTERNAL_API_KEY>` 机器认证，不接受 Visitor/Admin Session Cookie，也禁止复用 Visitor/Admin Key。该凭据只开放 Random、Semantic 与响应中的 External Media；Upload、Edit、Delete、Batch/ZIP 和 Settings 仍不可用。端点、参数与错误语义见 [External API Documentation / 外部 API 文档](docs/guides/external-api.md)。
 
 ## Testing / 测试
 
@@ -299,7 +299,7 @@ npm.cmd --prefix frontend run build
 app/                 后端应用：API、模型、仓储与业务服务（含 Multi-Vault）
 frontend/            前端应用：TypeScript、Vite 与 Vitest
 data/                本地数据：SQLite、原图、缩略图与任务产物（默认不跟踪）
-docs/                项目文档：API、权限与部署审计
+docs/                文档入口与分类目录（见 docs/README.md）
 docs/images/         README 静态展示图
 tests/               Pytest 后端自动化测试
 scripts/             离线整理与维护脚本
@@ -313,9 +313,10 @@ scripts/             离线整理与维护脚本
 
 ## Documentation / 文档
 
-- [External API Documentation / 外部 API 文档](docs/external-api.md)
-- [Permission Audit / 权限审计](docs/PHASE3_PERMISSION_AUDIT.md)
-- [Public Deployment Audit / 公网部署审计](docs/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)
+- [文档导航与分类目录](docs/README.md)
+- [External API Documentation / 外部 API 文档](docs/guides/external-api.md)
+- [Permission Audit / 权限审计](docs/audits/PHASE3_PERMISSION_AUDIT.md)
+- [Public Deployment Audit / 公网部署审计](docs/audits/PHASE4_PUBLIC_DEPLOYMENT_AUDIT.md)
 - [Luna Tagging Workflow / Luna 标签整理工作流](docs/LUNA_TAGGING_WORKFLOW.md)
 
 ## License / 许可证

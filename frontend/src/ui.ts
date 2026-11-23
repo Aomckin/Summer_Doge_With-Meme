@@ -40,6 +40,7 @@ export interface AppElements {
   openVaultInspectorButton: HTMLButtonElement;
   openCollectionsButton: HTMLButtonElement;
   operationError: HTMLElement;
+  libraryFilterToolbar: HTMLElement;
   templateFilters: HTMLElement;
   tagFilters: HTMLElement;
   profileFilters: HTMLElement;
@@ -196,8 +197,8 @@ export function mountShell(root: HTMLElement): AppElements {
                 <section>
                   <span class="management-group-label">创作与组织</span>
                   <button id="open-meme-maker" type="button" role="menuitem"><span>Meme 制作器</span><small>组合图片与文字</small></button>
-                  <button id="open-collections" type="button" role="menuitem"><span>牌组</span><small>整理常用收藏</small></button>
                   <button type="button" role="menuitem" data-open-publisher hidden><span>帖文工作台</span><small>编排图片与逐图文案</small></button>
+                  <button id="open-collections" type="button" role="menuitem"><span>牌组</span><small>整理常用收藏</small></button>
                   <button id="open-chat-recommendation" type="button" role="menuitem"><span>场景召唤</span><small>按聊天语境找 Meme</small></button>
                 </section>
                 <section>
@@ -211,8 +212,8 @@ export function mountShell(root: HTMLElement): AppElements {
                 <section class="admin-only-menu-section">
                   <span class="management-group-label">系统</span>
                   <button id="open-semantic-index" type="button" role="menuitem"><span>语义索引</span><small>索引状态与任务</small></button>
-                  <button id="open-settings" type="button" role="menuitem"><span>API 设置</span><small>厂商、模型与密钥</small></button>
                   <button type="button" role="menuitem" data-open-publisher-plugins hidden><span>Publisher 管理</span><small>插件能力与执行记录</small></button>
+                  <button id="open-settings" type="button" role="menuitem"><span>API 设置</span><small>厂商、模型与密钥</small></button>
                 </section>
               </div>
             </details>
@@ -241,8 +242,8 @@ export function mountShell(root: HTMLElement): AppElements {
           </div>
           <div id="browsing-controls" class="browsing-controls" aria-label="资料库视图设置">
             <span class="browsing-controls-label">视图</span>
-            <label>顺序
             <button type="button" class="button button-ghost" data-add-library-to-post hidden>添加到帖文</button>
+            <label>顺序
               <select data-list-sort aria-label="资料库顺序">
                 <option value="default">默认顺序</option>
                 <option value="shuffle">随机顺序</option>
@@ -559,6 +560,7 @@ export function mountShell(root: HTMLElement): AppElements {
     openVaultInspectorButton: required(root, "#open-vault-inspector"),
     openCollectionsButton: required(root, "#open-collections"),
     operationError: required(root, "#operation-error"),
+    libraryFilterToolbar: required(root, ".library-filter-toolbar"),
     templateFilters: required(root, "#template-filters"),
     tagFilters: required(root, "#tag-filters"),
     profileFilters: required(root, "#profile-filters"),
@@ -933,6 +935,23 @@ function renderProfileFilters(elements: AppElements, state: AppState): void {
         chip(state.orientationFilter === "square", "方图", 'data-profile-filter="square"'),
       ].join("")
     + `</div>`;
+}
+
+export function renderMemeSelection(elements: AppElements, selectedId: number): void {
+  for (const card of elements.memeGrid.querySelectorAll<HTMLElement>(".meme-card[data-meme-id]")) {
+    const selected = Number(card.dataset.memeId) === selectedId;
+    card.classList.toggle("is-selected", selected);
+    const indicator = card.querySelector(".card-selected-indicator");
+    if (selected && !indicator) {
+      const marker = document.createElement("span");
+      marker.className = "card-selected-indicator";
+      marker.setAttribute("aria-hidden", "true");
+      marker.textContent = "✓";
+      card.prepend(marker);
+    } else if (!selected) {
+      indicator?.remove();
+    }
+  }
 }
 
 export function renderLibrary(

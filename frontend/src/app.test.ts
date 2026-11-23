@@ -383,6 +383,40 @@ describe("MemeVaultApp", () => {
     );
   });
 
+  it("keeps cards, images and focus intact when selecting and switching details", async () => {
+    const api = makeApi({ listMemes: vi.fn().mockResolvedValue([makeMeme(1), makeMeme(2)]) });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+    const cards = [...document.querySelectorAll<HTMLElement>(".meme-card[data-meme-id]")];
+    const images = cards.map(card => card.querySelector("img"));
+    const listCalls = vi.mocked(api.listMemes).mock.calls.length;
+    const pageCalls = vi.mocked(api.listMemePage).mock.calls.length;
+    try {
+      for (const card of [cards[0], cards[0], cards[1]]) {
+        const open = card.querySelector<HTMLButtonElement>("[data-open-meme]")!;
+        open.focus();
+        open.click();
+        await vi.waitFor(() => {
+          expect(document.querySelector("[data-detail-title]")?.textContent).toBe(`Meme ${card.dataset.memeId}`);
+          expect(document.querySelector(".relation-status")?.textContent).not.toContain("正在加载");
+        });
+        const currentCards = [...document.querySelectorAll(".meme-card[data-meme-id]")];
+        cards.forEach((original, index) => {
+          expect(currentCards[index]).toBe(original);
+          expect(original.querySelector("img")).toBe(images[index]);
+          expect(original.classList.contains("is-selected")).toBe(original === card);
+        });
+        expect(document.activeElement).toBe(open);
+        expect(document.querySelectorAll(".card-selected-indicator")).toHaveLength(1);
+        expect(card.querySelector(".card-selected-indicator")).not.toBeNull();
+      }
+      expect(api.listMemes).toHaveBeenCalledTimes(listCalls);
+      expect(api.listMemePage).toHaveBeenCalledTimes(pageCalls);
+    } finally {
+      app.destroy();
+    }
+  });
+
   it("loads the library, replaces the page and filters by tag", async () => {
     const firstPage = Array.from({ length: 24 }, (_, index) =>
       makeMeme(index + 1),
@@ -2666,5 +2700,69 @@ describe("MemeVaultApp", () => {
     expect(searchInput.placeholder).toContain("按 Enter ↵ 检索");
     expect(submitBtn.textContent).toContain("检索 ↵");
     expect(submitBtn.hidden).toBe(false);
+  });
+
+  it("v2.1: selecting a meme preserves DOM node identity, toggles .is-selected and indicator without rebuilding grid or triggering cascade", async () => {
+    const api = makeApi({
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1), makeMeme(2)]),
+      listMemePage: vi.fn().mockResolvedValue({
+        items: [makeMeme(1), makeMeme(2)],
+        total: 2,
+        page: 1,
+        page_size: 24,
+        total_pages: 1,
+        sort: "default",
+        shuffle_seed: null,
+      }),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    const initialCard1 = document.querySelector<HTMLElement>('[data-meme-id="1"]')!;
+    const initialCard2 = document.querySelector<HTMLElement>('[data-meme-id="2"]')!;
+    expect(initialCard1).not.toBeNull();
+    expect(initialCard2).not.toBeNull();
+
+    initialCard1.click();
+    // Grid was not rebuilt; exact DOM node references are preserved
+    expect(document.querySelector('[data-meme-id="1"]')).toBe(initialCard1);
+    expect(document.querySelector('[data-meme-id="2"]')).toBe(initialCard2);
+    expect(initialCard1.classList.contains("is-selected")).toBe(true);
+    expect(initialCard1.querySelector(".card-selected-indicator")).not.toBeNull();
+    expect(initialCard1.hasAttribute("data-stagger-in")).toBe(false);
+
+    initialCard2.click();
+    // Again, DOM identity is strictly preserved
+    expect(document.querySelector('[data-meme-id="1"]')).toBe(initialCard1);
+    expect(document.querySelector('[data-meme-id="2"]')).toBe(initialCard2);
+    expect(initialCard1.classList.contains("is-selected")).toBe(false);
+    expect(initialCard1.querySelector(".card-selected-indicator")).toBeNull();
+    expect(initialCard2.classList.contains("is-selected")).toBe(true);
+    expect(initialCard2.querySelector(".card-selected-indicator")).not.toBeNull();
+    expect(initialCard2.hasAttribute("data-stagger-in")).toBe(false);
+
+    app.destroy();
+  });
+
+  it("v2.1: destroy() properly releases filterScrollFade and cascadeEntrance resources", async () => {
+    const api = makeApi({
+      listVaults: vi.fn().mockResolvedValue([
+        { id: 1, name: "Vault 1", slug: "meme", profile: "generic" },
+        { id: 2, name: "Vault 2", slug: "secondary", profile: "generic" },
+      ]),
+      listMemes: vi.fn().mockResolvedValue([makeMeme(1)]),
+    });
+    const app = new MemeVaultApp(root(), api);
+    await app.start();
+
+    const toolbar = document.querySelector<HTMLElement>(".library-filter-toolbar")!;
+    expect(toolbar).not.toBeNull();
+
+    const filterFadeDestroySpy = vi.spyOn((app as any).filterScrollFade, "destroy");
+    const cascadeDestroySpy = vi.spyOn((app as any).cascadeEntrance, "destroy");
+
+    expect(() => app.destroy()).not.toThrow();
+    expect(filterFadeDestroySpy).toHaveBeenCalledTimes(1);
+    expect(cascadeDestroySpy).toHaveBeenCalledTimes(1);
   });
 });

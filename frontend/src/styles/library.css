@@ -92,6 +92,33 @@
   overflow: visible;
 }
 
+/* v2.1 Filter chip horizontal scroll fade mask */
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-left][data-overflow-right],
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-left="true"][data-overflow-right="true"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+}
+
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-left]:not([data-overflow-right]),
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-left="true"]:not([data-overflow-right="true"]) {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black 100%);
+  mask-image: linear-gradient(to right, transparent, black 24px, black 100%);
+}
+
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-right]:not([data-overflow-left]),
+.filter-chip-scroll[data-v21-scroll-fade][data-overflow-right="true"]:not([data-overflow-left="true"]) {
+  -webkit-mask-image: linear-gradient(to right, black 0%, black calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, black 0%, black calc(100% - 24px), transparent 100%);
+}
+
+/* Disable mask when expanded or when focus is within to protect focus ring */
+.tag-filters[data-expanded] .filter-chip-scroll,
+.template-filters[data-expanded] .filter-chip-scroll,
+.filter-chip-scroll[data-v21-scroll-fade]:focus-within {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
 .template-filters [data-template-filter-search],
 .tag-filters [data-tag-filter-search] {
   width: 100%;
@@ -233,7 +260,7 @@
   border-color: var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-0);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
+  box-shadow: var(--card-rim-light), 0 1px 0 rgb(255 255 255 / 2%);
   transition:
     transform var(--motion-normal) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
@@ -243,27 +270,43 @@
 .library .meme-card:hover,
 .library .meme-card:focus-within {
   border-color: rgb(255 255 255 / 18%);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--card-rim-light), var(--shadow-md);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .library .meme-card:hover {
+    box-shadow:
+      var(--card-rim-light),
+      var(--shadow-md),
+      0 12px 28px -8px rgb(var(--accent-rgb) / 14%);
+  }
 }
 
 .library .meme-card.is-selected {
   border-color: rgb(var(--accent-rgb) / 82%);
   box-shadow:
+    var(--card-rim-light),
     0 0 0 1px rgb(var(--accent-rgb) / 42%),
     0 0 24px rgb(var(--accent-rgb) / 9%);
 }
 
 .library .meme-card.is-selected[data-card-tilt="ready"].is-card-lifted {
   box-shadow:
+    var(--card-rim-light),
     0 0 0 1px rgb(var(--accent-rgb) / 48%),
     0 0 28px rgb(var(--accent-rgb) / 12%),
     0 32px 70px rgb(0 0 0 / 48%),
     0 12px 26px rgb(0 0 0 / 30%);
 }
 
+.library .meme-grid[data-card-motion="off"] .meme-card {
+  box-shadow: var(--card-rim-light);
+}
+
 .library .meme-grid[data-card-motion="off"] .meme-card.is-selected,
 .library .meme-grid[data-card-motion="off"] .meme-card.is-selected:hover {
   box-shadow:
+    var(--card-rim-light),
     0 0 0 1px rgb(var(--accent-rgb) / 42%),
     0 0 24px rgb(var(--accent-rgb) / 9%);
 }
@@ -327,6 +370,28 @@
   color: var(--text-secondary);
   background: rgb(255 255 255 / 7%);
   font-weight: var(--weight-medium);
+}
+
+/* v2.1 Staggered cascade entrance for newly mounted library cards */
+@keyframes card-cascade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.meme-card[data-stagger-in="active"] {
+  animation: card-cascade-in 240ms var(--ease-standard) both;
+  animation-delay: var(--card-stagger-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meme-card[data-stagger-in] {
+    animation: none !important;
+    opacity: 1 !important;
+  }
 }
 
 @media (max-width: 900px) {

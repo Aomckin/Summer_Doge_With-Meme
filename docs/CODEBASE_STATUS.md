@@ -20,6 +20,7 @@ Windows 根目录快捷启动会在前端构建缺失或源码更新时先重建
 
 ## v2.0.4 前端架构治理与体验优化（已完成）
 
+- **卡片选中闪烁修复**：`selectMeme → renderMemeSelection` 仅更新网格中的选中样式和角标，详情及关联数据继续独立加载；不再因打开或切换详情而重建整个资料库网格，保留卡片、图片节点、按钮焦点与动画状态。回归测试覆盖重复点击、切换选中与不重复请求列表。
 - **生命周期安全与防内存泄漏（P1）**：`MemeVaultApp` 增加统一 `destroy()` 契约，支持销毁所有子控制器（AppShell、VaultManager、CaptionLab、EnrichmentWorkbench、InfiniteFeed 等）并终止正在进行的网络请求和定时器；登出/重进 Vault 时自动清理旧应用实例；卡片换页与重绘时通过 `unbindMemeCardTilts` 与 `stopDrunkPhysics` 显式解绑并取消物理/缓动动画帧。
 - **用户体验与交互安全增强（P2）**：
   - 新增全局非阻塞 Toast 通知系统（`toast.ts` + `toast.css`），操作反馈（如复制、关联、牌组归属）平滑呈现且具备无障碍 `role="status"` 与退出过渡。
@@ -408,8 +409,8 @@ GET/POST/PATCH/DELETE /api/memes/{meme_id}/captions...
 POST .../captions/generate 或 .../rewrite
   -> CaptionService 按 position 读取全部 MemeImage
   -> 当前激活 AIClient 的 Responses/Chat 实现
-  -> 去空白、去重并校验候选数量
   -> 拼接同一 Responses 消息的正文片段，并解析 JSON（兼容代码块包裹）
+  -> 去空白、去重并校验候选数量
   -> 只返回前端，不写数据库
 ```
 

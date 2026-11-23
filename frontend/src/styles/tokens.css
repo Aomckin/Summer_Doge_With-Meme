@@ -76,6 +76,7 @@
 
   /* Border and elevation. */
   --border-width: 1px;
+  --card-rim-light: inset 0 1px 0 rgb(255 255 255 / 6%);
   --shadow-sm: 0 8px 24px rgb(0 0 0 / 14%);
   --shadow-md: 0 20px 60px rgb(0 0 0 / 24%);
   --shadow-lg: 0 34px 100px rgb(0 0 0 / 55%);

@@ -4,6 +4,8 @@ from importlib import import_module, util
 
 from sqlalchemy import inspect
 
+from tests.vault_helpers import ensure_default_vault
+
 
 def load_meme_components():
     assert util.find_spec("app.models") is not None, "Models package is missing"
@@ -50,7 +52,9 @@ def test_meme_record_can_be_written_and_read() -> None:
     database.create_tables()
     session = database.SessionLocal()
 
+    vault_id = ensure_default_vault(session).id
     meme = model_module.Meme(
+        vault_id=vault_id,
         title="测试 Meme",
         description="用于验证模型读写",
         original_filename="original.png",
@@ -74,6 +78,7 @@ def test_meme_record_can_be_written_and_read() -> None:
         saved_meme = session.get(model_module.Meme, meme_id)
 
         assert saved_meme is not None
+        assert saved_meme.vault_id == vault_id
         assert saved_meme.title == "测试 Meme"
         assert saved_meme.file_hash == "model-test-sha256"
         assert saved_meme.created_at is not None

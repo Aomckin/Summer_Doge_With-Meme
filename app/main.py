@@ -21,6 +21,7 @@ from app.api.similarity_inspection import router as similarity_inspection_router
 from app.api.tags import router as tag_router
 from app.api.templates import router as template_router
 from app.api.vaults import router as vault_router
+from app.api.publisher import handle_publisher_error, router as publisher_router
 from app.config import (
     AI_SETTINGS_KEY_FILE,
     FRONTEND_DIST_DIR,
@@ -45,6 +46,9 @@ from app.auth import (
 from app.database import SessionLocal, create_tables
 from app.storage.vault_storage import VaultStorageService
 from app.services.import_job_service import ImportJobManager
+from app.services.post_service import PostNotFound, PublisherConflict, PublisherInputError
+from app.services.publisher_registry import PublisherRegistry
+from app.services.publisher_service import PublisherService
 from app.services.export_job_service import ExportJobManager
 from app.services.embedding_job_manager import EmbeddingJobManager
 from app.services.enrichment_job_manager import EnrichmentJobManager
@@ -57,6 +61,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     create_tables()
     application.state.import_job_manager.recover_interrupted()
     application.state.export_job_manager.startup()
+    application.state.publisher_service.startup()
     application.state.embedding_job_manager.startup()
     application.state.enrichment_job_manager.startup()
     try:
@@ -64,6 +69,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     finally:
         application.state.import_job_manager.shutdown()
         application.state.export_job_manager.shutdown()
+        application.state.publisher_service.shutdown()
         application.state.embedding_job_manager.shutdown()
         application.state.enrichment_job_manager.shutdown()
 
@@ -101,7 +107,7 @@ def create_app(
 
     application = FastAPI(
         title="Meme Vault",
-        version="2.0.0",
+        version="2.2.0",
         lifespan=lifespan,
     )
     application.state.images_dir = resolved_images
@@ -109,6 +115,12 @@ def create_app(
     application.state.vault_storage = VaultStorageService(
         resolved_images.parent, resolved_images, resolved_thumbnails
     )
+    application.state.publisher_service = PublisherService(
+        SessionLocal, application.state.vault_storage, resolved_images.parent / "publisher",
+        PublisherRegistry.from_environment(),
+    )
+    for error in (PostNotFound, PublisherConflict, PublisherInputError):
+        application.add_exception_handler(error, handle_publisher_error)
     application.state.template_images_dir = resolved_template_images
     application.state.template_thumbnails_dir = resolved_template_thumbnails
     application.state.ai_settings_key_file = ai_settings_key_file.resolve()
@@ -172,6 +184,7 @@ def create_app(
     application.include_router(collection_router)
     application.include_router(import_job_router)
     application.include_router(export_job_router)
+    application.include_router(publisher_router)
     application.include_router(embedding_job_router)
     application.include_router(enrichment_router)
     application.include_router(recommendation_router)
@@ -184,12 +197,13 @@ def create_app(
 
     # 根路径挂载必须最后注册，避免吞掉 API、媒体与 Swagger 路由。
     # 只有完整构建的入口文件存在时才启用，后端因此可独立启动。
+    entry_headers = {"Cache-Control": "no-cache"}
     mobile_index = resolved_frontend / "mobile" / "index.html"
     if mobile_index.is_file():
         application.add_api_route(
             "/mobile",
-            lambda: FileResponse(mobile_index),
-            methods=["GET"],
+            lambda: FileResponse(mobile_index, headers=entry_headers),
+            methods=["GET", "HEAD"],
             include_in_schema=False,
             name="mobile-ingest",
         )
@@ -197,15 +211,14 @@ def create_app(
     # /v/{vault_slug} 是前端 Vault URL 状态入口；刷新时回退到 SPA 入口页。
     main_index = resolved_frontend / "index.html"
     if main_index.is_file():
-        application.add_api_route(
-            "/v/{vault_slug}",
-            lambda: FileResponse(main_index),
-            methods=["GET"],
-            include_in_schema=False,
-            name="vault-entry",
-        )
-
-    if (resolved_frontend / "index.html").is_file():
+        for path, name in (("/", "main-entry"), ("/v/{vault_slug}", "vault-entry")):
+            application.add_api_route(
+                path,
+                lambda: FileResponse(main_index, headers=entry_headers),
+                methods=["GET", "HEAD"],
+                include_in_schema=False,
+                name=name,
+            )
         application.mount(
             "/",
             StaticFiles(directory=resolved_frontend, html=True),

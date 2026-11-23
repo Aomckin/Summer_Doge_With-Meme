@@ -573,6 +573,90 @@ export interface SimilarityInspectionResponse {
   pairs: SimilarityInspectionPair[];
 }
 
+export interface PostItemInput {
+  id: string;
+  meme_id: number;
+  meme_image_id: number;
+  caption: string;
+}
+
+export interface PostItem extends PostItemInput {
+  position: number;
+  meme_title: string | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+}
+
+export interface PostContent {
+  title: string;
+  intro_text: string;
+  outro_text: string;
+  items: PostItemInput[];
+}
+
+export interface PostSummary {
+  id: number;
+  title: string;
+  status: "draft";
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostDraft extends PostSummary {
+  intro_text: string;
+  outro_text: string;
+  items: PostItem[];
+}
+
+export type PublishAction = "export" | "prepare" | "dry_run" | "remote_draft" | "publish";
+export type PublishStatus = "queued" | "running" | "unknown" | "prepared" | "remote_draft" | "published" | "failed";
+
+export interface PublishRequest {
+  request_id: string;
+  revision: number;
+  plugin_id: string | null;
+  action: PublishAction;
+  retry_of: string | null;
+}
+
+export interface PublishAttempt extends Omit<PublishRequest, "request_id"> {
+  id: string;
+  post_id: number;
+  plugin_version: string | null;
+  status: PublishStatus;
+  external_post_id: string | null;
+  external_url: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  download_url: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface PublisherLogin {
+  id: string;
+  status: "waiting" | "succeeded" | "expired" | "failed";
+  qr_png: string | null;
+  message: string | null;
+}
+
+export interface PublisherInfo {
+  plugin_id: string;
+  name: string;
+  version: string;
+  protocol_version: "1";
+  supported_content_types: "image_text"[];
+  capabilities: string[];
+  limits: { max_images: number | null; max_image_bytes: number | null; max_package_bytes: number | null };
+  execution_mode: "local_process";
+  enabled: boolean;
+  available: boolean;
+  recent_attempt: PublishAttempt | null;
+  qr_session_saved?: boolean | null;
+}
+
 export interface CollectionSummary {
   id: number;
   name: string;

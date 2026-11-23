@@ -38,6 +38,7 @@ data/thumbnails/*
 data/template_images/*
 data/template_thumbnails/*
 data/export_archives/*
+data/publisher/
 data/import_archives/*
 data/**/*.part
 !data/images/.gitkeep

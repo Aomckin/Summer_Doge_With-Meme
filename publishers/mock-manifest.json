@@ -1,0 +1,10 @@
+{
+  "plugin_id": "mock",
+  "name": "Mock Publisher",
+  "version": "1.0.0",
+  "protocol_version": "1",
+  "supported_content_types": ["image_text"],
+  "capabilities": ["image_text", "multiple_images", "gif", "prepare", "dry_run"],
+  "limits": {},
+  "execution_mode": "local_process"
+}

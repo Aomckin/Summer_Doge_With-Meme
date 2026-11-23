@@ -30,8 +30,11 @@ def test_frontend_is_mounted_last_when_index_exists(tmp_path: Path) -> None:
         route.path for route in app.routes if hasattr(route, "path")
     ]
 
-    assert get(app, "/").status_code == 200
-    assert "Meme Vault" in get(app, "/").text
+    for path in ("/", "/v/meme"):
+        response = get(app, path)
+        assert response.status_code == 200
+        assert "Meme Vault" in response.text
+        assert response.headers["cache-control"] == "no-cache"
     assert route_paths[-1] == ""
     assert route_paths.index("") > route_paths.index("/api/health")
     assert route_paths.index("") > route_paths.index("/media/images")
@@ -77,6 +80,7 @@ def test_mobile_ingest_has_a_clean_route_when_built(tmp_path: Path) -> None:
     response = get(app, "/mobile")
     assert response.status_code == 200
     assert "Mobile Ingest" in response.text
+    assert response.headers["cache-control"] == "no-cache"
     route_paths = [route.path for route in app.routes if hasattr(route, "path")]
     assert route_paths.index("/mobile") < route_paths.index("")
 

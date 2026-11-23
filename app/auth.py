@@ -156,6 +156,7 @@ def _required_role(
         return "admin"
     if path.startswith((
         "/api/export-jobs",
+        "/api/publisher/",
         "/api/embedding-jobs",
         "/api/enrichment-",
         "/api/ai-settings",

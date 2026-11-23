@@ -587,6 +587,12 @@ v2.0 明确不做：云同步、跨 Vault 联合搜索、模板/收藏集的 Vau
 - [x] 阶段五：样式解耦与规范归档（拆解 3,500 行的 `main.css` 巨石文件为功能模块 CSS，拆分 `toast.css`、`meme-maker.css`、`enrichment.css`、`vault-inspector.css`、`batch.css`，保持类名与 Tokens 100% 兼容）。
 
 ### Phase 3 后续候选：公开访问与部署增强（尚未排期）
+### v2.2.0：Publisher Bridge 与帖文工作台
+
+- [x] 独立草稿和逐图文案、图库与牌组选图、拖动排序、自动保存、预览与缺图修复。
+- [x] 标准 ZIP、可信本地进程协议、插件管理和分版本发布历史，使用离线 Mock 验证交付。
+- [x] 小黑盒 CLI 适配器使用独立 CLI 环境，按文章顺序转换图片与文案。登录后可从工作台显式创建远端草稿或发布。配置见 [Publisher 插件协议](publisher-plugin-api.md#小黑盒-cli-发布插件)。
+
 
 > v1.0.0 Phase 3 已提供私人/小范围受邀访问边界。以下仍是长期候选；开始实现前必须另行确定唯一主目标并形成独立任务书和迁移方案。
 
@@ -700,7 +706,7 @@ data/thumbnails/*
 - [x] 完成多图 Meme 沉浸式顺序浏览；封面节点复用，关闭后恢复原 DOM 且不重载布局。
 - [x] 完成五档 Card Motion、Card Size / Aspect Ratio 系数、Magnetic Follow 和 drunk 环境物理，并进入 Feature Freeze。
 
-当前状态：v2.0.0 Multi-Vault 已完成（Vault 实体、vault_id 隔离、VaultStorage、per-Vault 语义索引、Vault API/媒体路由、旧接口兼容层、前端 Vault Selector 与 /v/{slug} URL 状态）；提交基线为 `v2.0` 分支当前 `HEAD`
+当前状态：Multi-Vault 与 v2.2.0 Publisher Bridge 已实现，详见上方版本记录及 [代码现状](CODEBASE_STATUS.md)。
 后端：Python + FastAPI
 前端：Vite + 原生 TypeScript
 数据库：SQLite

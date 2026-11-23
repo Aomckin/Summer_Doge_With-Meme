@@ -147,6 +147,7 @@ import type { MemeMakerController, MemeVaultImageInput } from "./meme-maker";
 import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
 import { showToast } from "./toast";
 import { installSearchableTemplateSelectors } from "./searchable-template-select";
+import type { PublisherWorkspace } from "./publisher-workspace";
 import { AppShellController } from "./app-shell";
 import {
   applyCardMotionPreset,
@@ -462,6 +463,8 @@ export class MemeVaultApp {
   private memeMakerInstance: MemeMakerController | null = null;
   private memeMakerLoading: Promise<MemeMakerController> | null = null;
   private editTagEditor: TagEditor | null = null;
+  private publisherWorkspace: PublisherWorkspace | null = null;
+  private publisherLoading: Promise<PublisherWorkspace | null> | null = null;
   private templateReferencePreviewToken = 0;
   private similarController: AbortController | null = null;
   private readonly vaultManager: VaultManagerController;
@@ -479,6 +482,7 @@ export class MemeVaultApp {
       this.elements.vaultSelectorName,
       {
         list: () => (this.api.listVaults ?? listVaults)(),
+    if (this.capabilities.canWrite) this.bindPublisherEntry();
         create: input => (this.api.createVault ?? createVault)(input),
         update: (id, input) => (this.api.updateVault ?? updateVault)(id, input),
         delete: (id, force) => (this.api.deleteVault ?? deleteVault)(id, force),
@@ -661,6 +665,7 @@ export class MemeVaultApp {
       this.elements.openChatRecommendationButton,
       {
         recommend: input => (this.api.recommendChatMemes ?? recommendChatMemes)(input),
+        addToPost: this.capabilities.canWrite ? memes => void this.openPublisher(false, memes) : undefined,
       },
       {
         openDetail: meme => this.selectMeme(meme),
@@ -982,6 +987,8 @@ export class MemeVaultApp {
   ): Promise<void> {
     const vault = this.state.currentVault;
     if (!vault) return;
+    this.publisherWorkspace?.destroy();
+    this.collectionManager.destroy();
     const updated = await call(vault.id);
     const index = this.state.vaults.findIndex(candidate => candidate.id === updated.id);
     if (index >= 0) this.state.vaults[index] = updated;
@@ -995,6 +1002,42 @@ export class MemeVaultApp {
     if (!vault) return;
     // 与后端解析结果合并默认值，容忍旧数据缺字段。
     const resolved = {
+  private bindPublisherEntry(): void {
+    const root = this.elements.appRoot;
+    for (const button of root.querySelectorAll<HTMLButtonElement>("[data-open-publisher], [data-open-publisher-plugins], [data-add-library-to-post]")) {
+      button.hidden = false;
+    }
+    root.addEventListener("click", event => {
+      const target = event.target as Element;
+      if (target.closest("[data-open-publisher]")) void this.openPublisher(false);
+      else if (target.closest("[data-open-publisher-plugins]")) void this.openPublisher(true);
+      else if (target.closest("[data-add-library-to-post]")) void this.openPublisher(false, this.state.memes);
+      else if (target.closest("[data-add-detail-to-post]") && this.state.selectedMeme) {
+        void this.openPublisher(false, [this.state.selectedMeme]);
+      }
+    }, { signal: this.abortController.signal });
+  }
+
+  private async openPublisher(management: boolean, source?: MemeResponse[]): Promise<void> {
+    try {
+      if (!this.publisherWorkspace) this.publisherLoading ??= import("./publisher-workspace").then(({ PublisherWorkspace }) => {
+        if (this.abortController.signal.aborted) return null;
+        this.publisherWorkspace = new PublisherWorkspace(
+          () => this.state.vaults,
+          () => this.state.currentVault?.id,
+        );
+        return this.publisherWorkspace;
+      }).finally(() => { this.publisherLoading = null; });
+      const workspace = this.publisherWorkspace ?? await this.publisherLoading;
+      if (source) await workspace?.addFromGallery(source);
+      else await workspace?.open(management);
+    } catch (error) {
+      if (!this.abortController.signal.aborted) {
+        showToast(error instanceof ApiError ? error.message : "无法打开帖文工作台，请重试", "error");
+      }
+    }
+  }
+
       ...DEFAULT_APPEARANCE_SETTINGS,
       ...(vault.appearance ?? {}) as Record<string, unknown>,
     } as unknown as Parameters<AppearanceController["applyVaultTheme"]>[0];

@@ -22,7 +22,7 @@ Meme Vault 解决的是一个很朴素的问题：当 Meme 收藏不断增长，
 
 `Local-first（本地优先）` · `Semantic Search（语义搜索）` · `Immersive Browsing（沉浸浏览）` · `Visitor / Admin（访客 / 管理员）` · `Read-only External API（只读外部 API）`
 
-**Current release / 当前版本：v2.0.4 — 前端架构治理与体验优化（含 Multi-Vault、按需动态加载与原生 Toast 体系）**
+**Current release / 当前版本：v2.2.0 — Publisher Bridge 与帖文工作台**
 
 ## Screenshots / 界面截图
 
@@ -65,6 +65,12 @@ MemeVault
 - Meme、Tag（标签）与 Template（模板）的增删改查和组合筛选。
 - Pagination（分页）、Batch Upload（批量上传）、多图 Meme、原图 / GIF 浏览与单图下载。
 - Inspector（详情检查器）、批量 ZIP 导入导出、Collection / Deck（收藏集 / 牌组）与重复内容巡检。
+
+### Publisher Workspace / 帖文工作台
+
+- Admin 从「更多功能 → 帖文工作台」创建草稿，也可以从资料库、搜索结果、详情或牌组选择一批图片追加到已有帖文。工作台选图支持关键词、语义检索、跳页和调整每页素材数量。
+- 每个图片条目都有独立文案，支持指定多图素材中的某一张、重复引用、拖动排序或用上移／下移，修改会自动保存。图片下的「选用已保存文案」可以复制该 Meme 在文案实验室里的正文。通用预览保留空文案和换行。
+- 「发布与历史」可导出 ZIP 或运行随附的离线 Mock Publisher。「更多功能 → Publisher 管理」显示注册插件、能力及最近结果。小黑盒 CLI Publisher 可通过本地配置增加文章试运行、远端草稿和正式发布，管理员可在「Publisher 管理」里扫码登录。配置和登录方法见 [Publisher 插件协议](docs/publisher-plugin-api.md#小黑盒-cli-发布插件)。
 
 ### Search & Discovery / 搜索与重新发现
 
@@ -186,7 +192,7 @@ python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8002
 .\run-meme-vault.cmd
 ```
 
-Windows 可以直接双击 `run-meme-vault.cmd`。它使用项目虚拟环境，只为本次 PowerShell 进程设置 `ExecutionPolicy Bypass`，不修改系统执行策略；启动失败会显示错误并等待按键，避免窗口闪退。默认端口为 8002；若被其他程序占用，脚本在应用初始化前提示错误，可用 `.\run-meme-vault.cmd -Port 8003` 指定其他空闲端口。
+Windows 可以直接双击 `run-meme-vault.cmd`。前端构建缺失或源码更新后，启动器先重建前端，以便从当前版本的「更多功能」进入帖文工作台和 Publisher 管理。它使用项目虚拟环境，只为本次 PowerShell 进程设置 `ExecutionPolicy Bypass`，不修改系统执行策略；启动失败会显示错误并等待按键，避免窗口闪退。默认端口为 8002；若被其他程序占用，脚本在应用初始化前提示错误，可用 `.\run-meme-vault.cmd -Port 8003` 指定其他空闲端口。
 
 也可以在已有终端中运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run-meme-vault.ps1`。脚本失败默认等待回车；自动化调用可加 `-NoPauseOnError`，失败时返回退出码 1。执行策略为 `Restricted` 时，直接执行 `.ps1` 会在脚本执行前被拦截，此时使用 `.cmd` 入口。
 

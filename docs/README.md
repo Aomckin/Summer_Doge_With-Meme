@@ -15,6 +15,7 @@
 ## 使用与集成指南 · guides/
 
 - [外部 Meme API](guides/external-api.md)：认证、端点、参数、媒体访问与错误语义。
+- [Publisher 插件协议](publisher-plugin-api.md)涵盖发布包、配置、回执和小黑盒最小对接示例。
 - 安装、启动和配置见 [项目 README](../README.md)。
 
 ## 设计提案 · design/
@@ -31,6 +32,7 @@
 | [多仓库资产管理系统任务书](<planning/MemeVault 多仓库资产管理系统开发任务书.md>) | 多仓库系统的原始需求与开发范围。 |
 | [v2.0.4 前端架构治理与体验优化](planning/v2.0.4_前端架构治理与体验优化任务书.md) | v2.0.4 前端专项任务书。 |
 | [v2.1 前端视觉与交互优化](planning/v2.1_前端视觉与交互优化任务书.md) | 初始规划稿，保留当时范围和约束。 |
+| [v2.2 Publisher Bridge](<planning/Meme Vault v2.2 开发任务书.md>) | 帖文工作台、发布包、适配协议与验收。 |
 
 本地如有独立前端目录 `frontend-v2.1/`，其设计与验收资料分别为 `V2_1_CREATIVE.md`、`V2_1_ACCEPTANCE.md`。该实验工程不随本次文档归类提交，资料是否可用以本地目录为准。
 

@@ -1,6 +1,6 @@
 import type { AppState, MemeCardSize, MemeResponse, VaultSummary } from "./types";
 import { hasCapability, profileForVault } from "./vault-profile";
-import { buildPaginationTokens, clampPage } from "./pagination";
+import { clampPage, memePageSizeOptions, paginationMarkup } from "./pagination";
 import { memeCopySource } from "./meme-actions";
 import { bindMemeCardTilts, storedCardMotionPreset, unbindMemeCardTilts } from "./card-tilt";
 import type { InfiniteFeedState } from "./immersive/immersive-feed";
@@ -197,6 +197,7 @@ export function mountShell(root: HTMLElement): AppElements {
                   <span class="management-group-label">创作与组织</span>
                   <button id="open-meme-maker" type="button" role="menuitem"><span>Meme 制作器</span><small>组合图片与文字</small></button>
                   <button id="open-collections" type="button" role="menuitem"><span>牌组</span><small>整理常用收藏</small></button>
+                  <button type="button" role="menuitem" data-open-publisher hidden><span>帖文工作台</span><small>编排图片与逐图文案</small></button>
                   <button id="open-chat-recommendation" type="button" role="menuitem"><span>场景召唤</span><small>按聊天语境找 Meme</small></button>
                 </section>
                 <section>
@@ -211,6 +212,7 @@ export function mountShell(root: HTMLElement): AppElements {
                   <span class="management-group-label">系统</span>
                   <button id="open-semantic-index" type="button" role="menuitem"><span>语义索引</span><small>索引状态与任务</small></button>
                   <button id="open-settings" type="button" role="menuitem"><span>API 设置</span><small>厂商、模型与密钥</small></button>
+                  <button type="button" role="menuitem" data-open-publisher-plugins hidden><span>Publisher 管理</span><small>插件能力与执行记录</small></button>
                 </section>
               </div>
             </details>
@@ -240,6 +242,7 @@ export function mountShell(root: HTMLElement): AppElements {
           <div id="browsing-controls" class="browsing-controls" aria-label="资料库视图设置">
             <span class="browsing-controls-label">视图</span>
             <label>顺序
+            <button type="button" class="button button-ghost" data-add-library-to-post hidden>添加到帖文</button>
               <select data-list-sort aria-label="资料库顺序">
                 <option value="default">默认顺序</option>
                 <option value="shuffle">随机顺序</option>
@@ -248,7 +251,7 @@ export function mountShell(root: HTMLElement): AppElements {
             <button class="button button-secondary" type="button" data-reshuffle hidden>重新洗牌</button>
             <label>每页
               <select data-page-size aria-label="每页显示数量">
-                <option value="24">24</option><option value="48">48</option><option value="96">96</option>
+                ${memePageSizeOptions}
               </select>
             </label>
             <label>卡片
@@ -1031,19 +1034,7 @@ export function renderLibrary(
     bindMemeCardTilts(elements.memeGrid);
   }
 
-  const disabled = state.loadingList || state.totalPages === 0;
-  const tokens = buildPaginationTokens(state.page, state.totalPages)
-    .map((token) => token === "ellipsis"
-      ? '<span class="pagination-ellipsis" aria-hidden="true">…</span>'
-      : `<button type="button" class="button button-ghost pagination-number${token === state.page ? " is-active" : ""}" data-page="${token}" ${disabled || token === state.page ? "disabled" : ""} aria-current="${token === state.page ? "page" : "false"}">${token}</button>`)
-    .join("");
-  elements.pagination.innerHTML = `
-    <button type="button" class="button button-ghost" data-page="1" ${disabled || state.page <= 1 ? "disabled" : ""}>第一页</button>
-    <button type="button" class="button button-ghost" data-page="${state.page - 1}" ${disabled || state.page <= 1 ? "disabled" : ""}>上一页</button>
-    <span class="pagination-numbers">${tokens}</span>
-    <button type="button" class="button button-ghost" data-page="${state.page + 1}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>下一页</button>
-    <button type="button" class="button button-ghost" data-page="${state.totalPages}" ${disabled || state.page >= state.totalPages ? "disabled" : ""}>最后一页</button>
-    <label>跳至页码 <input type="number" min="1" max="${Math.max(1, state.totalPages)}" inputmode="numeric" data-page-input ${disabled ? "disabled" : ""}></label>`;
+  elements.pagination.innerHTML = paginationMarkup(state.page, state.totalPages, state.loadingList);
 }
 
 export function renderImmersiveFeed(
@@ -1584,7 +1575,7 @@ export function renderDetail(
               ${meme.image_count === 1 ? '<button class="button button-secondary" type="button" data-copy-detail>复制图片</button>' : '<button class="button button-secondary" type="button" data-open-viewer data-image-index="0">选择图片复制</button>'}
               <a class="button button-secondary" href="${escapeHtml(meme.image_url)}" target="_blank" rel="noopener noreferrer">打开原图</a>
               ${meme.image_count === 1 || !isVisitor ? `<a class="button button-secondary" href="/api/memes/${meme.id}/download" data-download-meme>${meme.image_count > 1 ? "下载图片组" : "下载图片"}</a>` : ""}
-              ${isVisitor ? "" : '<button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button><button class="button button-secondary" type="button" data-edit-meme>编辑</button>'}
+              ${isVisitor ? "" : '<button class="button button-secondary" type="button" data-manage-meme-collections>加入牌组</button><button class="button button-secondary" type="button" data-add-detail-to-post>添加到帖文</button><button class="button button-secondary" type="button" data-edit-meme>编辑</button>'}
             </div>
           </section>
           ${hasCapability(state.currentVault, "artworkMetadata") ? profileMetadataMarkup(state) : ""}

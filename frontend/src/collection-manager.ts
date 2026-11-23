@@ -24,6 +24,7 @@ export interface CollectionActions {
   openDetail(meme: MemeResponse): void;
   openViewer(meme: MemeResponse): void;
   copyMeme?(meme: MemeResponse, button: HTMLButtonElement): Promise<boolean>;
+  addToPost?(memes: MemeResponse[]): void;
 }
 
 function message(error: unknown): string {
@@ -31,6 +32,7 @@ function message(error: unknown): string {
 }
 
 export class CollectionManagerController {
+  private readonly lifecycle = new AbortController();
   private readonly dialog = document.createElement("dialog");
   private readonly membershipDialog = document.createElement("dialog");
   private collections: CollectionSummary[] = [];
@@ -53,7 +55,7 @@ export class CollectionManagerController {
     this.membershipDialog.className = "settings-dialog membership-dialog";
     this.membershipDialog.dataset.membershipDialog = "";
     document.body.append(this.dialog, this.membershipDialog);
-    opener.addEventListener("click", () => void this.open());
+    opener.addEventListener("click", () => void this.open(), { signal: this.lifecycle.signal });
     this.dialog.addEventListener("click", event => this.handleManagerClick(event));
     this.dialog.addEventListener("submit", event => this.handleSubmit(event));
     this.membershipDialog.addEventListener("click", event => this.handleMembershipClick(event));
@@ -99,6 +101,13 @@ export class CollectionManagerController {
         this.renderMembership();
       }
     }
+  }
+
+  destroy(): void {
+    this.lifecycle.abort();
+    this.abort();
+    this.dialog.remove();
+    this.membershipDialog.remove();
   }
 
   private beginRequest(): number {
@@ -158,7 +167,7 @@ export class CollectionManagerController {
       const detail = this.detail;
       this.dialog.innerHTML = `<div class="settings-shell collection-shell">
         <header class="settings-header"><div><p class="eyebrow">DECK CONTENTS</p><h2>${escapeHtml(detail.name)}</h2><p>${escapeHtml(detail.description || "暂无描述")}</p></div><button class="icon-button" type="button" data-close-collections aria-label="关闭牌组详情">×</button></header>
-        <div class="collection-detail-toolbar"><button class="button button-ghost" type="button" data-back-collections>← 返回牌组</button><strong>${detail.meme_count} 个 Meme</strong></div>
+        <div class="collection-detail-toolbar"><button class="button button-ghost" type="button" data-back-collections>← 返回牌组</button><strong>${detail.meme_count} 个 Meme</strong>${this.actions.addToPost && detail.items.length ? '<button type="button" class="button button-secondary" data-add-collection-to-post>添加到帖文</button>' : ""}</div>
         ${error}
         <div class="collection-grid">${detail.items.length ? detail.items.map(item => `<div class="collection-card">${memeCardMarkup(item.meme, false, "medium", undefined, false)}<div class="collection-card-actions">${item.meme.image_count === 1 ? `<button class="button button-secondary" type="button" data-collection-copy="${item.meme.id}">复制</button>` : ""}<button class="button button-secondary" type="button" data-collection-viewer="${item.meme.id}">原图</button><a class="button button-secondary" href="/api/memes/${item.meme.id}/download">下载</a><button class="button button-danger" type="button" data-remove-collection-meme="${item.meme.id}">从牌组移除</button></div></div>`).join("") : '<div class="collection-empty"><h3>这个牌组还是空的。</h3><p>从 Meme 详情页选择“加入牌组”即可添加。</p></div>'}</div>
       </div>`;
@@ -191,6 +200,9 @@ export class CollectionManagerController {
     else if (target.closest("[data-back-collections]")) { this.detail = null; this.error = null; this.renderManager(); }
     else if (target.closest("[data-cancel-collection-edit]")) { this.editingId = null; this.renderManager(); }
     else if (target.closest("[data-edit-collection]")) { this.editingId = Number(target.closest<HTMLElement>("[data-edit-collection]")?.dataset.editCollection); this.renderManager(); }
+    else if (target.closest("[data-add-collection-to-post]") && this.detail) {
+      this.actions.addToPost?.(this.detail.items.map(item => item.meme));
+    }
     else if (target.closest("[data-open-collection]")) void this.openDetail(Number(target.closest<HTMLElement>("[data-open-collection]")?.dataset.openCollection));
     else if (target.closest("[data-delete-collection]")) void this.deleteCollection(Number(target.closest<HTMLElement>("[data-delete-collection]")?.dataset.deleteCollection));
     else if (target.closest("[data-remove-collection-meme]")) void this.removeMeme(Number(target.closest<HTMLElement>("[data-remove-collection-meme]")?.dataset.removeCollectionMeme));

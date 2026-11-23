@@ -54,11 +54,47 @@ import type {
   ChatRecommendationResponse,
   SimilarityInspectionInput,
   SimilarityInspectionResponse,
+  PostSummary,
+  PostDraft,
+  PostContent,
+  PostItemInput,
+  PublishAttempt,
+  PublishRequest,
+  PublisherInfo,
+  PublisherLogin,
   CollectionSummary,
   CollectionDetail,
   CollectionPayload,
   MemeCollectionsResponse,
 } from "./types";
+
+const publisherPath = "/api/publisher";
+
+export const publisherApi = {
+  list: (signal?: AbortSignal) => requestJson<PostSummary[]>(`${publisherPath}/posts`, { signal }),
+  get: (id: number, signal?: AbortSignal) => requestJson<PostDraft>(`${publisherPath}/posts/${id}`, { signal }),
+  otherImageIds: (id: number, signal?: AbortSignal) =>
+    requestJson<number[]>(`${publisherPath}/posts/${id}/other-image-ids`, { signal }),
+  create: (body: PostContent) => requestJson<PostDraft>(`${publisherPath}/posts`, jsonRequest("POST", body)),
+  update: (id: number, revision: number, body: PostContent, signal: AbortSignal) =>
+    requestJson<PostDraft>(`${publisherPath}/posts/${id}`, { ...jsonRequest("PUT", { ...body, revision }), signal }),
+  append: (id: number, items: PostItemInput[]) =>
+    requestJson<PostDraft>(`${publisherPath}/posts/${id}/items`, jsonRequest("POST", { items })),
+  copy: (id: number) => requestJson<PostDraft>(`${publisherPath}/posts/${id}/copy`, jsonRequest("POST")),
+  moveToTop: (id: number, signal: AbortSignal) =>
+    requestJson<PostSummary>(`${publisherPath}/posts/${id}/move-to-top`, { method: "POST", signal }),
+  remove: (id: number, revision: number) =>
+    requestJson<void>(`${publisherPath}/posts/${id}?revision=${revision}`, jsonRequest("DELETE")),
+  plugins: (signal?: AbortSignal) => requestJson<PublisherInfo[]>(`${publisherPath}/plugins`, { signal }),
+  beginXiaoheiheLogin: (signal: AbortSignal) =>
+    requestJson<PublisherLogin>(`${publisherPath}/plugins/xiaoheihe/login`, { method: "POST", signal }),
+  xiaoheiheLogin: (id: string, signal: AbortSignal) =>
+    requestJson<PublisherLogin>(`${publisherPath}/plugins/xiaoheihe/login/${encodeURIComponent(id)}`, { signal }),
+  attempts: (id: number, offset: number, signal?: AbortSignal) =>
+    requestJson<PublishAttempt[]>(`${publisherPath}/posts/${id}/attempts?offset=${offset}`, { signal }),
+  run: (id: number, body: PublishRequest) =>
+    requestJson<PublishAttempt>(`${publisherPath}/posts/${id}/attempts`, jsonRequest("POST", body)),
+};
 
 export function listCollections(signal?: AbortSignal): Promise<CollectionSummary[]> {
   return requestJson<CollectionSummary[]>("/api/collections", { signal });

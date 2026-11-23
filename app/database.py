@@ -170,7 +170,7 @@ def _backup_sqlite_file(bind: Engine) -> None:
 def upgrade_vault_isolation(bind: Engine) -> None:
     """v2.0.0 Multi-Vault 升级：默认 Vault、vault_id 回填与 Vault 内 hash 唯一索引。
 
-    单事务执行、可重复运行；新库由 ORM 直接建出目标结构，本函数不做任何写入。
+    可重复运行；新库由 ORM 建出结构，此处确保默认 Vault 存在。
     """
     if bind.dialect.name != "sqlite":
         return
@@ -239,12 +239,16 @@ def upgrade_vault_isolation(bind: Engine) -> None:
         if pending or needs_backfill:
             _backup_sqlite_file(bind)
 
+        if "next_asset_no" not in vault_table_columns:
+            connection.execute(text("ALTER TABLE vaults ADD COLUMN next_asset_no INTEGER"))
+
         # 默认 meme Vault 必须始终存在（新库同样需要）；slug 唯一保证幂等。
         connection.execute(text(
-            "INSERT INTO vaults (name, slug, type, description, storage_path, created_at, updated_at) "
-            "SELECT :name, :slug, 'meme', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+            "INSERT INTO vaults (name, slug, type, profile, storage_path, next_asset_no, created_at, updated_at) "
+            "SELECT :name, :slug, 'meme', 'meme', NULL, :initial_asset_no, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
             "WHERE NOT EXISTS (SELECT 1 FROM vaults WHERE slug = :slug)"
-        ), {"name": DEFAULT_VAULT_NAME, "slug": DEFAULT_VAULT_SLUG})
+        ), {"name": DEFAULT_VAULT_NAME, "slug": DEFAULT_VAULT_SLUG,
+            "initial_asset_no": 1 if "next_asset_no" in vault_table_columns else None})
 
         for _table_name, statement in pending:
             connection.execute(text(statement))
@@ -287,7 +291,6 @@ def upgrade_vault_isolation(bind: Engine) -> None:
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_memes_vault_asset_no ON memes (vault_id, vault_asset_no)"
             ))
         if "next_asset_no" not in vault_table_columns:
-            connection.execute(text("ALTER TABLE vaults ADD COLUMN next_asset_no INTEGER"))
             connection.execute(text(
                 "UPDATE vaults SET next_asset_no = "
                 "COALESCE((SELECT MAX(vault_asset_no) FROM memes WHERE memes.vault_id = vaults.id), 0) + 1 "

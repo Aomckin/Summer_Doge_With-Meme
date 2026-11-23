@@ -253,7 +253,7 @@
 [data-vault-mode="immersive"] .tag-filters,
 [data-vault-mode="immersive"] .browsing-controls,
 [data-vault-mode="immersive"] .list-status,
-[data-vault-mode="immersive"] .pagination,
+[data-vault-mode="immersive"] #library-pagination,
 [data-vault-mode="immersive"] .detail-panel {
   display: none !important;
 }

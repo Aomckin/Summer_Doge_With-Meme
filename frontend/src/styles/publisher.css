@@ -1,0 +1,333 @@
+body:has(.publisher-workspace[open], .publisher-picker[open]) {
+  overflow: hidden;
+}
+
+.settings-dialog.publisher-workspace,
+.settings-dialog.publisher-picker {
+  width: min(72rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: calc(100dvh - 2rem);
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.settings-dialog.publisher-picker {
+  width: min(56rem, calc(100vw - 2rem));
+}
+
+.settings-dialog.publisher-caption-picker {
+  width: min(36rem, calc(100vw - 2rem));
+}
+
+.publisher-saved-captions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.publisher-saved-captions .caption-card p {
+  overflow-wrap: anywhere;
+}
+
+.publisher-saved-captions .caption-card footer {
+  justify-content: flex-end;
+}
+
+.publisher-saved-captions .caption-card footer small {
+  margin-inline-end: auto;
+}
+
+.publisher-shell {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.publisher-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.publisher-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block: var(--space-2);
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border-default);
+  justify-content: space-between;
+}
+
+.publisher-shell :is(h2, h3, h4, p, figure) {
+  margin: 0;
+}
+
+.publisher-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.36fr) minmax(0, 1fr);
+  min-height: min(35rem, 72dvh);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+
+.publisher-sidebar {
+  position: sticky;
+  top: 3.5rem;
+  align-self: start;
+  max-height: calc(100dvh - 7rem);
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.publisher-posts {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.publisher-posts button {
+  text-align: start;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  color: inherit;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.publisher-posts button[aria-current="true"] {
+  border-color: var(--accent-primary);
+}
+
+.publisher-posts button span,
+.publisher-shell small,
+.publisher-shell [data-save-status],
+.publisher-empty {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.publisher-workspace-body {
+  border-inline-start: 1px solid var(--border-default);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+[data-publisher-editor] {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.publisher-shell label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.publisher-shell :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.publisher-shell textarea {
+  resize: vertical;
+}
+
+.publisher-items,
+.publisher-history {
+  display: grid;
+  list-style: none;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.publisher-items li:not(.publisher-empty) {
+  display: grid;
+  grid-template-columns: minmax(4rem, 8rem) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.publisher-item-fields {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.publisher-item-fields textarea {
+  background: var(--surface-panel);
+}
+
+.publisher-thumb {
+  min-height: 5rem;
+  display: grid;
+  align-content: center;
+}
+
+.publisher-thumb img,
+.publisher-choice img {
+  width: 100%;
+  max-height: 8rem;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+
+.publisher-drag {
+  padding-inline: var(--space-2);
+  cursor: grab;
+  color: var(--text-muted);
+}
+
+.publisher-missing {
+  padding: var(--space-2);
+  color: var(--warning);
+  font-size: var(--font-size-sm);
+}
+
+.publisher-preview,
+.publisher-delivery,
+.publisher-management {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+
+.publisher-preview {
+  overflow-wrap: anywhere;
+}
+
+.publisher-preview :is(p, figcaption) {
+  white-space: pre-wrap;
+}
+
+.publisher-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}
+
+.publisher-preview figcaption {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.publisher-history li,
+.publisher-management article {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.publisher-attempt-status[data-status="prepared"],
+.publisher-attempt-status[data-status="published"] {
+  color: var(--success);
+}
+
+.publisher-attempt-status[data-status="unknown"],
+.publisher-attempt-status[data-status="failed"],
+.publisher-shell [data-save-status].form-error {
+  color: var(--warning);
+}
+
+.publisher-picker-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(9rem, 100%), 1fr));
+  gap: var(--space-2);
+  max-height: 52dvh;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+.publisher-choice {
+  position: relative;
+  align-content: space-between;
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.publisher-choice:has(input:checked) {
+  border-color: var(--accent-primary);
+}
+
+.publisher-choice-badge {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  border-radius: 50%;
+  background: url("../publisher-used-doge.jpg") center / cover no-repeat;
+  opacity: 0.68;
+  pointer-events: none;
+}
+
+.publisher-picker-footer {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.publisher-picker-footer .pagination {
+  justify-content: flex-start;
+  margin: 0;
+}
+
+.publisher-login {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.publisher-login img {
+  padding: var(--space-2);
+  background: white;
+  border-radius: var(--radius-sm);
+  image-rendering: pixelated;
+}
+
+.publisher-shell [hidden] {
+  display: none;
+}
+
+@media (max-width: 45rem) {
+  .publisher-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .publisher-sidebar {
+    position: static;
+    border-block-end: 1px solid var(--border-default);
+  }
+  .publisher-workspace-body {
+    border-inline-start: 0;
+  }
+  .publisher-posts {
+    grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr));
+    max-height: 9rem;
+    overflow: auto;
+  }
+}

@@ -1,0 +1,77 @@
+/* AI Enrichment Workbench Styles */
+.settings-shell.enrichment-shell {
+  display: flex;
+  flex-direction: column;
+  max-width: 1280px;
+}
+
+.enrichment-shell .settings-header,
+.enrichment-tabs {
+  flex: 0 0 auto;
+}
+
+.enrichment-tabs,
+.enrichment-review-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.enrichment-tabs {
+  margin: 0;
+  padding: 16px 26px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(8 11 16 / 70%);
+}
+
+.enrichment-shell > .form-error {
+  flex: 0 0 auto;
+  margin: 14px 26px 0;
+}
+
+.enrichment-shell > section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 26px 28px;
+}
+
+.enrichment-review-toolbar {
+  margin: 0 0 18px;
+}
+
+.enrichment-review-toolbar span { margin-left: auto; color: var(--muted, #6b7280); }
+.enrichment-jobs { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(320px, 1.2fr); align-content: start; gap: 18px; }
+.enrichment-jobs fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 56px; row-gap: 16px; padding: 20px 18px 18px; border: 1px solid var(--border); border-radius: 10px; margin: 12px 0; }
+.enrichment-jobs fieldset .check-row { min-height: 28px; }
+.enrichment-jobs fieldset .check-row label { display: block; margin: 0; cursor: pointer; }
+.enrichment-id-range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+.enrichment-id-range[hidden] { display: none; }
+.enrichment-progress progress { width: 100%; height: 18px; }
+.enrichment-review-grid { display: grid; grid-template-columns: minmax(300px, .9fr) minmax(360px, 1.1fr); align-items: start; gap: 22px; }
+.enrichment-images { display: grid; gap: 12px; align-content: start; max-height: 60vh; overflow: auto; }
+.enrichment-images img { display: block; width: 100%; height: auto; border-radius: 10px; background: #ececec; }
+.enrichment-fields { display: grid; gap: 10px; align-content: start; }
+.enrichment-field { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.enrichment-field span { display: grid; gap: 5px; }
+.enrichment-field small { color: var(--muted, #6b7280); }
+.enrichment-field b { color: var(--accent); }
+.enrichment-reason, .notice.warning { padding: 12px; border-radius: 10px; color: #fff2a8; background: rgb(230 255 74 / 9%); }
+
+@media (max-width: 800px) {
+  .enrichment-jobs, .enrichment-review-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .enrichment-tabs,
+  .enrichment-shell > section {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .enrichment-shell > .form-error {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+}

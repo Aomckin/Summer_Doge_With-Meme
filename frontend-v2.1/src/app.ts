@@ -1,0 +1,3051 @@
+import {
+  ApiError,
+  analyzeMeme,
+  confirmAIAnalysis,
+  enrichMeme,
+  createEnrichmentJob, estimateEnrichmentJob, getEnrichmentJob, cancelEnrichmentJob,
+  retryFailedEnrichmentJob, listEnrichmentSuggestions,
+  applyEnrichmentSuggestion, rejectEnrichmentSuggestion,
+  reanalyzeEnrichmentSuggestion, getMeme,
+  createCaption,
+  createAIModel,
+  createAIProvider,
+  createTemplate,
+  createTemplateWithReferenceImage,
+  deleteMeme,
+  deleteTag,
+  deleteAIModel,
+  deleteAIProvider,
+  deleteTemplate,
+  deleteTemplateReferenceImage,
+  deleteCaption,
+  getRandomMeme,
+  listAIModels,
+  listAIProviderPresets,
+  listAIProviders,
+  listMemePage,
+  listMemes,
+  listTags,
+  mergeTag,
+  renameTag,
+  cleanupEmptyTags,
+  listTemplates,
+  listCaptions,
+  refreshAIModels,
+  generateCaptions,
+  rewriteCaption,
+  testAIProvider,
+  updateAIModel,
+  updateAIProvider,
+  updateTemplate,
+  updateCaption,
+  uploadTemplateReferenceImage,
+  updateMeme,
+  uploadMeme,
+  createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
+  createExportJob, getExportJob, listExportJobItems, cancelExportJob, deleteExportJob,
+  appendMemeImage, deleteMemeImage, reorderMemeImages,
+  listMemeRelations, addMemeRelations, deleteMemeRelation,
+  semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  recommendChatMemes,
+  inspectMemeSimilarity, ignoreMemeSimilarity, mergeMemes,
+  getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
+  listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
+  deleteEmbeddingJob,
+  listCollections, getCollection, createCollection, updateCollection,
+  deleteCollection, removeCollectionMeme, getMemeCollections, replaceMemeCollections,
+  listVaults, createVault, updateVault, deleteVault, updateVaultAssetMetadata, updateVaultAppearance,
+  updateVaultBackgroundImage, deleteVaultBackgroundImage,
+} from "./api";
+import type {
+  AIAnalysisConfirmPayload,
+  AIAnalysisResponse,
+  AppState,
+  ListMemePageOptions,
+  ListMemesOptions,
+  MemeCardSize,
+  MemePageResponse,
+  MemePageSize,
+  ListTagsOptions,
+  MemeResponse,
+  MemeUpdatePayload,
+  TagResponse,
+  TagCleanupResponse,
+  TemplateCreatePayload,
+  TemplateResponse,
+  TemplateUpdatePayload,
+  UploadMemeInput,
+  CreateImportJobInput, ImportJobItemPage, ImportJobResponse,
+  CreateExportJobInput, ExportJobItemPage, ExportJobResponse,
+  SemanticSearchInput, SemanticSearchResponse, ScoredMemeResponse,
+  SemanticIndexStatus, EmbeddingJobScope, EmbeddingJobResponse,
+  EmbeddingJobItemPage, MemeEmbeddingStatus,
+  EnrichmentSuggestionResponse,
+  ChatRecommendationInput, ChatRecommendationResponse,
+  SimilarityInspectionInput, SimilarityInspectionResponse,
+  CollectionSummary, CollectionDetail, CollectionPayload, MemeCollectionsResponse,
+  VaultCreateInput, VaultUpdateInput, VaultSummary,
+} from "./types";
+import type { BatchUploadController } from "./batch-upload";
+import type { BatchDownloadController } from "./batch-download";
+import { TagEditor } from "./tag-editor";
+import {
+  TagManagerController,
+  type TagMutation,
+} from "./tag-manager";
+import {
+  CaptionLabController,
+  type CaptionLabApi,
+} from "./caption-lab";
+import type {
+  AISettingsController,
+  AISettingsApi,
+} from "./settings";
+import {
+  type AppElements,
+  type EditDraft,
+  applyMemeCardSize,
+  closeImageViewer,
+  mountShell,
+  openImageViewer,
+  renderDetail,
+  appendImmersiveFeed,
+  renderImmersiveFeed,
+  renderInfiniteFeedState,
+  renderLibrary,
+  renderMemeCard,
+  renderMemeSelection,
+  renderOperationError,
+  renderRelationDialog,
+  renderTags,
+  renderTemplateFilters,
+  renderTemplateManager,
+  renderTemplateReferenceInputPreview,
+  renderToolbar,
+  TEMPLATE_PAGE_SIZE,
+  renderCapabilityGating,
+} from "./ui";
+import { clampPage } from "./pagination";
+import { SemanticIndexManager } from "./semantic-index-manager";
+import type { EnrichmentWorkbenchController } from "./enrichment-workbench";
+import { ChatRecommendationController } from "./chat-recommendation";
+import type { VaultInspectorController } from "./vault-inspector";
+import { CollectionManagerController } from "./collection-manager";
+import { AppearanceController } from "./appearance/appearance-controller";
+import { DEFAULT_APPEARANCE_SETTINGS } from "./appearance/appearance-types";
+import { AppearanceView } from "./appearance/appearance-view";
+import { ImmersiveController } from "./immersive/immersive-controller";
+import { ImmersiveRandomNavigator } from "./immersive/immersive-random";
+import { ImmersiveOccupancyGrid } from "./immersive/occupancy-grid";
+import { FreeGalleryLayoutTuner } from "./immersive/layout-tuner";
+import { ImmersiveMediaLoader } from "./immersive/immersive-media";
+import { ImmersiveFocusViewer } from "./immersive/focus-viewer";
+import {
+  InfiniteFeedController,
+  type InfiniteFeedPage,
+} from "./immersive/immersive-feed";
+import type { MemeMakerController, MemeVaultImageInput } from "./meme-maker";
+import { copySourceWithFeedback, memeCopySource, memeImageAt } from "./meme-actions";
+import { showToast } from "./toast";
+import { installSearchableTemplateSelectors } from "./searchable-template-select";
+import { AppShellController } from "./app-shell";
+import {
+  applyCardMotionPreset,
+  isCardMotionPresetName,
+  saveCardMotionPreset,
+  storedCardMotionPreset,
+  unbindMemeCardTilts,
+  stopDrunkPhysics,
+} from "./card-tilt";
+import { capabilitiesFor, type Capabilities } from "./auth";
+import { VaultManagerController } from "./vault-manager";
+import { PROFILE_DEFAULT_PRESET_ID, isVaultProfileName } from "./vault-profile";
+import { FilterScrollFadeController } from "./filter-scroll-fade";
+import { CascadeEntranceController } from "./cascade-entrance";
+import { SpatialLightController } from "./spatial-light";
+
+const PAGE_SIZE_KEY = "meme-vault.page-size";
+const CARD_SIZE_KEY = "meme-vault.card-size";
+const SHUFFLE_MODULUS = 2_147_483_647;
+
+export function exactMemeIdFromQuery(query: string): number | null {
+  const match = query.trim().match(/^(?:meme\s*)?#?(\d+)$/i);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function storedPageSize(): MemePageSize {
+  const value = Number(localStorage.getItem(PAGE_SIZE_KEY));
+  return value === 24 || value === 48 || value === 96 ? value : 24;
+}
+
+function storedCardSize(): MemeCardSize {
+  const value = localStorage.getItem(CARD_SIZE_KEY);
+  return value === "extra-large" || value === "large" || value === "medium" || value === "small"
+    ? value
+    : "medium";
+}
+
+function shuffleSeed(previous: number | null = null): number {
+  const values = new Uint32Array(1);
+  let seed: number;
+  do {
+    crypto.getRandomValues(values);
+    seed = values[0] % SHUFFLE_MODULUS;
+  } while (seed === previous);
+  return seed;
+}
+
+export interface MemeApi extends AISettingsApi, CaptionLabApi {
+  getMeme(id: number): Promise<MemeResponse>;
+  listMemePage(options: ListMemePageOptions): Promise<MemePageResponse>;
+  listMemes(options: ListMemesOptions): Promise<MemeResponse[]>;
+  listTags(options?: ListTagsOptions): Promise<TagResponse[]>;
+  renameTag(id: number, name: string): Promise<TagResponse>;
+  mergeTag(sourceId: number, targetId: number): Promise<TagResponse>;
+  deleteTag(id: number): Promise<void>;
+  cleanupEmptyTags(): Promise<TagCleanupResponse>;
+  listTemplates(): Promise<TemplateResponse[]>;
+  createTemplate(payload: TemplateCreatePayload): Promise<TemplateResponse>;
+  createTemplateWithReferenceImage(
+    payload: TemplateCreatePayload,
+    file: File,
+  ): Promise<TemplateResponse>;
+  updateTemplate(
+    id: number,
+    payload: TemplateUpdatePayload,
+  ): Promise<TemplateResponse>;
+  deleteTemplate(id: number): Promise<void>;
+  uploadTemplateReferenceImage(id: number, file: File): Promise<TemplateResponse>;
+  deleteTemplateReferenceImage(id: number): Promise<void>;
+  getRandomMeme(tags: string[], templateId?: number | null, gifOnly?: boolean, signal?: AbortSignal, vaultId?: number): Promise<MemeResponse>;
+  uploadMeme(input: UploadMemeInput): Promise<MemeResponse>;
+  createImportJob(input: CreateImportJobInput): Promise<ImportJobResponse>;
+  getImportJob(id: number): Promise<ImportJobResponse>;
+  listImportJobItems(id: number, offset?: number, limit?: number, status?: string): Promise<ImportJobItemPage>;
+  cancelImportJob(id: number): Promise<ImportJobResponse>;
+  retryFailedImportJob(id: number): Promise<ImportJobResponse>;
+  deleteImportJob(id: number): Promise<void>;
+  createExportJob(input: CreateExportJobInput): Promise<ExportJobResponse>;
+  getExportJob(id: number): Promise<ExportJobResponse>;
+  listExportJobItems(id: number, offset?: number, limit?: number): Promise<ExportJobItemPage>;
+  cancelExportJob(id: number): Promise<ExportJobResponse>;
+  deleteExportJob(id: number): Promise<void>;
+  updateMeme(
+    id: number,
+    payload: MemeUpdatePayload,
+  ): Promise<MemeResponse>;
+  deleteMeme(id: number): Promise<void>;
+  appendMemeImage(id: number, file: File): Promise<MemeResponse>;
+  deleteMemeImage(id: number, imageId: number): Promise<MemeResponse>;
+  reorderMemeImages(id: number, imageIds: number[]): Promise<MemeResponse>;
+  listMemeRelations(id: number): Promise<MemeResponse[]>;
+  addMemeRelations(id: number, ids: number[]): Promise<MemeResponse[]>;
+  deleteMemeRelation(id: number, relatedId: number): Promise<void>;
+  semanticSearch?(input: SemanticSearchInput): Promise<SemanticSearchResponse>;
+  recommendChatMemes?(input: ChatRecommendationInput): Promise<ChatRecommendationResponse>;
+  inspectMemeSimilarity?(input: SimilarityInspectionInput): Promise<SimilarityInspectionResponse>;
+  ignoreMemeSimilarity?(memeAId: number, memeBId: number): Promise<unknown>;
+  mergeMemes?(targetMemeId: number, sourceMemeId: number): Promise<MemeResponse>;
+  listSimilarMemes?(id: number, limit?: number, signal?: AbortSignal): Promise<{ items: ScoredMemeResponse[] }>;
+  rebuildMemeEmbedding?(id: number): Promise<MemeEmbeddingStatus>;
+  getSemanticIndexStatus?(): Promise<SemanticIndexStatus>;
+  createEmbeddingJob?(scope: EmbeddingJobScope, maxWorkers: number): Promise<EmbeddingJobResponse>;
+  getEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  listEmbeddingJobItems?(id: number, offset?: number, limit?: number, status?: string): Promise<EmbeddingJobItemPage>;
+  cancelEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  retryFailedEmbeddingJob?(id: number): Promise<EmbeddingJobResponse>;
+  deleteEmbeddingJob?(id: number): Promise<void>;
+  listCollections?(signal?: AbortSignal): Promise<CollectionSummary[]>;
+  getCollection?(id: number, signal?: AbortSignal): Promise<CollectionDetail>;
+  createCollection?(payload: CollectionPayload): Promise<CollectionSummary>;
+  updateCollection?(id: number, payload: CollectionPayload): Promise<CollectionSummary>;
+  deleteCollection?(id: number): Promise<void>;
+  removeCollectionMeme?(collectionId: number, memeId: number): Promise<void>;
+  getMemeCollections?(memeId: number, signal?: AbortSignal): Promise<MemeCollectionsResponse>;
+  replaceMemeCollections?(memeId: number, collectionIds: number[]): Promise<MemeCollectionsResponse>;
+  enrichMeme?(id: number): Promise<EnrichmentSuggestionResponse>;
+  analyzeMeme(id: number): Promise<AIAnalysisResponse>;
+  listVaults?(): Promise<VaultSummary[]>;
+  updateVaultAssetMetadata?(vaultId: number, memeId: number, data: Record<string, unknown>): Promise<MemeResponse>;
+  updateVaultAppearance?(vaultId: number, appearance: Record<string, unknown>): Promise<VaultSummary>;
+  updateVaultBackgroundImage?(vaultId: number, file: File): Promise<VaultSummary>;
+  deleteVaultBackgroundImage?(vaultId: number): Promise<VaultSummary>;
+  createVault?(input: VaultCreateInput): Promise<VaultSummary>;
+  updateVault?(id: number, input: VaultUpdateInput): Promise<VaultSummary>;
+  deleteVault?(id: number, force?: boolean): Promise<void>;
+  confirmAIAnalysis(
+    memeId: number,
+    analysisId: number,
+    payload: AIAnalysisConfirmPayload,
+  ): Promise<MemeResponse>;
+}
+
+const defaultApi: MemeApi = {
+  getMeme,
+  listMemePage,
+  listMemes,
+  listTags,
+  renameTag,
+  mergeTag,
+  deleteTag,
+  cleanupEmptyTags,
+  listTemplates,
+  createTemplate,
+  createTemplateWithReferenceImage,
+  updateTemplate,
+  deleteTemplate,
+  uploadTemplateReferenceImage,
+  deleteTemplateReferenceImage,
+  getRandomMeme,
+  uploadMeme,
+  createImportJob, getImportJob, listImportJobItems, cancelImportJob, retryFailedImportJob, deleteImportJob,
+  createExportJob, getExportJob, listExportJobItems, cancelExportJob, deleteExportJob,
+  updateMeme,
+  deleteMeme,
+  listCaptions,
+  createCaption,
+  updateCaption,
+  deleteCaption,
+  generateCaptions,
+  rewriteCaption,
+  appendMemeImage, deleteMemeImage, reorderMemeImages,
+  listMemeRelations, addMemeRelations, deleteMemeRelation,
+  semanticSearch, listSimilarMemes, rebuildMemeEmbedding,
+  recommendChatMemes,
+  inspectMemeSimilarity, ignoreMemeSimilarity, mergeMemes,
+  getSemanticIndexStatus, createEmbeddingJob, getEmbeddingJob,
+  listEmbeddingJobItems, cancelEmbeddingJob, retryFailedEmbeddingJob,
+  deleteEmbeddingJob,
+  listCollections, getCollection, createCollection, updateCollection,
+  deleteCollection, removeCollectionMeme, getMemeCollections, replaceMemeCollections,
+  analyzeMeme,
+  confirmAIAnalysis,
+  enrichMeme,
+  listAIProviderPresets,
+  listAIProviders,
+  createAIProvider,
+  updateAIProvider,
+  deleteAIProvider,
+  testAIProvider,
+  refreshAIModels,
+  listAIModels,
+  createAIModel,
+  updateAIModel,
+  deleteAIModel,
+};
+
+function initialState(): AppState {
+  return {
+    vaults: [],
+    currentVault: null,
+    orientationFilter: null,
+    favoriteOnly: false,
+    searchMode: "keyword",
+    semanticSubmittedQuery: "",
+    semanticScores: {},
+    similarMemes: [],
+    similarLoading: false,
+    similarError: null,
+    similarExpanded: false,
+    rebuildingEmbedding: false,
+    relatedMemes: [],
+    relationQuery: "",
+    selectedRelationIds: [],
+    relationsLoading: false,
+    relationsSaving: false,
+    relationRemovingId: null,
+    relationError: null,
+    imageOperation: null,
+    imageError: null,
+    memes: [],
+    availableTags: [],
+    availableTemplates: [],
+    selectedMeme: null,
+    query: "",
+    selectedTags: [],
+    tagSearchQuery: "",
+    tagsExpanded: false,
+    selectedTemplateId: null,
+    templatesExpanded: false,
+    gifOnly: false,
+    page: 1,
+    pageSize: storedPageSize(),
+    totalMemes: 0,
+    totalPages: 0,
+    listSort: "default",
+    shuffleSeed: null,
+    cardSize: storedCardSize(),
+    templatePage: 1,
+    loadingList: false,
+    saving: false,
+    deleting: false,
+    randomizing: false,
+    analyzing: false,
+    confirmingAnalysis: false,
+    aiAnalysis: null,
+    selectedAITags: [],
+    applyAIDescription: false,
+    applyAITitle: false,
+    selectedAITemplateId: null,
+    applyAITemplate: false,
+    aiError: null,
+    listError: null,
+    actionError: null,
+    operationError: null,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  return "网络请求失败，请稍后重试。";
+}
+
+interface ImmersiveFeedEntry {
+  meme: MemeResponse;
+  score?: number;
+}
+
+function value(form: HTMLFormElement, name: string): string {
+  const field = form.elements.namedItem(name);
+  if (
+    field instanceof HTMLInputElement ||
+    field instanceof HTMLTextAreaElement ||
+    field instanceof HTMLSelectElement
+  ) {
+    return field.value;
+  }
+  return "";
+}
+
+export class MemeVaultApp {
+  private readonly elements: AppElements;
+  private readonly state = initialState();
+  private listController: AbortController | null = null;
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private editing = false;
+  private editDraft: EditDraft | null = null;
+  private templateEditingId: number | null = null;
+  private templateBusy = false;
+  private templateError: string | null = null;
+  private viewerIndex = 0;
+  private viewerMeme: MemeResponse | null = null;
+  private draggedImageId: number | null = null;
+  private relationRemovalToken: symbol | null = null;
+  private settingsInstance: AISettingsController | null = null;
+  private settingsLoading: Promise<AISettingsController> | null = null;
+  private readonly appearance: AppearanceController;
+  private readonly immersive: ImmersiveController;
+  private readonly immersiveRandom: ImmersiveRandomNavigator;
+  private readonly immersiveOccupancyGrid: ImmersiveOccupancyGrid;
+  private readonly immersiveMedia: ImmersiveMediaLoader;
+  private readonly immersiveFocus: ImmersiveFocusViewer;
+  private readonly immersiveFeed: InfiniteFeedController<ImmersiveFeedEntry>;
+  private immersiveFeedMemes: MemeResponse[] = [];
+  private immersiveFeedScores: Record<number, number> = {};
+  private normalPageNeedsReload = false;
+  private batchUploadInstance: BatchUploadController | null = null;
+  private batchUploadLoading: Promise<BatchUploadController> | null = null;
+  private batchDownloadInstance: BatchDownloadController | null = null;
+  private batchDownloadLoading: Promise<BatchDownloadController> | null = null;
+  private readonly captionLab: CaptionLabController;
+  private readonly tagManager: TagManagerController;
+  private readonly semanticIndexManager: SemanticIndexManager;
+  private enrichmentWorkbenchInstance: EnrichmentWorkbenchController | null = null;
+  private enrichmentWorkbenchLoading: Promise<EnrichmentWorkbenchController> | null = null;
+  private vaultInspectorInstance: VaultInspectorController | null = null;
+  private vaultInspectorLoading: Promise<VaultInspectorController> | null = null;
+  private readonly collectionManager: CollectionManagerController;
+  private memeMakerInstance: MemeMakerController | null = null;
+  private memeMakerLoading: Promise<MemeMakerController> | null = null;
+  private editTagEditor: TagEditor | null = null;
+  private templateReferencePreviewToken = 0;
+  private similarController: AbortController | null = null;
+  private readonly vaultManager: VaultManagerController;
+  private readonly appShell: AppShellController;
+  private readonly filterScrollFade: FilterScrollFadeController;
+  private readonly cascadeEntrance: CascadeEntranceController;
+  private readonly spatialLight: SpatialLightController;
+  private readonly abortController = new AbortController();
+
+  constructor(
+    root: HTMLElement,
+    private readonly api: MemeApi = defaultApi,
+    private readonly capabilities: Capabilities = capabilitiesFor("admin"),
+  ) {
+    this.elements = mountShell(root);
+    this.vaultManager = new VaultManagerController(
+      this.elements.vaultSelector,
+      this.elements.vaultSelectorName,
+      {
+        list: () => (this.api.listVaults ?? listVaults)(),
+        create: input => (this.api.createVault ?? createVault)(input),
+        update: (id, input) => (this.api.updateVault ?? updateVault)(id, input),
+        delete: (id, force) => (this.api.deleteVault ?? deleteVault)(id, force),
+      },
+      {
+        canManage: this.capabilities.canWrite,
+        onSwitch: vault => void this.switchVault(vault),
+        onVaultsChanged: vaults => {
+          this.state.vaults = vaults;
+          const current = vaults.find(candidate => candidate.id === this.state.currentVault?.id);
+          if (current) {
+            this.state.currentVault = current;
+          } else if (this.state.currentVault && vaults.length) {
+            // 当前仓库被删除后重新按 URL 解析。
+            this.state.currentVault = null;
+            void this.applyVaultFromLocation();
+          }
+        },
+      },
+    );
+    window.addEventListener("popstate", () => {
+      void this.applyVaultFromLocation();
+    }, { signal: this.abortController.signal });
+    this.appShell = new AppShellController({
+      root: this.elements.appRoot,
+      searchInput: this.elements.searchInput,
+      managementMenu: this.elements.managementMenu,
+    });
+    this.filterScrollFade = new FilterScrollFadeController(this.elements.libraryFilterToolbar, {
+      signal: this.abortController.signal,
+    });
+    this.cascadeEntrance = new CascadeEntranceController(this.elements.memeGrid, {
+      signal: this.abortController.signal,
+    });
+    this.spatialLight = new SpatialLightController({
+      signal: this.abortController.signal,
+    });
+    this.appearance = new AppearanceController({
+      backgroundElement: this.elements.appearanceBackground,
+    });
+    new AppearanceView(
+      this.elements.openAppearanceButton,
+      this.elements.appearanceDialog,
+      this.elements.appearanceContent,
+      this.appearance,
+      {
+        getVault: () => this.state.currentVault,
+        canEdit: this.capabilities.canWrite,
+        onUploadBackground: async file => {
+          await this.applyBackgroundMutation(vault2 =>
+            (this.api.updateVaultBackgroundImage ?? updateVaultBackgroundImage)(vault2, file),
+          );
+        },
+        onRemoveBackground: async () => {
+          await this.applyBackgroundMutation(vault2 =>
+            (this.api.deleteVaultBackgroundImage ?? deleteVaultBackgroundImage)(vault2),
+          );
+        },
+        onResetAppearance: async () => {
+          // 先清除上传的背景，再恢复 Profile 默认预设。
+          const vault = this.state.currentVault;
+          if (vault?.background_image_url) {
+            await (this.api.deleteVaultBackgroundImage ?? deleteVaultBackgroundImage)(vault.id);
+          }
+          this.appearance.applyPreset(
+            PROFILE_DEFAULT_PRESET_ID[
+              (isVaultProfileName(vault?.profile) ? vault.profile : "generic")
+            ] as never,
+          );
+        },
+      },
+    );
+    this.immersiveRandom = new ImmersiveRandomNavigator(this.elements.memeGrid);
+    this.immersiveOccupancyGrid = new ImmersiveOccupancyGrid(this.elements.memeGrid);
+    this.immersiveMedia = new ImmersiveMediaLoader(this.elements.memeGrid);
+    this.immersiveFocus = new ImmersiveFocusViewer(
+      this.elements.memeGrid,
+      this.immersiveMedia,
+      {
+        onBeforeDetach: item => this.immersiveOccupancyGrid.beginTemporaryDetach(item),
+        onAfterRestore: item => this.immersiveOccupancyGrid.endTemporaryDetach(item),
+      },
+    );
+    this.immersiveFeed = new InfiniteFeedController<ImmersiveFeedEntry>({
+      sentinel: this.elements.immersiveFeedSentinel,
+      pageSize: this.state.pageSize,
+      itemKey: entry => entry.meme.id,
+      loadPage: (page, pageSize, signal) => this.loadImmersivePage(page, pageSize, signal),
+      onReset: entries => {
+        this.immersiveFeedMemes = entries.map(entry => entry.meme);
+        this.immersiveFeedScores = Object.fromEntries(
+          entries.flatMap(entry => entry.score === undefined ? [] : [[entry.meme.id, entry.score]]),
+        );
+        renderImmersiveFeed(
+          this.elements,
+          this.immersiveFeedMemes,
+          this.state.selectedMeme?.id ?? null,
+          this.immersiveFeedScores,
+        );
+      },
+      onAppend: entries => {
+        const memes = entries.map(entry => entry.meme);
+        this.immersiveFeedMemes.push(...memes);
+        for (const entry of entries) {
+          if (entry.score !== undefined) this.immersiveFeedScores[entry.meme.id] = entry.score;
+        }
+        appendImmersiveFeed(
+          this.elements,
+          memes,
+          this.state.selectedMeme?.id ?? null,
+          this.immersiveFeedScores,
+        );
+      },
+      onStateChange: state => renderInfiniteFeedState(this.elements, state, this.state.currentVault),
+      errorMessage: readableError,
+    });
+    new FreeGalleryLayoutTuner(
+      this.elements.immersiveTunerButton,
+      this.elements.immersiveTunerPanel,
+      tuning => this.immersiveOccupancyGrid.setTuning(tuning),
+    );
+    this.immersive = new ImmersiveController(
+      {
+        entryButton: this.elements.openImmersiveButton,
+        dock: this.elements.immersiveDock,
+        searchInput: this.elements.immersiveSearchInput,
+        randomButton: this.elements.immersiveRandomButton,
+        appearanceButton: this.elements.immersiveAppearanceButton,
+        exitButton: this.elements.immersiveExitButton,
+        appearanceDialog: this.elements.appearanceDialog,
+      },
+      {
+        getSearchValue: () => this.elements.searchInput.value,
+        onSearch: value => this.submitImmersiveSearch(value),
+        onRandom: () => {
+          if (this.immersiveFocus.isOpen()) {
+            void this.immersiveFocus.close().then(() => {
+              this.immersiveRandom.visit(this.immersiveFeedMemes);
+            });
+          } else {
+            this.immersiveRandom.visit(this.immersiveFeedMemes);
+          }
+        },
+        onOpenAppearance: () => this.elements.openAppearanceButton.click(),
+        onEnter: () => this.startImmersiveFeed(),
+        onExit: () => this.immersiveFeed.stop(),
+        onLayoutChanged: () => {
+          if (document.documentElement.dataset.vaultMode === "immersive") {
+            this.cascadeEntrance.cancel();
+            this.immersiveOccupancyGrid.activate();
+            this.immersiveMedia.activate();
+          } else {
+            this.immersiveFocus.deactivate();
+            this.immersiveMedia.deactivate();
+            this.immersiveOccupancyGrid.deactivate();
+            if (this.normalPageNeedsReload) {
+              this.normalPageNeedsReload = false;
+              void this.reloadMemes();
+            } else {
+              renderLibrary(this.elements, this.state);
+              this.cascadeEntrance.trigger();
+            }
+          }
+          window.dispatchEvent(new Event("resize"));
+        },
+      },
+    );
+    this.collectionManager = new CollectionManagerController(
+      this.elements.openCollectionsButton,
+      {
+        list: signal => (this.api.listCollections ?? listCollections)(signal),
+        get: (id, signal) => (this.api.getCollection ?? getCollection)(id, signal),
+        create: payload => (this.api.createCollection ?? createCollection)(payload),
+        update: (id, payload) => (this.api.updateCollection ?? updateCollection)(id, payload),
+        delete: id => (this.api.deleteCollection ?? deleteCollection)(id),
+        removeMeme: (collectionId, memeId) => (this.api.removeCollectionMeme ?? removeCollectionMeme)(collectionId, memeId),
+        getMemberships: (memeId, signal) => (this.api.getMemeCollections ?? getMemeCollections)(memeId, signal),
+        replaceMemberships: (memeId, ids) => (this.api.replaceMemeCollections ?? replaceMemeCollections)(memeId, ids),
+      },
+      {
+        openDetail: meme => this.selectMeme(meme),
+        copyMeme: (meme, button) => copySourceWithFeedback(memeCopySource(meme), button),
+        openViewer: meme => {
+          this.viewerMeme = meme;
+          this.viewerIndex = 0;
+          openImageViewer(this.elements, meme, 0);
+        },
+      },
+    );
+    new ChatRecommendationController(
+      this.elements.openChatRecommendationButton,
+      {
+        recommend: input => (this.api.recommendChatMemes ?? recommendChatMemes)(input),
+      },
+      {
+        openDetail: meme => this.selectMeme(meme),
+        copyMeme: (meme, button) => copySourceWithFeedback(memeCopySource(meme), button),
+        openViewer: meme => {
+          this.viewerMeme = meme;
+          this.viewerIndex = 0;
+          openImageViewer(this.elements, meme, 0);
+        },
+      },
+    );
+    this.elements.openVaultInspectorButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
+      if (this.vaultInspectorInstance) {
+        this.vaultInspectorInstance.open();
+      } else {
+        void this.getVaultInspector().then(inspector => inspector.open());
+      }
+    });
+    this.semanticIndexManager = new SemanticIndexManager(
+      this.elements.openSemanticIndexButton,
+      {
+        getStatus: () => this.api.getSemanticIndexStatus
+          ? this.api.getSemanticIndexStatus()
+          : Promise.resolve({
+              total_memes: 0, ready_count: 0, missing_count: 0, stale_count: 0,
+              failed_count: 0, incompatible_count: 0, active_model_id: null,
+              dimension: 1024, running_job: null,
+            }),
+        createJob: (scope, maxWorkers) => (this.api.createEmbeddingJob ?? createEmbeddingJob)(scope, maxWorkers, this.requireVaultId()),
+        getJob: id => (this.api.getEmbeddingJob ?? getEmbeddingJob)(id),
+        listItems: (id, offset, limit, status) => (this.api.listEmbeddingJobItems ?? listEmbeddingJobItems)(id, offset, limit, status),
+        cancelJob: id => (this.api.cancelEmbeddingJob ?? cancelEmbeddingJob)(id),
+        retryFailed: id => (this.api.retryFailedEmbeddingJob ?? retryFailedEmbeddingJob)(id),
+        deleteJob: id => (this.api.deleteEmbeddingJob ?? deleteEmbeddingJob)(id),
+      },
+    );
+    this.elements.openEnrichmentButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
+      const params = { query: this.state.query, tags: [...this.state.selectedTags] };
+      if (this.enrichmentWorkbenchInstance) {
+        this.enrichmentWorkbenchInstance.open(params);
+      } else {
+        void this.getEnrichmentWorkbench().then(workbench => {
+          workbench.open(params);
+        });
+      }
+    });
+    this.captionLab = new CaptionLabController(this.elements.detailPanel, this.api);
+    this.elements.openMemeMakerButton.addEventListener("click", () => {
+      if (this.memeMakerInstance) {
+        this.memeMakerInstance.open();
+      } else {
+        void this.getMemeMaker().then(maker => maker.open());
+      }
+    });
+    this.tagManager = new TagManagerController(this.api, {
+      onMutation: (mutation) => {
+        this.applyTagMutation(mutation);
+        void this.semanticIndexManager.refresh();
+      },
+      onFilterTag: async (name) => {
+        this.state.selectedTags = [name];
+        this.state.page = 1;
+        renderTags(this.elements, this.state);
+        await this.reloadMemes();
+      },
+    });
+    this.elements.profileFilters.addEventListener("click", (event) => {
+      const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-profile-filter]");
+      if (!chip) return;
+      const filter = chip.dataset.profileFilter;
+      if (filter === "favorite") {
+        this.state.favoriteOnly = !this.state.favoriteOnly;
+      } else if (filter === "landscape" || filter === "portrait" || filter === "square") {
+        this.state.orientationFilter = this.state.orientationFilter === filter ? null : filter;
+      }
+      this.state.page = 1;
+      void this.reloadMemes();
+    });
+    this.elements.detailPanel.addEventListener("submit", (event) => {
+      const form = (event.target as Element).closest<HTMLFormElement>("form[data-profile-metadata-form]");
+      if (!form || event.target !== form) return;
+      event.preventDefault();
+      void this.saveProfileMetadata(form);
+    });
+    this.bindEvents();
+    installSearchableTemplateSelectors();
+    this.render();
+  }
+
+  async start(): Promise<void> {
+    await this.refreshVaults();
+    // 外观属于仓库本身：仓库解析后立即应用其主题（自定义优先，其次 Profile 默认）。
+    this.applyVaultTheme();
+    // 仓库解析完成后整体重渲染，让 Capability 门控按当前仓库生效。
+    this.render();
+    await Promise.all([
+      this.reloadMemes(),
+      this.refreshTags(),
+      this.refreshTemplates(),
+      this.preloadHeavyControllers(),
+    ]);
+  }
+
+  private async preloadHeavyControllers(): Promise<void> {
+    if (!this.capabilities.canWrite && !this.capabilities.canManageSettings && !this.capabilities.canBatchDownload) {
+      return;
+    }
+    const tasks: Promise<unknown>[] = [];
+    if (this.capabilities.canWrite) {
+      tasks.push(this.getBatchUpload(), this.getMemeMaker(), this.getVaultInspector(), this.getEnrichmentWorkbench());
+    }
+    if (this.capabilities.canManageSettings) {
+      tasks.push(this.getSettings());
+    }
+    if (this.capabilities.canBatchDownload) {
+      tasks.push(this.getBatchDownload());
+    }
+    await Promise.all(tasks);
+  }
+
+  private async getSettings(): Promise<AISettingsController> {
+    if (this.settingsInstance) return this.settingsInstance;
+    if (this.settingsLoading) return this.settingsLoading;
+    this.settingsLoading = (async () => {
+      const { AISettingsController } = await import("./settings");
+      this.settingsInstance = new AISettingsController(this.elements, this.api);
+      return this.settingsInstance;
+    })();
+    return this.settingsLoading;
+  }
+
+  private async getBatchUpload(): Promise<BatchUploadController> {
+    if (this.batchUploadInstance) return this.batchUploadInstance;
+    if (this.batchUploadLoading) return this.batchUploadLoading;
+    this.batchUploadLoading = (async () => {
+      const { BatchUploadController } = await import("./batch-upload");
+      this.batchUploadInstance = new BatchUploadController({
+        uploadMeme: (input) => this.api.uploadMeme(input),
+        createImportJob: (input) => this.api.createImportJob({ ...input, vaultId: this.requireVaultId() }),
+        getImportJob: (id) => this.api.getImportJob(id),
+        listImportJobItems: (id, offset, limit, status) =>
+          this.api.listImportJobItems(id, offset, limit, status),
+        cancelImportJob: (id) => this.api.cancelImportJob(id),
+        retryFailedImportJob: (id) => this.api.retryFailedImportJob(id),
+        deleteImportJob: (id) => this.api.deleteImportJob(id),
+        onComplete: async () => {
+          await Promise.all([
+            this.reloadMemes(),
+            this.refreshTags(),
+            this.refreshTemplates(),
+            this.semanticIndexManager.refresh(),
+          ]);
+        },
+      });
+      return this.batchUploadInstance;
+    })();
+    return this.batchUploadLoading;
+  }
+
+  private async getBatchDownload(): Promise<BatchDownloadController> {
+    if (this.batchDownloadInstance) return this.batchDownloadInstance;
+    if (this.batchDownloadLoading) return this.batchDownloadLoading;
+    this.batchDownloadLoading = (async () => {
+      const { BatchDownloadController } = await import("./batch-download");
+      this.batchDownloadInstance = new BatchDownloadController({
+        createExportJob: input => this.api.createExportJob({ ...input, vaultId: this.requireVaultId() }),
+        getExportJob: id => this.api.getExportJob(id),
+        listExportJobItems: (id, offset, limit) => this.api.listExportJobItems(id, offset, limit),
+        cancelExportJob: id => this.api.cancelExportJob(id),
+        deleteExportJob: id => this.api.deleteExportJob(id),
+      });
+      return this.batchDownloadInstance;
+    })();
+    return this.batchDownloadLoading;
+  }
+
+  private async getEnrichmentWorkbench(): Promise<EnrichmentWorkbenchController> {
+    if (this.enrichmentWorkbenchInstance) return this.enrichmentWorkbenchInstance;
+    if (this.enrichmentWorkbenchLoading) return this.enrichmentWorkbenchLoading;
+    this.enrichmentWorkbenchLoading = (async () => {
+      const { EnrichmentWorkbenchController } = await import("./enrichment-workbench");
+      this.enrichmentWorkbenchInstance = new EnrichmentWorkbenchController(
+        this.elements.openEnrichmentButton,
+        {
+          createJob: input => createEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
+          estimateJob: input => estimateEnrichmentJob({ ...input, vault_id: this.requireVaultId() }),
+          getJob: id => getEnrichmentJob(id),
+          cancelJob: id => cancelEnrichmentJob(id),
+          retryFailed: id => retryFailedEnrichmentJob(id),
+          listSuggestions: (status, source) => listEnrichmentSuggestions(status, source),
+          applySuggestion: (id, fields, allowStale) => applyEnrichmentSuggestion(id, fields, allowStale),
+          rejectSuggestion: id => rejectEnrichmentSuggestion(id),
+          reanalyzeSuggestion: id => reanalyzeEnrichmentSuggestion(id),
+          getMeme: id => getMeme(id),
+          listTemplates: () => this.api.listTemplates(),
+        },
+        async memeId => {
+          if (this.state.selectedMeme?.id === memeId) {
+            this.replaceMeme(await getMeme(memeId));
+          }
+          await Promise.all([
+            this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh(),
+          ]);
+          renderTags(this.elements, this.state);
+          this.cascadeEntrance.cancel();
+          renderLibrary(this.elements, this.state);
+          renderDetail(this.elements, this.state, this.editing, this.editDraft);
+        },
+        () => ({ query: this.state.query, tags: [...this.state.selectedTags] }),
+      );
+      return this.enrichmentWorkbenchInstance;
+    })();
+    return this.enrichmentWorkbenchLoading;
+  }
+
+  private async getVaultInspector(): Promise<VaultInspectorController> {
+    if (this.vaultInspectorInstance) return this.vaultInspectorInstance;
+    if (this.vaultInspectorLoading) return this.vaultInspectorLoading;
+    this.vaultInspectorLoading = (async () => {
+      const { VaultInspectorController } = await import("./vault-inspector");
+      this.vaultInspectorInstance = new VaultInspectorController(
+        this.elements.openVaultInspectorButton,
+        {
+          inspect: input => (this.api.inspectMemeSimilarity ?? inspectMemeSimilarity)(input),
+          ignore: (left, right) => (this.api.ignoreMemeSimilarity ?? ignoreMemeSimilarity)(left, right),
+          relate: (id, relatedIds) => this.api.addMemeRelations(id, relatedIds),
+          merge: (targetId, sourceId) => (this.api.mergeMemes ?? mergeMemes)(targetId, sourceId),
+          deleteMeme: id => this.api.deleteMeme(id),
+        },
+        {
+          openViewer: meme => {
+            this.viewerMeme = meme;
+            this.viewerIndex = 0;
+            openImageViewer(this.elements, meme, 0);
+          },
+          onMerge: async (target, sourceId) => {
+            const index = this.state.memes.findIndex(item => item.id === target.id);
+            if (index >= 0) this.state.memes[index] = target;
+            this.state.memes = this.state.memes.filter(item => item.id !== sourceId);
+            if (this.state.selectedMeme?.id === sourceId || this.state.selectedMeme?.id === target.id) {
+              this.selectMeme(target);
+            }
+            await Promise.all([this.refreshTags(), this.refreshTemplates(), this.semanticIndexManager.refresh()]);
+            this.cascadeEntrance.cancel();
+            renderLibrary(this.elements, this.state);
+          },
+          onDelete: async memeId => {
+            this.state.memes = this.state.memes.filter(item => item.id !== memeId);
+            this.state.totalMemes = Math.max(0, this.state.totalMemes - 1);
+            if (this.state.selectedMeme?.id === memeId) {
+              this.captionLab.clear();
+              this.state.selectedMeme = null;
+            }
+            await Promise.all([this.refreshTags(), this.semanticIndexManager.refresh()]);
+            if (!this.state.memes.length && this.state.totalMemes > 0) {
+              await this.reloadMemes();
+            } else {
+              this.cascadeEntrance.cancel();
+              renderLibrary(this.elements, this.state);
+            }
+            renderDetail(this.elements, this.state, false, null);
+          },
+        },
+      );
+      return this.vaultInspectorInstance;
+    })();
+    return this.vaultInspectorLoading;
+  }
+
+  private async getMemeMaker(): Promise<MemeMakerController> {
+    if (this.memeMakerInstance) return this.memeMakerInstance;
+    if (this.memeMakerLoading) return this.memeMakerLoading;
+    this.memeMakerLoading = (async () => {
+      const { MemeMakerController } = await import("./meme-maker");
+      this.memeMakerInstance = new MemeMakerController(
+        this.elements.openMemeMakerButton,
+        {
+          listTemplates: () => this.api.listTemplates(),
+          listMemes: options => this.api.listMemes(options),
+          uploadMeme: input => this.api.uploadMeme(input),
+        },
+        {
+          onSaved: async () => {
+            await Promise.all([
+              this.reloadMemes(), this.refreshTags(), this.refreshTemplates(),
+              this.semanticIndexManager.refresh(),
+            ]);
+          },
+        },
+      );
+      return this.memeMakerInstance;
+    })();
+    return this.memeMakerLoading;
+  }
+
+  destroy(): void {
+    this.abortController.abort();
+    this.listController?.abort();
+    this.similarController?.abort();
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    this.appShell.destroy();
+    this.vaultManager.destroy();
+    this.captionLab.destroy();
+    this.spatialLight.destroy();
+    this.enrichmentWorkbenchInstance?.destroy();
+    this.enrichmentWorkbenchInstance = null;
+    this.vaultInspectorInstance = null;
+    this.settingsInstance = null;
+    this.batchUploadInstance = null;
+    this.batchDownloadInstance = null;
+    this.memeMakerInstance = null;
+    this.immersiveFeed.destroy();
+    this.immersiveOccupancyGrid.destroy();
+    unbindMemeCardTilts(this.elements.memeGrid);
+    stopDrunkPhysics(this.elements.memeGrid);
+  }
+
+  /** 背景图变更（上传/删除）：更新当前仓库的主题数据并立即应用。 */
+  private async applyBackgroundMutation(
+    call: (vaultId: number) => Promise<VaultSummary>,
+  ): Promise<void> {
+    const vault = this.state.currentVault;
+    if (!vault) return;
+    const updated = await call(vault.id);
+    const index = this.state.vaults.findIndex(candidate => candidate.id === updated.id);
+    if (index >= 0) this.state.vaults[index] = updated;
+    if (this.state.currentVault?.id === updated.id) this.state.currentVault = updated;
+    this.applyVaultTheme();
+  }
+
+  /** 把当前仓库的主题应用到外观控制器；切换仓库时同步调用，避免主题闪烁。 */
+  private applyVaultTheme(): void {
+    const vault = this.state.currentVault;
+    if (!vault) return;
+    // 与后端解析结果合并默认值，容忍旧数据缺字段。
+    const resolved = {
+      ...DEFAULT_APPEARANCE_SETTINGS,
+      ...(vault.appearance ?? {}) as Record<string, unknown>,
+    } as unknown as Parameters<AppearanceController["applyVaultTheme"]>[0];
+    this.appearance.setVaultPersistence(
+      this.capabilities.canWrite
+        ? async settings => {
+            await (this.api.updateVaultAppearance ?? updateVaultAppearance)(vault.id, settings as unknown as Record<string, unknown>);
+          }
+        : null,
+    );
+    this.appearance.applyVaultTheme(resolved, vault.background_image_url ?? null);
+  }
+
+  /** meme 仓库返回 undefined，继续走旧兼容接口；其他仓库返回其 id。 */
+  private vaultIdParam(): number | undefined {
+    const vault = this.state.currentVault;
+    return vault && vault.slug !== "meme" ? vault.id : undefined;
+  }
+
+  private async saveProfileMetadata(form: HTMLFormElement): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const vault = this.state.currentVault;
+    if (!meme || !vault) return;
+    const data = new FormData(form);
+    const payload: Record<string, unknown> = {};
+    const text = (name: string): string => String(data.get(name) ?? "").trim();
+    if (text("work")) payload.work = text("work");
+    const characters = text("characters");
+    if (characters) {
+      payload.characters = characters
+        .split(/[,，、]/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+    if (text("artist")) payload.artist = text("artist");
+    const favorite = Number(data.get("favorite_level") ?? 0);
+    if (Number.isFinite(favorite) && favorite >= 1) payload.favorite_level = Math.floor(favorite);
+    if (text("source_url")) payload.source_url = text("source_url");
+    const errorElement = form.querySelector<HTMLElement>("[data-profile-metadata-error]");
+    const submitButton = form.querySelector<HTMLButtonElement>("button[type='submit']");
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const updated = await (this.api.updateVaultAssetMetadata ?? updateVaultAssetMetadata)(
+        vault.id,
+        meme.id,
+        payload,
+      );
+      // replaceMeme 原地更新 state.memes、selectedMeme 与详情面板。
+      this.replaceMeme(updated);
+      showToast("作品信息已保存", "success");
+    } catch (error) {
+      if (errorElement) {
+        errorElement.textContent = readableError(error);
+        errorElement.hidden = false;
+      }
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  }
+
+  private hasCapability(capability: string): boolean {
+    return this.state.currentVault?.capabilities?.[capability] === true;
+  }
+
+  /** 任务类接口用：缺失当前仓库时抛错，绝不静默回退默认 meme Vault。 */
+  private requireVaultId(): number {
+    const vault = this.state.currentVault;
+    if (!vault) {
+      throw new Error("当前仓库尚未加载完成，请稍后重试");
+    }
+    return vault.id;
+  }
+
+  private vaultSlugFromLocation(): string | null {
+    const match = window.location.pathname.match(/^\/v\/([a-z0-9][a-z0-9-]{0,63})\/?$/i);
+    return match ? match[1].toLowerCase() : null;
+  }
+
+  private async refreshVaults(): Promise<void> {
+    this.state.vaults = await this.vaultManager.refresh();
+    if (this.state.currentVault) {
+      const refreshed = this.state.vaults.find(
+        candidate => candidate.id === this.state.currentVault?.id,
+      );
+      if (refreshed) {
+        this.state.currentVault = refreshed;
+        this.vaultManager.updateSelector(refreshed);
+        return;
+      }
+    }
+    const slug = this.vaultSlugFromLocation();
+    const target = this.resolveVault(slug);
+    this.state.currentVault = target;
+    this.vaultManager.updateSelector(target);
+    // 规范化为 /v/{slug}，刷新与分享均可恢复。
+    if (target && window.location.pathname !== `/v/${target.slug}`) {
+      window.history.replaceState(null, "", `/v/${target.slug}`);
+    }
+  }
+
+  private resolveVault(slug: string | null): VaultSummary | null {
+    const vaults = this.state.vaults;
+    if (!vaults.length) return null;
+    if (slug) {
+      const matched = vaults.find(vault => vault.slug === slug);
+      if (matched) return matched;
+    }
+    return vaults.find(vault => vault.slug === "meme") ?? vaults[0];
+  }
+
+  private async applyVaultFromLocation(): Promise<void> {
+    if (!this.state.vaults.length) {
+      await this.refreshVaults();
+      return;
+    }
+    const slug = this.vaultSlugFromLocation();
+    const target = this.resolveVault(slug);
+    if (!target || target.id === this.state.currentVault?.id) return;
+    await this.switchVault(target, { push: false });
+  }
+
+  private async switchVault(
+    vault: VaultSummary,
+    options: { push?: boolean } = {},
+  ): Promise<void> {
+    if (vault.id === this.state.currentVault?.id) return;
+    this.state.currentVault = vault;
+    // 数据、Profile、Capability、词汇与外观一起切换；主题在数据加载前应用，避免闪烁。
+    this.applyVaultTheme();
+    this.vaultManager.updateSelector(vault);
+    if (options.push !== false) {
+      window.history.pushState(null, "", `/v/${vault.slug}`);
+    }
+    // 重置浏览状态：搜索、筛选、分页、选中与沉浸全部重新绑定当前仓库。
+    this.listController?.abort();
+    this.cascadeEntrance.cancel();
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    this.state.query = "";
+    this.state.selectedTags = [];
+    this.state.selectedTemplateId = null;
+    this.state.gifOnly = false;
+    this.state.orientationFilter = null;
+    this.state.favoriteOnly = false;
+    this.state.page = 1;
+    this.state.totalMemes = 0;
+    this.state.totalPages = 0;
+    this.state.listSort = "default";
+    this.state.shuffleSeed = null;
+    this.state.memes = [];
+    this.state.searchMode = "keyword";
+    this.state.semanticSubmittedQuery = "";
+    this.state.semanticScores = {};
+    this.state.selectedMeme = null;
+    this.state.similarMemes = [];
+    this.state.similarLoading = false;
+    this.state.similarError = null;
+    this.state.similarExpanded = false;
+    this.state.relatedMemes = [];
+    this.state.relationError = null;
+    this.state.listError = null;
+    this.state.actionError = null;
+    this.elements.searchInput.value = "";
+    this.elements.searchMode.value = "keyword";
+    if (this.immersive.isActive()) {
+      this.elements.immersiveExitButton.click();
+    }
+    this.captionLab.clear();
+    this.render();
+    await Promise.all([
+      this.reloadMemes(),
+      this.refreshTags(),
+      this.refreshTemplates(),
+    ]);
+  }
+
+  private bindEvents(): void {
+    this.elements.searchInput.addEventListener("input", () => {
+      this.immersive.setSearchValue(this.elements.searchInput.value);
+      if (this.state.searchMode === "semantic") {
+        if (!this.elements.searchInput.value.trim()) {
+          this.state.semanticSubmittedQuery = "";
+          this.state.semanticScores = {};
+          this.state.memes = [];
+          this.state.totalMemes = 0;
+          this.state.totalPages = 0;
+          this.state.page = 1;
+          renderLibrary(this.elements, this.state);
+        }
+        return;
+      }
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer);
+      }
+      this.searchTimer = setTimeout(() => {
+        this.searchTimer = null;
+        const query = this.elements.searchInput.value.trim();
+        const exactId = exactMemeIdFromQuery(query);
+        if (exactId !== null) {
+          void this.openMemeById(exactId);
+          return;
+        }
+        this.state.query = query;
+        this.state.page = 1;
+        void this.reloadMemes();
+      }, 300);
+    });
+
+    this.elements.searchMode.addEventListener("change", () => {
+      this.state.searchMode = this.elements.searchMode.value === "semantic" ? "semantic" : "keyword";
+      this.state.page = 1;
+      this.listController?.abort();
+      if (this.state.searchMode === "semantic") {
+        this.state.semanticSubmittedQuery = "";
+        this.state.semanticScores = {};
+        this.state.memes = [];
+        this.state.totalMemes = 0;
+        this.state.totalPages = 0;
+        renderLibrary(this.elements, this.state);
+      } else {
+        this.state.query = this.elements.searchInput.value.trim();
+        void this.reloadMemes();
+      }
+    });
+    this.elements.searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && this.state.searchMode === "semantic") {
+        event.preventDefault();
+        void this.submitSemanticSearch();
+      } else if (event.key === "Enter" && this.state.searchMode === "keyword") {
+        const exactId = exactMemeIdFromQuery(this.elements.searchInput.value);
+        if (exactId !== null) {
+          event.preventDefault();
+          if (this.searchTimer) {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = null;
+          }
+          void this.openMemeById(exactId);
+        }
+      }
+    });
+    this.elements.semanticSearchButton.addEventListener("click", () => {
+      void this.submitSemanticSearch();
+    });
+
+    this.elements.tagFilters.addEventListener("click", (event) => {
+      const target = (event.target as Element).closest<HTMLButtonElement>(
+        "button",
+      );
+      if (!target) {
+        return;
+      }
+      if (target.matches("[data-expand-tags]")) {
+        this.state.tagsExpanded = !this.state.tagsExpanded;
+        renderTags(this.elements, this.state);
+        this.filterScrollFade?.refresh();
+        return;
+      }
+      if (!target.dataset.tag) {
+        return;
+      }
+      const tag = target.dataset.tag;
+      this.state.selectedTags = this.state.selectedTags.includes(tag)
+        ? this.state.selectedTags.filter((name) => name !== tag)
+        : [...this.state.selectedTags, tag];
+      this.state.page = 1;
+      renderTags(this.elements, this.state);
+      this.filterScrollFade.refresh();
+      void this.reloadMemes();
+    });
+
+    this.elements.memeGrid.addEventListener("click", (event) => {
+      const element = event.target as Element;
+      const copy = element.closest<HTMLButtonElement>("[data-copy-meme]");
+      const download = element.closest<HTMLAnchorElement>("[data-quick-download]");
+      if (download) return;
+      const card = element.closest<HTMLElement>("[data-meme-id]");
+      const id = Number(copy?.dataset.copyMeme ?? card?.dataset.memeId);
+      const collection = this.immersive.isActive() ? this.immersiveFeedMemes : this.state.memes;
+      const meme = collection.find((item) => item.id === id);
+      if (copy && meme) {
+        event.stopPropagation();
+        void copySourceWithFeedback(memeCopySource(meme), copy);
+        return;
+      }
+      if (meme) {
+        this.selectMeme(meme);
+      }
+    });
+
+    this.elements.listStatus.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      if (target.closest("[data-retry-list]")) {
+        void this.reloadMemes();
+      } else if (target.closest("[data-empty-upload]")) {
+        this.elements.openUploadButton.click();
+      } else if (target.closest("[data-clear-library-filters]")) {
+        this.state.query = "";
+        this.state.selectedTags = [];
+        this.state.selectedTemplateId = null;
+        this.state.page = 1;
+        this.elements.searchInput.value = "";
+        renderTags(this.elements, this.state);
+        renderTemplateFilters(this.elements, this.state);
+        this.filterScrollFade.refresh();
+        void this.reloadMemes();
+      }
+    });
+
+    this.elements.immersiveFeedStatus.addEventListener("click", event => {
+      if (!(event.target as Element).closest("[data-retry-infinite-feed]")) return;
+      void this.immersiveFeed.retry();
+    });
+    this.elements.browsingControls.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      if (target.matches("[data-list-sort]")) {
+        this.state.listSort = target.value === "shuffle" ? "shuffle" : "default";
+        this.state.shuffleSeed = this.state.listSort === "shuffle" ? shuffleSeed() : null;
+        this.state.page = 1;
+        void this.reloadMemes();
+      } else if (target.matches("[data-page-size]")) {
+        const size = Number(target.value);
+        if (size === 24 || size === 48 || size === 96) {
+          this.state.pageSize = size;
+          this.state.page = 1;
+          localStorage.setItem(PAGE_SIZE_KEY, String(size));
+          void this.reloadMemes();
+        }
+      } else if (target.matches("[data-card-size]")) {
+        const size = target.value;
+        if (size === "extra-large" || size === "large" || size === "medium" || size === "small") {
+          this.state.cardSize = size;
+          localStorage.setItem(CARD_SIZE_KEY, size);
+          applyMemeCardSize(this.elements, size);
+          applyCardMotionPreset(this.elements.memeGrid, storedCardMotionPreset(), { cardSize: size });
+          this.immersiveOccupancyGrid.refresh();
+          this.immersiveMedia.refresh();
+        }
+      } else if (target.matches("[data-card-motion-preset]") && isCardMotionPresetName(target.value)) {
+        saveCardMotionPreset(target.value);
+        applyCardMotionPreset(this.elements.memeGrid, target.value);
+        if (target.value === "off") {
+          this.cascadeEntrance.cancel();
+        } else {
+          this.cascadeEntrance.trigger();
+        }
+      }
+    });
+    this.elements.browsingControls.addEventListener("click", (event) => {
+      if (!(event.target as Element).closest("[data-reshuffle]")) return;
+      this.state.shuffleSeed = shuffleSeed(this.state.shuffleSeed);
+      this.state.page = 1;
+      void this.reloadMemes();
+    });
+    this.elements.tagFilters.addEventListener("input", event => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement) || !input.matches("[data-tag-filter-search]")) return;
+      this.state.tagSearchQuery = input.value;
+      const query = input.value.trim().toLocaleLowerCase();
+      let visibleCount = 0;
+      for (const button of this.elements.tagFilters.querySelectorAll<HTMLButtonElement>("[data-tag]")) {
+        button.hidden = query
+          ? !button.dataset.tag?.toLocaleLowerCase().includes(query)
+          : button.hasAttribute("data-collapsed-hidden");
+        if (!button.hidden) visibleCount += 1;
+      }
+      const toggle = this.elements.tagFilters.querySelector<HTMLButtonElement>("[data-expand-tags]");
+      if (toggle) toggle.hidden = Boolean(query);
+      const empty = this.elements.tagFilters.querySelector<HTMLElement>("[data-tag-search-empty]");
+      if (empty) empty.hidden = visibleCount > 0;
+      this.filterScrollFade.refresh();
+    });
+
+    this.elements.templateFilters.addEventListener("click", (event) => {
+      const target = (event.target as Element).closest<HTMLButtonElement>("button");
+      if (!target) return;
+      if (target.matches("[data-expand-templates]")) {
+        this.state.templatesExpanded = !this.state.templatesExpanded;
+        renderTemplateFilters(this.elements, this.state);
+        this.filterScrollFade.refresh();
+        return;
+      }
+      if (!target.hasAttribute("data-template-filter")) return;
+      const id = Number(target.dataset.templateFilter);
+      this.state.selectedTemplateId = Number.isInteger(id) && id > 0 ? id : null;
+      this.state.page = 1;
+      renderTemplateFilters(this.elements, this.state);
+      this.filterScrollFade.refresh();
+      void this.reloadMemes();
+    });
+    this.elements.templateFilters.addEventListener("input", event => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement) || !input.matches("[data-template-filter-search]")) return;
+      const query = input.value.trim().toLocaleLowerCase();
+      for (const button of this.elements.templateFilters.querySelectorAll<HTMLButtonElement>("[data-template-filter]")) {
+        button.hidden = Boolean(query)
+          && button.dataset.templateFilter !== ""
+          && !button.textContent?.toLocaleLowerCase().includes(query);
+      }
+      this.filterScrollFade.refresh();
+    });
+    this.elements.pagination.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-page]");
+      if (button) void this.goToPage(Number(button.dataset.page));
+    });
+    this.elements.pagination.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (event.key === "Enter" && input instanceof HTMLInputElement && input.matches("[data-page-input]")) {
+        event.preventDefault();
+        if (input.value.trim()) void this.goToPage(Number(input.value));
+      }
+    });
+    this.elements.randomButton.addEventListener("click", () => {
+      void this.randomize();
+    });
+    this.elements.gifModeButton.addEventListener("click", () => {
+      this.state.gifOnly = !this.state.gifOnly;
+      if (this.state.gifOnly && this.state.searchMode === "semantic") {
+        this.state.searchMode = "keyword";
+        this.elements.searchMode.value = "keyword";
+        this.state.query = this.elements.searchInput.value.trim();
+      }
+      this.state.page = 1;
+      renderToolbar(this.elements, this.state);
+      void this.reloadMemes();
+    });
+    this.elements.openUploadButton.addEventListener("click", () => {
+      if (!this.capabilities.canWrite) return;
+      const tpls = this.hasCapability("templates") ? this.state.availableTemplates : [];
+      const tags = this.state.availableTags;
+      const vId = this.vaultIdParam();
+      if (this.batchUploadInstance) {
+        this.batchUploadInstance.open(tpls, tags, vId);
+      } else {
+        void this.getBatchUpload().then(upload => {
+          upload.open(tpls, tags, vId);
+        });
+      }
+    });
+    this.elements.openSettingsButton.addEventListener("click", () => {
+      if (!this.capabilities.canManageSettings) return;
+      if (this.settingsInstance) {
+        this.settingsInstance.open();
+      } else {
+        void this.getSettings().then(settings => settings.open());
+      }
+    });
+    this.elements.openTemplatesButton.addEventListener("click", () => {
+      this.openTemplateManager();
+    });
+    this.elements.browseTemplatesButton.addEventListener("click", () => {
+      this.elements.managementMenu.open = false;
+      this.elements.templateFilters.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      this.elements.templateFilters.querySelector<HTMLInputElement>("[data-template-filter-search]")?.focus();
+    });
+    this.elements.openTagsButton.addEventListener("click", () => {
+      this.tagManager.open();
+    });
+    for (const button of document.querySelectorAll("[data-close-templates]")) {
+      button.addEventListener("click", () => {
+        if (!this.templateBusy) {
+          this.elements.templateDialog.close();
+        }
+      });
+    }
+    this.elements.templateForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.submitTemplate();
+    });
+    this.elements.openDownloadButton.addEventListener("click", () => {
+      if (!this.capabilities.canBatchDownload) return;
+      const filter = {
+        query: this.state.query,
+        tags: this.state.selectedTags,
+        templateId: this.state.selectedTemplateId,
+      };
+      if (this.batchDownloadInstance) {
+        this.batchDownloadInstance.open(filter);
+      } else {
+        void this.getBatchDownload().then(download => {
+          download.open(filter);
+        });
+      }
+    });
+    this.elements.templateForm
+      .querySelector<HTMLInputElement>('[name="reference_image"]')
+      ?.addEventListener("change", (event) => {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        if (file) {
+          this.previewTemplateReference(file);
+        } else {
+          this.renderCurrentTemplateReference();
+        }
+      });
+    this.elements.templateForm
+      .querySelector("[data-cancel-template-edit]")
+      ?.addEventListener("click", () => {
+        this.templateEditingId = null;
+        this.templateError = null;
+        this.clearTemplateReferenceInput();
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          null,
+          false,
+          null,
+        );
+      });
+    this.elements.templateList.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      const editButton =
+        target.closest<HTMLButtonElement>("[data-edit-template]");
+      const deleteButton =
+        target.closest<HTMLButtonElement>("[data-delete-template]");
+      if (editButton) {
+        this.templateEditingId = Number(editButton.dataset.editTemplate);
+        this.templateError = null;
+        this.clearTemplateReferenceInput();
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          this.templateEditingId,
+          false,
+          null,
+        );
+      } else if (deleteButton) {
+        void this.removeTemplate(Number(deleteButton.dataset.deleteTemplate));
+      }
+    });
+    this.elements.detailPanel.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      if (target.closest("[data-open-viewer]")) {
+        const meme = this.state.selectedMeme;
+        if (meme) {
+          this.viewerMeme = meme;
+          this.viewerIndex = Number(target.closest<HTMLElement>("[data-image-index]")?.dataset.imageIndex ?? 0);
+          openImageViewer(this.elements, meme, this.viewerIndex);
+        }
+      } else if (target.closest("[data-copy-detail]")) {
+        const meme = this.state.selectedMeme;
+        const button = target.closest<HTMLButtonElement>("[data-copy-detail]");
+        if (meme && button) void copySourceWithFeedback(memeCopySource(meme), button);
+      } else if (target.closest("[data-edit-meme]")) {
+        if (!this.capabilities.canWrite) return;
+        this.beginEdit();
+      } else if (target.closest("[data-manage-meme-collections]")) {
+        if (!this.capabilities.canWrite) return;
+        if (this.state.selectedMeme) void this.collectionManager.openMembership(this.state.selectedMeme);
+      } else if (target.closest("[data-cancel-edit]")) {
+        this.cancelEdit();
+      } else if (target.closest("[data-delete-meme]")) {
+        if (!this.capabilities.canWrite) return;
+        void this.removeSelected();
+      } else if (target.closest("[data-analyze-meme]")) {
+        void this.analyzeSelected();
+      } else if (target.closest("[data-confirm-ai]")) {
+        void this.confirmAnalysis();
+      } else if (target.closest("[data-related-meme]")) {
+        const id = Number(target.closest<HTMLElement>("[data-related-meme]")?.dataset.relatedMeme);
+        const meme = this.state.relatedMemes.find((item) => item.id === id);
+        if (meme) this.selectMeme(meme);
+      } else if (target.closest("[data-similar-meme]")) {
+        const id = Number(target.closest<HTMLElement>("[data-similar-meme]")?.dataset.similarMeme);
+        const meme = this.state.similarMemes.find(item => item.meme.id === id)?.meme;
+        if (meme) this.selectMeme(meme);
+      } else if (target.closest("[data-toggle-similar]")) {
+        this.state.similarExpanded = !this.state.similarExpanded;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      } else if (target.closest("[data-rebuild-embedding]")) {
+        void this.rebuildSelectedEmbedding();
+      } else if (target.closest("[data-remove-relation]")) {
+        const id = Number(target.closest<HTMLElement>("[data-remove-relation]")?.dataset.removeRelation);
+        void this.removeRelation(id);
+      } else if (target.closest("[data-open-relations]")) {
+        this.openRelationDialog();
+      } else if (target.closest("[data-delete-image]")) {
+        const imageId = Number(target.closest<HTMLElement>("[data-delete-image]")?.dataset.deleteImage);
+        void this.deleteSelectedImage(imageId);
+      }
+    });
+    this.elements.detailPanel.addEventListener("change", (event) => {
+      const target = event.target as HTMLInputElement;
+      if (!target.matches("[data-append-image]") || !target.files?.[0] || !this.state.selectedMeme) return;
+      void this.appendSelectedImage(target.files[0]);
+    });
+    this.elements.detailPanel.addEventListener("dragstart", (event) => {
+      const card = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      if (card && this.state.imageOperation === null) {
+        this.draggedImageId = Number(card.dataset.imageId);
+        card.classList.add("is-dragging");
+      }
+    });
+    this.elements.detailPanel.addEventListener("dragover", (event) => {
+      const card = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      if (card && this.draggedImageId !== null) {
+        event.preventDefault();
+        for (const item of this.elements.detailPanel.querySelectorAll(".is-drag-over")) {
+          item.classList.remove("is-drag-over");
+        }
+        card.classList.add("is-drag-over");
+      }
+    });
+    this.elements.detailPanel.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const target = (event.target as Element).closest<HTMLElement>("[data-image-id]");
+      const meme = this.state.selectedMeme;
+      if (!target || !meme || this.draggedImageId === null) {
+        this.clearImageDragState();
+        return;
+      }
+      const targetId = Number(target.dataset.imageId);
+      const ids = meme.images.map((image) => image.id);
+      const from = ids.indexOf(this.draggedImageId);
+      const to = ids.indexOf(targetId);
+      this.clearImageDragState();
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      void this.reorderSelectedImages(ids);
+    });
+    this.elements.detailPanel.addEventListener("dragend", () => {
+      this.clearImageDragState();
+    });
+    this.elements.detailPanel.addEventListener("change", (event) => {
+      const target = event.target;
+      if (target instanceof HTMLSelectElement && target.matches("[data-ai-template]")) {
+        this.state.selectedAITemplateId = target.value
+          ? Number(target.value)
+          : null;
+        return;
+      }
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      const tag = target.dataset.aiTag;
+      if (tag) {
+        this.state.selectedAITags = target.checked
+          ? [...new Set([...this.state.selectedAITags, tag])]
+          : this.state.selectedAITags.filter((name) => name !== tag);
+      } else if (target.matches("[data-ai-description]")) {
+        this.state.applyAIDescription = target.checked;
+      } else if (target.matches("[data-ai-title]")) {
+        this.state.applyAITitle = target.checked;
+      } else if (target.matches("[data-ai-apply-template]")) {
+        this.state.applyAITemplate = target.checked;
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
+      }
+    });
+    this.elements.detailPanel.addEventListener("submit", (event) => {
+      const form = (event.target as Element).closest<HTMLFormElement>(
+        "#edit-form",
+      );
+      if (!form) {
+        return;
+      }
+      event.preventDefault();
+      void this.submitEdit(form);
+    });
+    this.elements.templatePagination.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-template-page]");
+      if (!button || this.templateBusy) return;
+      this.state.templatePage = clampPage(
+        Number(button.dataset.templatePage),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
+      );
+      renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
+    });
+    this.elements.templatePagination.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (event.key !== "Enter" || !(input instanceof HTMLInputElement) || !input.matches("[data-template-page-input]") || !input.value.trim()) return;
+      event.preventDefault();
+      this.state.templatePage = clampPage(
+        Number(input.value),
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
+      );
+      renderTemplateManager(this.elements, this.state, this.templateEditingId, false, this.templateError);
+    });
+    this.elements.detailPanel.addEventListener("meme-detail-rendered", () => {
+      this.mountEditTagEditor();
+    });
+
+    for (const button of this.elements.relationDialog.querySelectorAll(
+      "[data-close-relations]",
+    )) {
+      button.addEventListener("click", () => this.closeRelationDialog());
+    }
+    this.elements.relationDialog.addEventListener("click", (event) => {
+      if (event.target === this.elements.relationDialog) {
+        this.closeRelationDialog();
+      }
+    });
+    this.elements.relationSearch.addEventListener("input", () => {
+      this.state.relationQuery = this.elements.relationSearch.value;
+      renderRelationDialog(this.elements, this.state);
+    });
+    this.elements.relationCandidates.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.matches("[data-relation-choice]")) {
+        return;
+      }
+      const id = Number(target.dataset.relationChoice);
+      this.state.selectedRelationIds = target.checked
+        ? [...new Set([...this.state.selectedRelationIds, id])]
+        : this.state.selectedRelationIds.filter((item) => item !== id);
+      renderRelationDialog(this.elements, this.state);
+    });
+    this.elements.relationSave.addEventListener("click", () => {
+      void this.saveRelations();
+    });
+
+    const closeViewer = () => {
+      closeImageViewer(this.elements);
+      this.viewerMeme = null;
+      this.viewerIndex = 0;
+    };
+    this.elements.imageViewerDialog.addEventListener("click", (event) => {
+      if (event.target === this.elements.imageViewerDialog) {
+        closeViewer();
+      }
+    });
+    this.elements.imageViewerDialog
+      .querySelector("[data-close-viewer]")
+      ?.addEventListener("click", closeViewer);
+    this.elements.imageViewerDialog.addEventListener("close", () => {
+      this.viewerMeme = null;
+      this.viewerIndex = 0;
+      closeImageViewer(this.elements);
+    });
+    const moveViewer = (delta: number) => {
+      const meme = this.viewerMeme;
+      const count = meme?.images.length || 1;
+      this.viewerIndex = Math.max(0, Math.min(count - 1, this.viewerIndex + delta));
+      if (meme) openImageViewer(this.elements, meme, this.viewerIndex);
+    };
+    this.elements.imageViewerPrevious.addEventListener("click", () => moveViewer(-1));
+    this.elements.imageViewerNext.addEventListener("click", () => moveViewer(1));
+    this.elements.imageViewerCopy.addEventListener("click", () => {
+      if (this.viewerMeme) {
+        void copySourceWithFeedback(
+          memeImageAt(this.viewerMeme, this.viewerIndex),
+          this.elements.imageViewerCopy,
+        );
+      }
+    });
+    this.elements.imageViewerForge.addEventListener("click", () => {
+      const meme = this.viewerMeme;
+      if (!meme) return;
+      const image = meme.images[this.viewerIndex];
+      const input: MemeVaultImageInput = {
+        url: image?.image_url ?? meme.image_url,
+        filename: image?.original_filename ?? meme.original_filename,
+        title: meme.title,
+        mimeType: image?.mime_type ?? meme.mime_type,
+        width: image?.width ?? meme.width,
+        height: image?.height ?? meme.height,
+      };
+      closeViewer();
+      if (this.memeMakerInstance) {
+        this.memeMakerInstance.openWithVaultImage(input);
+      } else {
+        void this.getMemeMaker().then(maker => maker.openWithVaultImage(input));
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (this.elements.imageViewerDialog.open && event.key === "ArrowLeft") moveViewer(-1);
+      if (this.elements.imageViewerDialog.open && event.key === "ArrowRight") moveViewer(1);
+    }, { signal: this.abortController.signal });
+    this.elements.imageViewerImage.addEventListener("error", () => {
+      this.elements.imageViewerImage.hidden = true;
+      this.elements.imageViewerFrame.classList.add("is-broken");
+      this.elements.imageViewerError.textContent = "原图加载失败";
+      this.elements.imageViewerError.hidden = false;
+    });
+  }
+
+  private render(): void {
+    renderCapabilityGating(this.elements, this.state);
+    renderToolbar(this.elements, this.state);
+    renderOperationError(this.elements, this.state);
+    renderTemplateFilters(this.elements, this.state);
+    renderTags(this.elements, this.state);
+    renderLibrary(this.elements, this.state);
+    renderDetail(
+      this.elements,
+      this.state,
+      this.editing,
+      this.editDraft,
+    );
+    renderRelationDialog(this.elements, this.state);
+    this.filterScrollFade?.refresh();
+  }
+
+  private async refreshTemplates(): Promise<void> {
+    try {
+      this.state.availableTemplates = await this.api.listTemplates();
+      if (
+        this.state.selectedTemplateId !== null
+        && !this.state.availableTemplates.some(
+          template => template.id === this.state.selectedTemplateId,
+        )
+      ) {
+        this.state.selectedTemplateId = null;
+      }
+      this.state.templatePage = clampPage(
+        this.state.templatePage,
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
+      );
+      if (this.state.aiAnalysis?.suggested_template) {
+        const currentSuggestion = this.state.availableTemplates.find(
+          (template) =>
+            template.id === this.state.aiAnalysis?.suggested_template?.id,
+        );
+        this.state.aiAnalysis = {
+          ...this.state.aiAnalysis,
+          suggested_template: currentSuggestion ?? null,
+        };
+        if (!currentSuggestion) {
+          this.state.selectedAITemplateId = null;
+          this.state.applyAITemplate = false;
+        }
+      }
+      this.batchUploadInstance?.setTemplates(this.state.availableTemplates);
+      renderTemplateFilters(this.elements, this.state);
+      this.filterScrollFade?.refresh();
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+      if (this.elements.templateDialog.open) {
+        renderTemplateManager(
+          this.elements,
+          this.state,
+          this.templateEditingId,
+          this.templateBusy,
+          this.templateError,
+        );
+      }
+    } catch (error) {
+      this.state.operationError = `模板加载失败：${readableError(error)}`;
+      renderOperationError(this.elements, this.state);
+    }
+  }
+
+  private openTemplateManager(): void {
+    this.templateEditingId = null;
+    this.templateError = null;
+    this.state.templatePage = 1;
+    this.clearTemplateReferenceInput();
+    renderTemplateManager(this.elements, this.state, null, false, null);
+    this.elements.templateDialog.showModal();
+  }
+
+  private async submitTemplate(): Promise<void> {
+    if (this.templateBusy) {
+      return;
+    }
+    const name = value(this.elements.templateForm, "name").trim();
+    const description =
+      value(this.elements.templateForm, "description").trim() || null;
+    const reference = this.elements.templateForm.elements.namedItem("reference_image");
+    const file = reference instanceof HTMLInputElement ? reference.files?.[0] : undefined;
+    if (!name) {
+      this.templateError = "模板名称不能为空。";
+      this.elements.templateError.hidden = false;
+      this.elements.templateError.textContent = this.templateError;
+      return;
+    }
+    this.templateBusy = true;
+    this.templateError = null;
+    this.elements.templateSubmit.disabled = true;
+    this.elements.templateSubmit.textContent = "正在保存…";
+    try {
+      const creating = this.templateEditingId === null;
+      if (this.templateEditingId === null) {
+        if (file) {
+          await this.api.createTemplateWithReferenceImage(
+            { name, description },
+            file,
+          );
+        } else {
+          await this.api.createTemplate({ name, description });
+        }
+      } else {
+        await this.api.updateTemplate(this.templateEditingId, {
+          name,
+          description,
+        });
+        if (file) await this.api.uploadTemplateReferenceImage(this.templateEditingId, file);
+      }
+      this.templateEditingId = null;
+      this.clearTemplateReferenceInput();
+      await this.refreshTemplates();
+      await this.semanticIndexManager.refresh();
+      if (creating) {
+        this.state.templatePage = Math.max(
+          1,
+          Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
+        );
+      }
+    } catch (error) {
+      this.templateError = readableError(error);
+    } finally {
+      this.templateBusy = false;
+      renderTemplateManager(
+        this.elements,
+        this.state,
+        this.templateEditingId,
+        false,
+        this.templateError,
+      );
+      if (this.templateError && file) {
+        this.previewTemplateReference(file);
+      }
+    }
+  }
+
+  private clearTemplateReferenceInput(): void {
+    this.templateReferencePreviewToken += 1;
+    const input = this.elements.templateForm.elements.namedItem(
+      "reference_image",
+    );
+    if (input instanceof HTMLInputElement) {
+      input.value = "";
+    }
+  }
+
+  private renderCurrentTemplateReference(): void {
+    this.templateReferencePreviewToken += 1;
+    const template = this.state.availableTemplates.find(
+      (item) => item.id === this.templateEditingId,
+    );
+    renderTemplateReferenceInputPreview(
+      this.elements,
+      template?.reference_thumbnail_url ?? null,
+      template ? `${template.name} 当前参考图` : "参考图预览",
+    );
+  }
+
+  private previewTemplateReference(file: File): void {
+    const token = ++this.templateReferencePreviewToken;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (token !== this.templateReferencePreviewToken) {
+        return;
+      }
+      const source = typeof reader.result === "string" ? reader.result : null;
+      renderTemplateReferenceInputPreview(
+        this.elements,
+        source,
+        `${file.name} 预览`,
+      );
+    });
+    reader.readAsDataURL(file);
+  }
+
+  private async removeTemplate(templateId: number): Promise<void> {
+    const template = this.state.availableTemplates.find(
+      (item) => item.id === templateId,
+    );
+    if (
+      !template ||
+      this.templateBusy ||
+      !confirm(`确定删除模板“${template.name}”吗？相关 Meme 将变为未归类。`)
+    ) {
+      return;
+    }
+    this.templateBusy = true;
+    this.templateError = null;
+    renderTemplateManager(
+      this.elements,
+      this.state,
+      this.templateEditingId,
+      true,
+      null,
+    );
+    try {
+      await this.api.deleteTemplate(templateId);
+      await this.semanticIndexManager.refresh();
+      this.state.availableTemplates = this.state.availableTemplates.filter(
+        (item) => item.id !== templateId,
+      );
+      this.state.templatePage = clampPage(
+        this.state.templatePage,
+        Math.ceil(this.state.availableTemplates.length / TEMPLATE_PAGE_SIZE),
+      );
+      if (this.state.selectedMeme?.template?.id === templateId) {
+        this.state.selectedMeme = {
+          ...this.state.selectedMeme,
+          template: null,
+        };
+      }
+      if (this.state.selectedTemplateId === templateId) {
+        this.state.selectedTemplateId = null;
+      }
+      if (this.state.aiAnalysis?.suggested_template?.id === templateId) {
+        this.state.aiAnalysis = {
+          ...this.state.aiAnalysis,
+          suggested_template: null,
+        };
+        this.state.selectedAITemplateId = null;
+        this.state.applyAITemplate = false;
+      }
+      this.templateEditingId = null;
+      await Promise.all([this.refreshTemplates(), this.reloadMemes()]);
+    } catch (error) {
+      this.templateError = readableError(error);
+    } finally {
+      this.templateBusy = false;
+      renderTemplateManager(
+        this.elements,
+        this.state,
+        this.templateEditingId,
+        false,
+        this.templateError,
+      );
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    }
+  }
+
+  private async reloadMemes(scrollAfter = false): Promise<void> {
+    if (this.immersive.isActive()) {
+      this.normalPageNeedsReload = true;
+      await this.immersiveFeed.reset();
+      return;
+    }
+    if (this.state.searchMode === "semantic" && !this.state.semanticSubmittedQuery) {
+      this.cascadeEntrance.cancel();
+      this.state.memes = [];
+      this.state.semanticScores = {};
+      this.state.totalMemes = 0;
+      this.state.totalPages = 0;
+      this.state.loadingList = false;
+      renderLibrary(this.elements, this.state);
+      return;
+    }
+    this.listController?.abort();
+    const controller = new AbortController();
+    this.listController = controller;
+    this.cascadeEntrance.cancel();
+    this.state.loadingList = true;
+    this.state.listError = null;
+    this.state.memes = [];
+    renderLibrary(this.elements, this.state);
+
+    try {
+      const response = this.state.searchMode === "semantic"
+        ? await (this.api.semanticSearch ?? semanticSearch)({
+            query: this.state.semanticSubmittedQuery,
+            tags: this.state.selectedTags,
+            template_id: this.state.selectedTemplateId,
+            page: this.state.page,
+            page_size: this.state.pageSize,
+            signal: controller.signal,
+            vaultId: this.vaultIdParam(),
+          })
+        : await this.api.listMemePage({
+            page: this.state.page,
+            pageSize: this.state.pageSize,
+            q: this.state.query,
+            tags: this.state.selectedTags,
+            templateId: this.state.selectedTemplateId,
+            gifOnly: this.state.gifOnly,
+            sort: this.state.listSort,
+            shuffleSeed: this.state.shuffleSeed,
+            signal: controller.signal,
+            vaultId: this.vaultIdParam(),
+            orientation: this.state.orientationFilter,
+            favorite: this.state.favoriteOnly,
+          });
+      if (this.listController !== controller) {
+        return;
+      }
+      if (this.state.searchMode === "semantic") {
+        const semantic = response as SemanticSearchResponse;
+        this.state.memes = semantic.items.map(item => item.meme);
+        this.state.semanticScores = Object.fromEntries(
+          semantic.items.map(item => [item.meme.id, item.score]),
+        );
+      } else {
+        const keyword = response as MemePageResponse;
+        this.state.memes = keyword.items;
+        this.state.semanticScores = {};
+        this.state.listSort = keyword.sort;
+        this.state.shuffleSeed = keyword.shuffle_seed;
+      }
+      this.state.totalMemes = response.total;
+      this.state.totalPages = response.total_pages;
+      this.state.page = response.page;
+      this.state.pageSize = response.page_size;
+      if (scrollAfter) {
+        this.elements.libraryHeading.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      }
+    } catch (error) {
+      if (isAbortError(error) || this.listController !== controller) {
+        return;
+      }
+      this.state.listError = readableError(error);
+    } finally {
+      if (this.listController === controller) {
+        this.state.loadingList = false;
+        renderLibrary(this.elements, this.state);
+        if (!this.state.listError && this.state.memes.length) {
+          this.cascadeEntrance.trigger();
+        }
+      }
+    }
+  }
+
+  private startImmersiveFeed(): void {
+    this.immersiveFeed.setPageSize(this.state.pageSize);
+    const canReuseFirstPage = this.state.page === 1
+      && !this.state.loadingList
+      && !this.state.listError;
+    const initial = canReuseFirstPage ? {
+      items: this.state.memes.map(meme => ({
+        meme,
+        score: this.state.searchMode === "semantic"
+          ? this.state.semanticScores[meme.id]
+          : undefined,
+      })),
+      total: this.state.totalMemes,
+      page: 1,
+      pageSize: this.state.pageSize,
+      totalPages: this.state.totalPages,
+    } satisfies InfiniteFeedPage<ImmersiveFeedEntry> : undefined;
+    this.immersiveFeed.start(initial);
+  }
+
+  private async loadImmersivePage(
+    page: number,
+    pageSize: number,
+    signal: AbortSignal,
+  ): Promise<InfiniteFeedPage<ImmersiveFeedEntry>> {
+    if (this.state.searchMode === "semantic") {
+      if (!this.state.semanticSubmittedQuery) {
+        return { items: [], total: 0, page: 1, pageSize, totalPages: 0 };
+      }
+      const response = await (this.api.semanticSearch ?? semanticSearch)({
+        query: this.state.semanticSubmittedQuery,
+        tags: this.state.selectedTags,
+        template_id: this.state.selectedTemplateId,
+        page,
+        page_size: pageSize as MemePageSize,
+        signal,
+        vaultId: this.vaultIdParam(),
+      });
+      return {
+        items: response.items.map(item => ({ meme: item.meme, score: item.score })),
+        total: response.total,
+        page: response.page,
+        pageSize: response.page_size,
+        totalPages: response.total_pages,
+      };
+    }
+    const response = await this.api.listMemePage({
+      page,
+      pageSize: pageSize as MemePageSize,
+      q: this.state.query,
+      tags: this.state.selectedTags,
+      templateId: this.state.selectedTemplateId,
+      gifOnly: this.state.gifOnly,
+      sort: this.state.listSort,
+      shuffleSeed: this.state.shuffleSeed,
+      signal,
+      vaultId: this.vaultIdParam(),
+      orientation: this.state.orientationFilter,
+      favorite: this.state.favoriteOnly,
+    });
+    return {
+      items: response.items.map(meme => ({ meme })),
+      total: response.total,
+      page: response.page,
+      pageSize: response.page_size,
+      totalPages: response.total_pages,
+    };
+  }
+
+  private submitImmersiveSearch(value: string): void {
+    this.elements.searchInput.value = value;
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    if (this.state.searchMode === "semantic") {
+      this.state.semanticSubmittedQuery = value.trim();
+      this.state.page = 1;
+      this.normalPageNeedsReload = true;
+      void this.immersiveFeed.reset();
+      return;
+    }
+    const query = value.trim();
+    const exactId = exactMemeIdFromQuery(query);
+    if (exactId !== null) {
+      void this.openMemeById(exactId);
+      return;
+    }
+    this.state.query = query;
+    this.state.page = 1;
+    this.normalPageNeedsReload = true;
+    void this.immersiveFeed.reset();
+  }
+
+  private async submitSemanticSearch(): Promise<void> {
+    const query = this.elements.searchInput.value.trim();
+    if (!query) {
+      this.cascadeEntrance.cancel();
+      this.state.semanticSubmittedQuery = "";
+      this.state.memes = [];
+      this.state.semanticScores = {};
+      this.state.totalMemes = 0;
+      this.state.totalPages = 0;
+      renderLibrary(this.elements, this.state);
+      return;
+    }
+    this.state.semanticSubmittedQuery = query;
+    this.state.page = 1;
+    await this.reloadMemes();
+  }
+
+  private async openMemeById(id: number): Promise<void> {
+    if (!Number.isSafeInteger(id) || id < 1) return;
+    this.state.listError = null;
+    try {
+      this.selectMeme(await this.api.getMeme(id));
+    } catch {
+      this.cascadeEntrance.cancel();
+      this.state.listError = `Meme #${id} 不存在`;
+      renderLibrary(this.elements, this.state);
+    }
+  }
+
+  private async goToPage(page: number): Promise<void> {
+    if (this.state.loadingList || this.state.totalPages === 0 || !Number.isInteger(page)) return;
+    const target = clampPage(page, this.state.totalPages);
+    if (target === this.state.page) return;
+    if (!this.confirmDiscardUnsavedChanges()) return;
+    this.state.page = target;
+    await this.reloadMemes(true);
+  }
+
+  private async refreshTags(): Promise<void> {
+    try {
+      this.state.availableTags = await this.api.listTags({ vaultId: this.vaultIdParam() });
+      this.batchUploadInstance?.setAvailableTags(this.state.availableTags);
+      this.editTagEditor?.setAvailableTags(this.state.availableTags);
+      renderTags(this.elements, this.state);
+    } catch (error) {
+      this.state.actionError = readableError(error);
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    }
+  }
+
+  private selectMeme(meme: MemeResponse): void {
+    if (this.state.selectedMeme && this.state.selectedMeme.id !== meme.id) {
+      if (!this.confirmDiscardUnsavedChanges()) {
+        return;
+      }
+    }
+    if (!this.captionLab.setMeme(meme.id)) {
+      return;
+    }
+    this.state.selectedMeme = meme;
+    this.state.actionError = null;
+    this.state.operationError = null;
+    this.state.imageError = null;
+    this.state.relatedMemes = [];
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+    this.state.relationsLoading = true;
+    this.state.relationRemovingId = null;
+    this.similarController?.abort();
+    this.state.similarMemes = [];
+    this.state.similarLoading = true;
+    this.state.similarError = null;
+    this.state.similarExpanded = false;
+    this.state.rebuildingEmbedding = false;
+    this.relationRemovalToken = null;
+    this.editing = false;
+    this.editDraft = null;
+    this.editTagEditor = null;
+    this.resetAIAnalysis();
+    renderMemeSelection(this.elements, meme.id);
+    renderDetail(this.elements, this.state, false, null);
+    void this.loadRelations(meme.id);
+    void this.loadSimilarMemes(meme.id);
+  }
+
+  private async loadSimilarMemes(memeId: number): Promise<void> {
+    if (!this.api.listSimilarMemes) {
+      this.state.similarLoading = false;
+      this.state.similarError = "尚未建立语义索引";
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      return;
+    }
+    this.similarController?.abort();
+    const controller = new AbortController();
+    this.similarController = controller;
+    try {
+      const response = await this.api.listSimilarMemes(memeId, 12, controller.signal);
+      if (controller.signal.aborted || this.state.selectedMeme?.id !== memeId) return;
+      this.state.similarMemes = response.items;
+      this.state.similarError = null;
+    } catch (error) {
+      if (controller.signal.aborted || this.state.selectedMeme?.id !== memeId) return;
+      this.state.similarMemes = [];
+      this.state.similarError = error instanceof ApiError && error.status === 409
+        ? "尚未建立语义索引"
+        : readableError(error);
+    } finally {
+      if (this.similarController === controller && this.state.selectedMeme?.id === memeId) {
+        this.state.similarLoading = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
+  }
+
+  private async rebuildSelectedEmbedding(): Promise<void> {
+    const memeId = this.state.selectedMeme?.id;
+    if (!memeId || this.state.rebuildingEmbedding) return;
+    this.state.rebuildingEmbedding = true;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      await (this.api.rebuildMemeEmbedding ?? rebuildMemeEmbedding)(memeId);
+      if (this.state.selectedMeme?.id === memeId) await this.loadSimilarMemes(memeId);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === memeId) this.state.similarError = readableError(error);
+    } finally {
+      if (this.state.selectedMeme?.id === memeId) {
+        this.state.rebuildingEmbedding = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
+  }
+
+  private clearImageDragState(): void {
+    this.draggedImageId = null;
+    for (const item of this.elements.detailPanel.querySelectorAll(
+      ".is-dragging, .is-drag-over",
+    )) {
+      item.classList.remove("is-dragging", "is-drag-over");
+    }
+  }
+
+  private async appendSelectedImage(file: File): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = "append";
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.appendMemeImage(meme.id, file);
+      await this.semanticIndexManager.refresh();
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async deleteSelectedImage(imageId: number): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = imageId;
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.deleteMemeImage(meme.id, imageId);
+      await this.semanticIndexManager.refresh();
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      this.cascadeEntrance.cancel();
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async reorderSelectedImages(imageIds: number[]): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.imageOperation !== null) {
+      return;
+    }
+    this.state.imageOperation = "reorder";
+    this.state.imageError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.reorderMemeImages(meme.id, imageIds);
+      await this.semanticIndexManager.refresh();
+      this.replaceMeme(updated);
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.imageError = readableError(error);
+      }
+    } finally {
+      this.state.imageOperation = null;
+      this.cascadeEntrance.cancel();
+      renderLibrary(this.elements, this.state);
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async loadRelations(memeId: number): Promise<void> {
+    try {
+      const relations = await this.api.listMemeRelations(memeId);
+      if (this.state.selectedMeme?.id !== memeId) {
+        return;
+      }
+      this.state.relatedMemes = relations;
+    } catch (error) {
+      if (this.state.selectedMeme?.id !== memeId) {
+        return;
+      }
+      this.state.relatedMemes = [];
+      this.state.relationError = readableError(error);
+    } finally {
+      if (this.state.selectedMeme?.id === memeId) {
+        this.state.relationsLoading = false;
+        renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      }
+    }
+  }
+
+  private openRelationDialog(): void {
+    if (!this.state.selectedMeme || this.state.relationsLoading) {
+      return;
+    }
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+    renderRelationDialog(this.elements, this.state);
+    this.elements.relationDialog.showModal();
+    this.elements.relationSearch.focus();
+  }
+
+  private closeRelationDialog(): void {
+    if (this.state.relationsSaving) {
+      return;
+    }
+    if (this.elements.relationDialog.open) {
+      this.elements.relationDialog.close();
+    }
+    this.state.relationQuery = "";
+    this.state.selectedRelationIds = [];
+    this.state.relationError = null;
+  }
+
+  private async saveRelations(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const ids = [...this.state.selectedRelationIds];
+    if (!meme || !ids.length || this.state.relationsSaving) {
+      return;
+    }
+    this.state.relationsSaving = true;
+    this.state.relationError = null;
+    renderRelationDialog(this.elements, this.state);
+    try {
+      const relations = await this.api.addMemeRelations(meme.id, ids);
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.state.relatedMemes = relations;
+      this.state.selectedRelationIds = [];
+      this.state.relationQuery = "";
+      this.elements.relationDialog.close();
+      showToast(`已添加 ${ids.length} 个关联`, "success");
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relationError = readableError(error);
+      }
+    } finally {
+      this.state.relationsSaving = false;
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+      renderRelationDialog(this.elements, this.state);
+    }
+  }
+
+  private async removeRelation(relatedId: number): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.relationRemovingId !== null) {
+      return;
+    }
+    const removalToken = Symbol("relation-removal");
+    this.relationRemovalToken = removalToken;
+    this.state.relationRemovingId = relatedId;
+    this.state.relationError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      await this.api.deleteMemeRelation(meme.id, relatedId);
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relatedMemes = this.state.relatedMemes.filter(
+          (item) => item.id !== relatedId,
+        );
+      }
+      showToast("已移除关联", "info");
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.relationError = readableError(error);
+      }
+    } finally {
+      if (this.relationRemovalToken !== removalToken) {
+        return;
+      }
+      this.relationRemovalToken = null;
+      this.state.relationRemovingId = null;
+      renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    }
+  }
+
+  private async randomize(): Promise<void> {
+    if (this.state.randomizing) {
+      return;
+    }
+    if (!this.confirmDiscardUnsavedChanges()) {
+      return;
+    }
+    this.state.randomizing = true;
+    this.state.actionError = null;
+    renderToolbar(this.elements, this.state);
+    try {
+      const meme = this.state.gifOnly
+        ? await this.api.getRandomMeme(
+            this.state.selectedTags,
+            this.state.selectedTemplateId,
+            true,
+            undefined,
+            this.vaultIdParam(),
+          )
+        : await this.api.getRandomMeme(
+            this.state.selectedTags,
+            this.state.selectedTemplateId,
+            false,
+            undefined,
+            this.vaultIdParam(),
+          );
+      this.selectMeme(meme);
+    } catch (error) {
+      this.state.actionError = readableError(error);
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    } finally {
+      this.state.randomizing = false;
+      renderToolbar(this.elements, this.state);
+    }
+  }
+
+  private beginEdit(): void {
+    const meme = this.state.selectedMeme;
+    if (!meme) {
+      return;
+    }
+    this.editing = true;
+    this.state.actionError = null;
+    this.editDraft = {
+      title: meme.title,
+      description: meme.description ?? "",
+      source: meme.source ?? "",
+      tags: meme.tags.map((tag) => tag.name),
+      templateId: meme.template ? String(meme.template.id) : "",
+    };
+    renderDetail(
+      this.elements,
+      this.state,
+      this.editing,
+      this.editDraft,
+    );
+  }
+
+  private cancelEdit(): void {
+    this.editing = false;
+    this.editTagEditor = null;
+    this.editDraft = null;
+    this.state.actionError = null;
+    renderDetail(this.elements, this.state, false, null);
+  }
+
+  private isDetailDirty(): boolean {
+    if (this.editing && this.state.selectedMeme) {
+      const form = this.elements.detailPanel.querySelector<HTMLFormElement>("#edit-form, [data-edit-form]");
+      if (form) {
+        const meme = this.state.selectedMeme;
+        const title = value(form, "title").trim();
+        const description = value(form, "description").trim();
+        const source = value(form, "source").trim();
+        const templateId = value(form, "template_id");
+        const origTemplateId = meme.template ? String(meme.template.id) : "";
+        const tags = (this.editTagEditor?.getTags() ?? this.editDraft?.tags ?? []).slice().sort().join("\0");
+        const origTags = meme.tags.map((tag) => tag.name).sort().join("\0");
+
+        if (
+          title !== meme.title ||
+          description !== (meme.description ?? "").trim() ||
+          source !== (meme.source ?? "").trim() ||
+          templateId !== origTemplateId ||
+          tags !== origTags
+        ) {
+          return true;
+        }
+      }
+    }
+
+    if (this.state.selectedMeme) {
+      const metaForm = this.elements.detailPanel.querySelector<HTMLFormElement>("form[data-profile-metadata-form]");
+      if (metaForm) {
+        const details = metaForm.closest("details");
+        if (details?.open) {
+          const data = (this.state.selectedMeme.profile_metadata?.data ?? {}) as Record<string, unknown>;
+          const work = (metaForm.querySelector<HTMLInputElement>('input[name="work"]')?.value ?? "").trim();
+          const origWork = String(data.work ?? "").trim();
+          const chars = (metaForm.querySelector<HTMLInputElement>('input[name="characters"]')?.value ?? "").trim();
+          const origChars = (Array.isArray(data.characters) ? (data.characters as string[]).join(", ") : "").trim();
+          const artist = (metaForm.querySelector<HTMLInputElement>('input[name="artist"]')?.value ?? "").trim();
+          const origArtist = String(data.artist ?? "").trim();
+          const fav = Number(metaForm.querySelector<HTMLInputElement>('input[name="favorite_level"]')?.value ?? 0);
+          const origFav = typeof data.favorite_level === "number" ? data.favorite_level : 0;
+          const srcUrl = (metaForm.querySelector<HTMLInputElement>('input[name="source_url"]')?.value ?? "").trim();
+          const origSrcUrl = String(data.source_url ?? "").trim();
+
+          if (
+            work !== origWork ||
+            chars !== origChars ||
+            artist !== origArtist ||
+            fav !== origFav ||
+            srcUrl !== origSrcUrl
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private confirmDiscardUnsavedChanges(): boolean {
+    if (!this.isDetailDirty()) return true;
+    const confirmed = window.confirm("当前内容有未保存的修改，确定放弃并离开吗？");
+    if (confirmed) {
+      if (this.editing) {
+        this.cancelEdit();
+      }
+    }
+    return confirmed;
+  }
+
+  private async submitEdit(form: HTMLFormElement): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.saving) {
+      return;
+    }
+    const title = value(form, "title").trim();
+    if (!title) {
+      this.state.actionError = "标题不能为空。";
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+      return;
+    }
+
+    this.editDraft = {
+      title,
+      description: value(form, "description"),
+      source: value(form, "source"),
+      tags: this.editTagEditor?.getTags() ?? this.editDraft?.tags ?? [],
+      templateId: value(form, "template_id"),
+    };
+    const payload: MemeUpdatePayload = {
+      title,
+      description: this.editDraft.description.trim() || null,
+      source: this.editDraft.source.trim() || null,
+      tags: this.editDraft.tags,
+      template_id: this.editDraft.templateId
+        ? Number(this.editDraft.templateId)
+        : null,
+    };
+    this.state.saving = true;
+    this.state.actionError = null;
+    this.state.operationError = null;
+    renderOperationError(this.elements, this.state);
+    renderDetail(
+      this.elements,
+      this.state,
+      this.editing,
+      this.editDraft,
+    );
+
+    try {
+      const targetId = meme.id;
+      const previousTags = meme.tags.map((tag) => tag.name).sort();
+      const submittedTags = [...this.editDraft.tags].sort();
+      const tagsChanged = previousTags.join("\0") !== submittedTags.join("\0");
+      const updated = await this.api.updateMeme(targetId, payload);
+      await this.semanticIndexManager.refresh();
+      this.replaceMeme(updated);
+      renderMemeCard(
+        this.elements,
+        updated,
+        this.state.selectedMeme?.id === targetId,
+      );
+      if (this.state.selectedMeme?.id === targetId) {
+        this.editing = false;
+        this.editDraft = null;
+        this.editTagEditor = null;
+      }
+      showToast("保存成功", "success");
+      await this.refreshTags();
+      if (tagsChanged) {
+        this.state.page = 1;
+        await this.reloadMemes();
+      }
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.actionError = readableError(error);
+      } else {
+        this.state.operationError = readableError(error);
+      }
+    } finally {
+      this.state.saving = false;
+      renderOperationError(this.elements, this.state);
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    }
+  }
+
+  private mountEditTagEditor(): void {
+    const host = this.elements.detailPanel.querySelector<HTMLElement>(
+      "[data-edit-tag-editor]",
+    );
+    if (!host || !this.editing || !this.editDraft) {
+      this.editTagEditor = null;
+      return;
+    }
+    this.editTagEditor = new TagEditor(host, {
+      tags: this.editDraft.tags,
+      availableTags: this.state.availableTags,
+      label: "Meme 标签",
+      disabled: this.state.saving,
+      onChange: (tags) => {
+        if (this.editDraft) this.editDraft.tags = tags;
+      },
+    });
+  }
+
+  private mapMemeTagMutation(
+    meme: MemeResponse,
+    mutation: TagMutation,
+  ): MemeResponse {
+    const replacement =
+      mutation.type === "rename" || mutation.type === "merge"
+        ? { from: mutation.from, to: mutation.to }
+        : null;
+    const removed =
+      mutation.type === "delete"
+        ? new Set([mutation.name])
+        : mutation.type === "cleanup"
+          ? new Set(mutation.names)
+          : new Set<string>();
+    const tags = meme.tags
+      .filter((tag) => !removed.has(tag.name))
+      .map((tag) =>
+        replacement && tag.name === replacement.from
+          ? { ...tag, name: replacement.to }
+          : tag,
+      )
+      .filter(
+        (tag, index, items) =>
+          items.findIndex((candidate) => candidate.name === tag.name) === index,
+      );
+    return tags === meme.tags ? meme : { ...meme, tags };
+  }
+
+  private async applyTagMutation(mutation: TagMutation): Promise<void> {
+    if (mutation.type === "rename" || mutation.type === "merge") {
+      this.state.selectedTags = [
+        ...new Set(
+          this.state.selectedTags.map((tag) =>
+            tag === mutation.from ? mutation.to : tag,
+          ),
+        ),
+      ];
+    } else {
+      const removed = new Set(
+        mutation.type === "delete" ? [mutation.name] : mutation.names,
+      );
+      this.state.selectedTags = this.state.selectedTags.filter(
+        (tag) => !removed.has(tag),
+      );
+    }
+    this.state.memes = this.state.memes.map((meme) =>
+      this.mapMemeTagMutation(meme, mutation),
+    );
+    this.state.relatedMemes = this.state.relatedMemes.map((meme) =>
+      this.mapMemeTagMutation(meme, mutation),
+    );
+    if (this.state.selectedMeme) {
+      this.state.selectedMeme = this.mapMemeTagMutation(
+        this.state.selectedMeme,
+        mutation,
+      );
+    }
+    await this.refreshTags();
+    renderTags(this.elements, this.state);
+    this.filterScrollFade?.refresh();
+    this.cascadeEntrance.cancel();
+    renderLibrary(this.elements, this.state);
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    this.state.page = 1;
+    await this.reloadMemes();
+  }
+
+  private replaceMeme(updated: MemeResponse): void {
+    if (this.state.selectedMeme?.id === updated.id) {
+      this.state.selectedMeme = updated;
+    }
+    const index = this.state.memes.findIndex(
+      (meme) => meme.id === updated.id,
+    );
+    if (index >= 0) {
+      this.state.memes[index] = updated;
+    }
+  }
+
+  private resetAIAnalysis(): void {
+    this.state.analyzing = false;
+    this.state.confirmingAnalysis = false;
+    this.state.aiAnalysis = null;
+    this.state.selectedAITags = [];
+    this.state.applyAIDescription = false;
+    this.state.applyAITitle = false;
+    this.state.selectedAITemplateId = null;
+    this.state.applyAITemplate = false;
+    this.state.aiError = null;
+  }
+
+  private async analyzeSelected(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (!meme || this.state.analyzing || this.state.confirmingAnalysis) {
+      return;
+    }
+    this.state.analyzing = true;
+    this.state.aiError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      if (this.api.enrichMeme) {
+        const suggestion = await this.api.enrichMeme(meme.id);
+        if (this.state.selectedMeme?.id === meme.id) {
+          const workbench = await this.getEnrichmentWorkbench();
+          await workbench.openSuggestion(suggestion);
+        }
+        return;
+      }
+      const analysis = await this.api.analyzeMeme(meme.id);
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.state.aiAnalysis = analysis;
+      this.state.selectedAITags = analysis.suggestions.map(
+        (suggestion) => suggestion.name,
+      );
+      this.state.applyAIDescription = !meme.description;
+      this.state.applyAITitle = false;
+      this.state.selectedAITemplateId =
+        analysis.suggested_template?.id ?? null;
+      this.state.applyAITemplate = analysis.suggested_template !== null;
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.aiError = readableError(error);
+      }
+    } finally {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.analyzing = false;
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
+      }
+    }
+  }
+
+  private async confirmAnalysis(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    const analysis = this.state.aiAnalysis;
+    if (
+      !meme ||
+      !analysis ||
+      this.state.analyzing ||
+      this.state.confirmingAnalysis
+    ) {
+      return;
+    }
+    this.state.confirmingAnalysis = true;
+    this.state.aiError = null;
+    renderDetail(this.elements, this.state, this.editing, this.editDraft);
+    try {
+      const updated = await this.api.confirmAIAnalysis(
+        meme.id,
+        analysis.id,
+        {
+          tags: this.state.selectedAITags,
+          apply_description: this.state.applyAIDescription,
+          apply_title: this.state.applyAITitle,
+          template_id: this.state.selectedAITemplateId,
+          apply_template: this.state.applyAITemplate,
+        },
+      );
+      await this.semanticIndexManager.refresh();
+      if (this.state.selectedMeme?.id !== meme.id) {
+        return;
+      }
+      this.replaceMeme(updated);
+      this.state.aiAnalysis = null;
+      this.state.selectedAITags = [];
+      this.state.applyAIDescription = false;
+      this.state.applyAITitle = false;
+      this.state.selectedAITemplateId = null;
+      this.state.applyAITemplate = false;
+      await this.refreshTags();
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.aiError = readableError(error);
+      }
+    } finally {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.confirmingAnalysis = false;
+        renderTags(this.elements, this.state);
+        this.cascadeEntrance.cancel();
+        renderLibrary(this.elements, this.state);
+        renderDetail(
+          this.elements,
+          this.state,
+          this.editing,
+          this.editDraft,
+        );
+      }
+    }
+  }
+
+  private async removeSelected(): Promise<void> {
+    const meme = this.state.selectedMeme;
+    if (
+      !meme ||
+      this.state.deleting ||
+      !confirm(`确定删除“${meme.title}”吗？此操作无法撤销。`)
+    ) {
+      return;
+    }
+
+    this.state.deleting = true;
+    this.state.actionError = null;
+    this.state.operationError = null;
+    renderOperationError(this.elements, this.state);
+    renderDetail(this.elements, this.state, false, null);
+    try {
+      const targetId = meme.id;
+      await this.api.deleteMeme(targetId);
+      await this.semanticIndexManager.refresh();
+      if (this.state.selectedMeme?.id === targetId) {
+        this.captionLab.clear();
+        this.state.selectedMeme = null;
+        this.editing = false;
+        this.editDraft = null;
+        this.resetAIAnalysis();
+      }
+      await this.reloadMemes();
+    } catch (error) {
+      if (this.state.selectedMeme?.id === meme.id) {
+        this.state.actionError = readableError(error);
+      } else {
+        this.state.operationError = readableError(error);
+      }
+    } finally {
+      this.state.deleting = false;
+      renderOperationError(this.elements, this.state);
+      this.cascadeEntrance.cancel();
+      renderLibrary(this.elements, this.state);
+      renderDetail(
+        this.elements,
+        this.state,
+        this.editing,
+        this.editDraft,
+      );
+    }
+  }
+}

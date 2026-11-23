@@ -1,0 +1,698 @@
+export interface TagResponse {
+  id: number;
+  name: string;
+  category: string;
+  description: string | null;
+  created_at: string;
+  usage_count: number;
+}
+
+export type TagSort = "name_asc" | "name_desc" | "usage_asc" | "usage_desc";
+
+export interface VaultSummary {
+  id: number;
+  name: string;
+  slug: string;
+  type: string;
+  /** 领域档案：决定 UI 词汇、能力开关与扩展元数据结构。 */
+  profile: string;
+  capabilities: Record<string, boolean>;
+  /** 已解析的仓库视觉主题（自定义优先，其次 Profile 默认预设）。 */
+  appearance: Record<string, unknown>;
+  background_image_url: string | null;
+  description: string | null;
+  icon: string | null;
+  meme_count: number;
+  max_file_size_mb: number;
+}
+
+export interface VaultCreateInput {
+  name: string;
+  slug: string;
+  profile?: string;
+  description?: string | null;
+  icon?: string | null;
+  max_file_size_mb?: number;
+}
+
+export interface VaultUpdateInput {
+  name?: string;
+  description?: string | null;
+  icon?: string | null;
+  max_file_size_mb?: number;
+  profile?: string;
+}
+
+export interface ListTagsOptions {
+  includeEmpty?: boolean;
+  q?: string;
+  sort?: TagSort;
+  signal?: AbortSignal;
+  vaultId?: number;
+}
+
+export interface TagCleanupResponse {
+  deleted_count: number;
+  deleted_tags: string[];
+}
+
+export interface TemplateResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  reference_image_url: string | null;
+  reference_thumbnail_url: string | null;
+  reference_mime_type: string | null;
+  reference_width: number | null;
+  reference_height: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateCreatePayload {
+  name: string;
+  description?: string | null;
+}
+
+export interface TemplateUpdatePayload {
+  name?: string;
+  description?: string | null;
+}
+
+export interface MemeResponse {
+  id: number;
+  /** 所属仓库；vault_asset_no 是仓库内展示序号，id 是内部稳定资源标识。 */
+  vault_id: number;
+  vault_asset_no: number | null;
+  title: string;
+  description: string | null;
+  source: string | null;
+  original_filename: string;
+  stored_filename: string;
+  image_url: string;
+  thumbnail_url: string | null;
+  mime_type: string;
+  file_size: number;
+  width: number;
+  height: number;
+  file_hash: string;
+  created_at: string;
+  updated_at: string;
+  tags: TagResponse[];
+  template: TemplateResponse | null;
+  images: MemeImageResponse[];
+  image_count: number;
+  profile_metadata?: { profile: string; data: Record<string, unknown> } | null;
+}
+
+export interface MemeImageResponse {
+  id: number;
+  original_filename: string;
+  stored_filename: string;
+  image_url: string;
+  thumbnail_url: string | null;
+  mime_type: string;
+  file_size: number;
+  width: number;
+  height: number;
+  file_hash: string;
+  position: number;
+  created_at: string;
+}
+
+export interface MemeUpdatePayload {
+  title?: string;
+  description?: string | null;
+  source?: string | null;
+  tags?: string[];
+  template_id?: number | null;
+}
+
+export interface UploadMemeInput {
+  file: File;
+  title: string;
+  description?: string;
+  source?: string;
+  tags?: string[];
+  template_id?: number | null;
+  // 提供时上传到指定 Vault；省略时走默认 meme Vault 兼容接口。
+  vaultId?: number;
+}
+
+export interface AITagSuggestionResponse {
+  name: string;
+  confidence: number;
+  existing: boolean;
+}
+
+export interface AIAnalysisResponse {
+  id: number;
+  meme_id: number;
+  model_name: string;
+  suggested_title: string | null;
+  description: string;
+  suggestions: AITagSuggestionResponse[];
+  created_at: string;
+  confirmed_at: string | null;
+  suggested_template: TemplateResponse | null;
+}
+
+export interface AIAnalysisConfirmPayload {
+  tags: string[];
+  apply_description: boolean;
+  apply_title: boolean;
+  template_id: number | null;
+  apply_template: boolean;
+}
+
+export interface CreateImportJobInput {
+  archive: File;
+  tags: string[];
+  template_id: number | null;
+  source: string;
+  chunk_size: number;
+  // 提供时导入到指定 Vault；省略时走默认 meme Vault。
+  vaultId?: number;
+}
+
+export type ImportJobStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export interface ImportJobResponse {
+  id: number;
+  original_filename: string;
+  status: ImportJobStatus;
+  total_entries: number;
+  image_entries: number;
+  processed_count: number;
+  success_count: number;
+  skipped_count: number;
+  failed_count: number;
+  chunk_size: number;
+  tags: string[];
+  template_id: number | null;
+  source: string | null;
+  current_filename: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ImportJobItemResponse {
+  id: number;
+  entry_index: number;
+  filename: string;
+  status: "success" | "skipped" | "failed";
+  meme_id: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ImportJobItemPage {
+  items: ImportJobItemResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export type ExportScope = "all" | "filtered";
+export type ExportOrganization = "flat" | "template" | "tag";
+
+export interface CreateExportJobInput {
+  scope: ExportScope;
+  query: string | null;
+  tags: string[];
+  template_id: number | null;
+  organization: ExportOrganization;
+  include_manifest: true;
+  archive_name: string;
+  // 提供时导出范围限定在指定 Vault；省略时走默认 meme Vault。
+  vaultId?: number;
+}
+
+export interface ExportJobResponse {
+  id: number;
+  status: "pending" | "running" | "ready" | "completed_with_errors" | "cancelling" | "cancelled" | "interrupted" | "failed" | "expired";
+  scope: ExportScope;
+  query: string | null;
+  tags: string[];
+  template_id: number | null;
+  organization: ExportOrganization;
+  include_manifest: boolean;
+  archive_name: string;
+  total_memes: number;
+  total_images: number;
+  processed_memes: number;
+  processed_images: number;
+  success_count: number;
+  skipped_count: number;
+  failed_count: number;
+  estimated_bytes: number;
+  archive_size: number | null;
+  current_meme_id: number | null;
+  current_filename: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  expires_at: string | null;
+}
+
+export interface ExportJobItemResponse {
+  id: number;
+  meme_id: number;
+  image_id: number;
+  status: string;
+  archive_filename: string | null;
+  file_size: number;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ExportJobItemPage {
+  items: ExportJobItemResponse[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export type CaptionLength = "short" | "medium" | "long";
+export type CaptionSource = "manual" | "ai";
+export type CaptionRewriteAction = "polish" | "shorten" | "expand" | "retone";
+
+export interface CaptionResponse {
+  id: number;
+  meme_id: number;
+  content: string;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+  source: CaptionSource;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaptionCreatePayload {
+  content: string;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+  source: CaptionSource;
+}
+
+export type CaptionUpdatePayload = Omit<
+  Partial<CaptionCreatePayload>,
+  "source"
+>;
+
+export interface CaptionGeneratePayload {
+  count: 3 | 5 | 8;
+  scene: string | null;
+  tone: string | null;
+  length: CaptionLength | null;
+}
+
+export interface CaptionRewritePayload
+  extends Omit<CaptionGeneratePayload, "count"> {
+  content: string;
+  action: CaptionRewriteAction;
+}
+
+export interface CaptionCandidatesResponse {
+  model_name: string;
+  captions: string[];
+}
+
+export type AIProviderProtocol =
+  | "openai_responses"
+  | "openai_chat_completions"
+  | "dashscope_multimodal_embedding";
+
+export interface AIPresetModel {
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+  supports_image_embedding: boolean;
+}
+
+export interface AIProviderPreset {
+  id: string;
+  name: string;
+  base_url: string;
+  protocol: AIProviderProtocol;
+  description: string;
+  models: AIPresetModel[];
+}
+
+export interface AIProviderResponse {
+  id: number;
+  name: string;
+  protocol: AIProviderProtocol;
+  base_url: string;
+  has_api_key: boolean;
+  api_key_hint: string | null;
+  timeout_seconds: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProviderCreatePayload {
+  preset_id?: string | null;
+  name: string;
+  protocol: AIProviderProtocol;
+  base_url: string;
+  api_key?: string | null;
+  timeout_seconds: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  enabled: boolean;
+}
+
+export type AIProviderUpdatePayload = Partial<
+  Omit<AIProviderCreatePayload, "preset_id">
+>;
+
+export interface AIModelResponse {
+  id: number;
+  provider_id: number;
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+  supports_image_embedding: boolean;
+  enabled: boolean;
+  is_active: boolean;
+  is_embedding_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIModelCreatePayload {
+  provider_id: number;
+  model_id: string;
+  display_name: string;
+  supports_vision: boolean;
+  supports_image_embedding: boolean;
+  enabled: boolean;
+  is_active: boolean;
+  is_embedding_active: boolean;
+}
+
+export type AIModelUpdatePayload = Partial<
+  Omit<AIModelCreatePayload, "provider_id">
+>;
+
+export interface AIConnectionTestResponse {
+  ok: boolean;
+  message: string;
+  model_count: number;
+}
+
+export interface ListMemesOptions {
+  offset: number;
+  limit: number;
+  q?: string;
+  tags?: string[];
+  templateId?: number | null;
+  gifOnly?: boolean;
+  signal?: AbortSignal;
+  vaultId?: number;
+}
+
+export type EnrichmentField = "title" | "description" | "add_tags" | "remove_tags" | "template";
+export type EnrichmentScope = "all" | "filtered" | "missing_description" | "missing_tags" | "missing_template" | "filename_title" | "never_analyzed" | "stale_suggestions" | "id_range";
+
+export interface EnrichmentSuggestionResponse {
+  id: number; meme_id: number; source: "luna" | "provider" | "manual_import";
+  provider_id: number | null; model_record_id: number | null; model_id_snapshot: string | null; job_id: number | null;
+  suggested_title: string | null; suggested_description: string | null; suggested_template_id: number | null;
+  add_tags: string[]; remove_tags: string[]; confidence: Record<string, number | null>;
+  reason: string | null; status: string; source_hash: string; stale: boolean; applied_fields: EnrichmentField[];
+  created_at: string; reviewed_at: string | null; applied_at: string | null;
+}
+
+export interface EnrichmentSuggestionPage {
+  items: EnrichmentSuggestionResponse[]; total: number; offset: number; limit: number;
+}
+
+export interface EnrichmentJobCreateInput {
+  scope: EnrichmentScope; query: string | null; tags: string[];
+  start_meme_id: number | null; end_meme_id: number | null;
+  analyze_title: boolean; analyze_description: boolean; analyze_tags: boolean; analyze_template: boolean;
+  max_workers: 1 | 2 | 4 | 8;
+  // 运行时由 app 层注入当前仓库 id；后端对缺失 vault_id 直接 422。
+  vault_id?: number;
+}
+
+export interface EnrichmentJobResponse {
+  id: number; status: string; scope: EnrichmentScope; provider_id: number | null; model_record_id: number | null;
+  start_meme_id: number | null; end_meme_id: number | null;
+  model_id_snapshot: string; analyze_title: boolean; analyze_description: boolean; analyze_tags: boolean; analyze_template: boolean;
+  total_count: number; processed_count: number; success_count: number; skipped_count: number; failed_count: number;
+  input_tokens: number; output_tokens: number; total_tokens: number; max_workers: number;
+  error_message: string | null; created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EnrichmentJobItemResponse {
+  id: number; job_id: number; meme_id: number; status: string; attempt_count: number; suggestion_id: number | null;
+  error_message: string | null; input_tokens: number; output_tokens: number; total_tokens: number;
+  started_at: string | null; completed_at: string | null;
+}
+
+export interface EnrichmentJobItemPage {
+  items: EnrichmentJobItemResponse[]; total: number; offset: number; limit: number;
+}
+
+export type MemeListSort = "default" | "shuffle";
+export type MemeCardSize = "extra-large" | "large" | "medium" | "small";
+export type MemePageSize = 24 | 48 | 96;
+
+export interface MemePageResponse {
+  items: MemeResponse[];
+  total: number;
+  page: number;
+  page_size: MemePageSize;
+  total_pages: number;
+  sort: MemeListSort;
+  shuffle_seed: number | null;
+}
+
+export type OrientationFilter = "portrait" | "landscape" | "square";
+
+export interface ListMemePageOptions {
+  page: number;
+  pageSize: MemePageSize;
+  q?: string;
+  tags?: string[];
+  templateId?: number | null;
+  gifOnly?: boolean;
+  sort: MemeListSort;
+  shuffleSeed?: number | null;
+  signal?: AbortSignal;
+  vaultId?: number;
+  orientation?: OrientationFilter | null;
+  favorite?: boolean;
+}
+
+export type SearchMode = "keyword" | "semantic";
+
+export interface ScoredMemeResponse {
+  meme: MemeResponse;
+  score: number;
+}
+
+export interface SemanticSearchResponse {
+  items: ScoredMemeResponse[];
+  total: number;
+  page: number;
+  page_size: MemePageSize;
+  total_pages: number;
+  indexed_count: number;
+  missing_count: number;
+  model_id: string;
+}
+
+export interface SemanticSearchInput {
+  query: string;
+  tags: string[];
+  template_id: number | null;
+  page: number;
+  page_size: MemePageSize;
+  signal?: AbortSignal;
+  vaultId?: number;
+}
+
+export interface ChatRecommendationInput {
+  context: string;
+  response_intent: string | null;
+  page: number;
+  signal?: AbortSignal;
+}
+
+export interface ChatRecommendationResponse {
+  items: ScoredMemeResponse[];
+  total: number;
+  page: number;
+  page_size: 12;
+  total_pages: number;
+  indexed_count: number;
+  missing_count: number;
+  model_id: string;
+}
+
+export interface SimilarityInspectionInput {
+  scope: "whole_vault" | "id_range";
+  start_meme_id: number | null;
+  end_meme_id: number | null;
+  top_k: number;
+  similarity_threshold: number;
+  signal?: AbortSignal;
+}
+
+export interface SimilarityInspectionPair {
+  meme_a: MemeResponse;
+  meme_b: MemeResponse;
+  score: number;
+  weak_relation_exists: boolean;
+}
+
+export interface SimilarityInspectionResponse {
+  requested_count: number;
+  ready_count: number;
+  missing_or_stale_count: number;
+  candidate_pair_count: number;
+  pairs: SimilarityInspectionPair[];
+}
+
+export interface CollectionSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  meme_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionItem {
+  position: number;
+  added_at: string;
+  meme: MemeResponse;
+}
+
+export interface CollectionDetail extends CollectionSummary {
+  items: CollectionItem[];
+}
+
+export interface CollectionPayload {
+  name: string;
+  description: string | null;
+}
+
+export interface MemeCollectionsResponse {
+  collection_ids: number[];
+}
+
+export interface SemanticIndexStatus {
+  total_memes: number;
+  ready_count: number;
+  missing_count: number;
+  stale_count: number;
+  failed_count: number;
+  incompatible_count: number;
+  active_model_id: string | null;
+  dimension: number;
+  running_job: { id: number; status: string; processed_count: number; total_count: number } | null;
+}
+
+export type EmbeddingJobScope = "missing_or_stale" | "failed" | "all";
+export interface EmbeddingJobResponse {
+  id: number; status: string; scope: EmbeddingJobScope;
+  model_record_id: number; model_id_snapshot: string; dimension: number; max_workers: number;
+  total_count: number; processed_count: number; success_count: number; skipped_count: number; failed_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number;
+  error_message: string | null; created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EmbeddingJobItemResponse {
+  id: number; job_id: number; meme_id: number; source_hash: string; status: string; attempt_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number; error_message: string | null;
+  created_at: string; started_at: string | null; completed_at: string | null;
+}
+
+export interface EmbeddingJobItemPage {
+  items: EmbeddingJobItemResponse[]; total: number; offset: number; limit: number;
+}
+
+export interface MemeEmbeddingStatus {
+  meme_id: number; status: "ready" | "stale" | "failed"; model_id: string; dimension: number;
+  embedding_kind: string; indexed_image_count: number; total_image_count: number;
+  text_tokens: number; image_tokens: number; total_tokens: number; last_error: string | null; indexed_at: string | null;
+}
+
+export interface AppState {
+  vaults: VaultSummary[];
+  currentVault: VaultSummary | null;
+  orientationFilter: OrientationFilter | null;
+  favoriteOnly: boolean;
+  searchMode: SearchMode;
+  semanticSubmittedQuery: string;
+  semanticScores: Record<number, number>;
+  similarMemes: ScoredMemeResponse[];
+  similarLoading: boolean;
+  similarError: string | null;
+  similarExpanded: boolean;
+  rebuildingEmbedding: boolean;
+  relatedMemes: MemeResponse[];
+  relationQuery: string;
+  selectedRelationIds: number[];
+  relationsLoading: boolean;
+  relationsSaving: boolean;
+  relationRemovingId: number | null;
+  relationError: string | null;
+  imageOperation: "append" | "reorder" | number | null;
+  imageError: string | null;
+  memes: MemeResponse[];
+  availableTags: TagResponse[];
+  availableTemplates: TemplateResponse[];
+  selectedMeme: MemeResponse | null;
+  query: string;
+  selectedTags: string[];
+  tagSearchQuery: string;
+  tagsExpanded: boolean;
+  selectedTemplateId: number | null;
+  templatesExpanded: boolean;
+  gifOnly: boolean;
+  page: number;
+  pageSize: MemePageSize;
+  totalMemes: number;
+  totalPages: number;
+  listSort: MemeListSort;
+  shuffleSeed: number | null;
+  cardSize: MemeCardSize;
+  templatePage: number;
+  loadingList: boolean;
+  saving: boolean;
+  deleting: boolean;
+  randomizing: boolean;
+  analyzing: boolean;
+  confirmingAnalysis: boolean;
+  aiAnalysis: AIAnalysisResponse | null;
+  selectedAITags: string[];
+  applyAIDescription: boolean;
+  applyAITitle: boolean;
+  selectedAITemplateId: number | null;
+  applyAITemplate: boolean;
+  aiError: string | null;
+  listError: string | null;
+  actionError: string | null;
+  operationError: string | null;
+}

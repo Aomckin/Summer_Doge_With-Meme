@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $EnvFile = Join-Path $ProjectRoot ".env"
+$Frontend = Join-Path $ProjectRoot "frontend"
 
 try {
     Set-Location -LiteralPath $ProjectRoot
@@ -33,6 +34,35 @@ try {
     }
     finally {
         $Listener.Stop()
+    }
+
+    $BuildEntries = @("dist\index.html", "dist\mobile\index.html") | ForEach-Object { Join-Path $Frontend $_ }
+    $NeedsBuild = -not (Test-Path -LiteralPath (Join-Path $Frontend "dist\assets") -PathType Container)
+    if (@($BuildEntries | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count) {
+        $NeedsBuild = $true
+    }
+    if (-not $NeedsBuild) {
+        $OldestEntry = (Get-Item -LiteralPath $BuildEntries | Sort-Object LastWriteTimeUtc | Select-Object -First 1).LastWriteTimeUtc
+        $Inputs = @("src", "mobile", "public", "index.html", "package.json", "package-lock.json", "tsconfig.json", "vite.config.ts") |
+            ForEach-Object { Join-Path $Frontend $_ } |
+            Where-Object { Test-Path -LiteralPath $_ }
+        if ($Inputs) {
+        if ($Inputs) {
+            $NeedsBuild = $null -ne (Get-ChildItem -LiteralPath $Inputs -File -Recurse |
+                Where-Object { $_.LastWriteTimeUtc -gt $OldestEntry } | Select-Object -First 1)
+        }
+        }
+    }
+    if ($NeedsBuild) {
+        $Npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+        if (-not $Npm) {
+            throw "The frontend needs a build. Install Node.js with npm, then launch Meme Vault again."
+        }
+        Write-Host "Building the current Meme Vault frontend..." -ForegroundColor Cyan
+        & $Npm.Source --prefix $Frontend run build
+        if ($LASTEXITCODE -ne 0) {
+            throw "Frontend build failed. Check the error above and install dependencies with npm.cmd --prefix frontend ci if needed."
+        }
     }
 
     Write-Host "Starting Meme Vault: http://127.0.0.1:$Port" -ForegroundColor Cyan

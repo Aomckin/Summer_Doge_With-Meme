@@ -1,5 +1,6 @@
 """Exercise the Windows launcher without the real app, database or providers."""
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -43,6 +44,11 @@ def run_script(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def prepare_fake_uvicorn(root: Path, exit_code: int = 0) -> None:
     venv.EnvBuilder(with_pip=False).create(root / ".venv")
     (root / ".env").write_text("# fake configuration\n", encoding="utf-8")
+    dist = root / "frontend" / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "mobile").mkdir()
+    for entry in (dist / "index.html", dist / "mobile" / "index.html"):
+        entry.write_text("<!doctype html>", encoding="utf-8")
     (root / "uvicorn.py").write_text(
         "import json, os, sys\n"
         "print('LAUNCH=' + json.dumps({'cwd': os.getcwd(), 'args': sys.argv[1:]}))\n"
@@ -93,6 +99,7 @@ def test_uvicorn_arguments_and_project_directory(launcher_root: Path) -> None:
         "--forwarded-allow-ips", "127.0.0.1",
     ]
     assert "Press Enter to close" not in result.stdout
+    assert "Building the current" not in result.stdout
     assert "Fake Uvicorn diagnostic" in result.stderr
 
 
@@ -136,4 +143,41 @@ def test_occupied_port_fails_before_application_startup(launcher_root: Path) -> 
     assert result.returncode == 1
     assert f"Cannot bind to 127.0.0.1:{port}" in result.stdout
     assert "-Port 8003" in result.stdout
+    assert "LAUNCH=" not in result.stdout
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_launcher_rebuilds_missing_or_stale_frontend(launcher_root: Path, monkeypatch, stale: bool) -> None:
+    prepare_fake_uvicorn(launcher_root)
+    frontend = launcher_root / "frontend"
+    if stale:
+        src = frontend / "src"
+        src.mkdir()
+        (src / "app.ts").write_text("// updated source", encoding="utf-8")
+        old = 1_600_000_000
+        os.utime(frontend / "dist" / "index.html", (old, old))
+    else:
+        (frontend / "dist" / "mobile" / "index.html").unlink()
+    (launcher_root / "npm.cmd").write_text(
+        '@echo off\n'
+        'if not "%~1 %~3 %~4"=="--prefix run build" exit /b 9\n'
+        'if not exist "%~2\\dist\\index.html" exit /b 8\n'
+        'echo FRONTEND_BUILD\n'
+        'exit /b 0\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("PATH", f"{launcher_root}{os.pathsep}{os.environ['PATH']}")
+    result = run_script(launcher_root, "-NoPauseOnError", "-Port", "8003")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.index("FRONTEND_BUILD") < result.stdout.index("LAUNCH=")
+
+
+def test_failed_frontend_build_stops_before_uvicorn(launcher_root: Path, monkeypatch) -> None:
+    prepare_fake_uvicorn(launcher_root)
+    (launcher_root / "frontend" / "dist" / "index.html").unlink()
+    (launcher_root / "npm.cmd").write_text("@echo off\nexit /b 7\n", encoding="ascii")
+    monkeypatch.setenv("PATH", f"{launcher_root}{os.pathsep}{os.environ['PATH']}")
+    result = run_script(launcher_root, "-NoPauseOnError", "-Port", "8003")
+    assert result.returncode == 1
+    assert "Frontend build failed" in result.stdout
     assert "LAUNCH=" not in result.stdout

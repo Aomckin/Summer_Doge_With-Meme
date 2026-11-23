@@ -245,6 +245,7 @@ CAPTION_SYSTEM_PROMPT = (
     "你是中文 Meme 文案创作助手。根据用户提供的完整有序图片组和资料生成"
     "可直接用于 Meme 的简体中文文案。文案要自然、具体、有梗，不要解释创作过程，"
     "不要添加序号、引号或“文案：”前缀。严格遵循场景、语气和长度条件。"
+    '只输出 JSON 对象，格式为 {"captions":["候选文案"]}。'
 )
 
 
@@ -378,13 +379,13 @@ class _HTTPAIClient:
             )
         )
 
-    @staticmethod
     def _parse_caption_result(
+        self,
         response_payload: object,
         output_text: str,
     ) -> AICaptionResult:
         try:
-            parsed = json.loads(output_text)
+            parsed = self._load_model_json(output_text)
             if not isinstance(parsed, dict):
                 raise TypeError
             captions = parsed["captions"]
@@ -400,7 +401,7 @@ class _HTTPAIClient:
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise AIInvalidResponseError(
-                "AI service returned an invalid caption response"
+                "AI 返回的文案格式无效，需要包含文案字符串列表。"
             ) from error
         return AICaptionResult(
             model_name=model_name,
@@ -491,7 +492,7 @@ class _HTTPAIClient:
         return text[:maximum]
 
     @staticmethod
-    def _load_enrichment_json(output_text: str) -> object:
+    def _load_model_json(output_text: str) -> object:
         """Conservatively unwrap transport noise without rewriting model data."""
         cleaned = output_text.lstrip("\ufeff").strip()
         candidates = [cleaned]
@@ -512,7 +513,7 @@ class _HTTPAIClient:
     def _parse_enrichment_result(self, response_payload: object, output_text: str) -> AIEnrichmentResult:
         model_name, input_tokens, output_tokens, total_tokens = self._response_usage(response_payload)
         try:
-            value = self._load_enrichment_json(output_text)
+            value = self._load_model_json(output_text)
             if not isinstance(value, dict):
                 raise TypeError
             def optional_text(name: str, maximum: int) -> str | None:
@@ -899,10 +900,15 @@ class OpenAIResponsesClient(_HTTPAIClient):
         )
         try:
             payload = response.json()
+        except ValueError as error:
+            raise AIInvalidResponseError("AI 服务返回了无法读取的响应。") from error
+        if isinstance(payload, dict) and payload.get("status") == "incomplete":
+            raise AIInvalidResponseError("AI 返回的文案不完整，请重试或减少候选数。")
+        try:
             output_text = self._extract_output_text(payload)
-        except (TypeError, ValueError, json.JSONDecodeError) as error:
+        except (TypeError, ValueError, AIInvalidResponseError) as error:
             raise AIInvalidResponseError(
-                "AI service returned an invalid caption response"
+                "AI 服务未返回文案正文，请检查当前模型或接入协议。"
             ) from error
         return self._parse_caption_result(payload, output_text)
 
@@ -920,16 +926,18 @@ class OpenAIResponsesClient(_HTTPAIClient):
     def _extract_output_text(payload: object) -> str:
         if not isinstance(payload, dict):
             raise AIInvalidResponseError("AI service returned an invalid response")
-        for output in payload.get("output", []):
+        for output in payload.get("output") or []:
             if not isinstance(output, dict) or output.get("type") != "message":
                 continue
-            for content in output.get("content", []):
-                if (
-                    isinstance(content, dict)
-                    and content.get("type") == "output_text"
-                    and isinstance(content.get("text"), str)
-                ):
-                    return content["text"]
+            text = "".join(
+                content["text"] for content in output.get("content") or []
+                if isinstance(content, dict) and content.get("type") == "output_text"
+                and isinstance(content.get("text"), str)
+            )
+            if text.strip():
+                return text
+        if isinstance(text := payload.get("output_text"), str) and text.strip():
+            return text
         raise AIInvalidResponseError("AI service returned no structured output")
 
 
@@ -1138,10 +1146,7 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                 "messages": [
                     {
                         "role": "system",
-                        "content": (
-                            f"{CAPTION_SYSTEM_PROMPT} 必须只输出 JSON 对象："
-                            '{"captions":["候选文案"]}'
-                        ),
+                        "content": CAPTION_SYSTEM_PROMPT,
                     },
                     {
                         "role": "user",
@@ -1165,6 +1170,6 @@ class OpenAICompatibleChatClient(_HTTPAIClient):
                 raise TypeError
         except (KeyError, IndexError, TypeError, ValueError) as error:
             raise AIInvalidResponseError(
-                "AI service returned an invalid caption response"
+                "AI 服务未返回文案正文，请检查当前模型或接入协议。"
             ) from error
         return self._parse_caption_result(payload, output_text)

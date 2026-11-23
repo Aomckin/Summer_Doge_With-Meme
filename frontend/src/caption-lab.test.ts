@@ -180,20 +180,53 @@ describe("CaptionLabController", () => {
     });
     const { panel } = setup(api);
     await flush();
+    panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open = true;
     panel.querySelector<HTMLButtonElement>("[data-edit-caption='1']")!.click();
     const textarea = panel.querySelector<HTMLTextAreaElement>(
       "[data-caption-content]",
     )!;
+    expect(panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open).toBe(true);
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.value).toBe(firstCaption.content);
+    expect(panel.querySelector("[data-save-draft]")?.textContent).toBe("保存修改");
     textarea.value = "修改后";
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     panel.querySelector<HTMLButtonElement>("[data-save-draft]")!.click();
     await flush();
 
-    expect(api.updateCaption).toHaveBeenCalledWith(
-      1,
-      1,
-      expect.not.objectContaining({ source: expect.anything() }),
-    );
+    expect(api.updateCaption).toHaveBeenCalledWith(1, 1, {
+      content: "修改后",
+      scene: firstCaption.scene,
+      tone: firstCaption.tone,
+      length: firstCaption.length,
+    });
+    expect(panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open).toBe(true);
+    expect(panel.querySelector(".caption-card")?.textContent).toContain("修改后");
+  });
+
+  it("keeps the editor open when discarding an edit and after the detail panel rerenders", async () => {
+    const api = makeApi({ listCaptions: vi.fn().mockResolvedValue([firstCaption]) });
+    const { controller, panel, confirmDiscard } = setup(api);
+    await flush();
+    panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open = true;
+    panel.querySelector<HTMLButtonElement>("[data-edit-caption='1']")!.click();
+
+    panel.innerHTML = '<div data-caption-lab-host></div>';
+    panel.dispatchEvent(new CustomEvent("meme-detail-rendered"));
+    expect(panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open).toBe(true);
+
+    const textarea = panel.querySelector<HTMLTextAreaElement>("[data-caption-content]")!;
+    textarea.value = "不要保存";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    panel.querySelector<HTMLButtonElement>("[data-discard-draft]")!.click();
+    expect(confirmDiscard).toHaveBeenCalledOnce();
+    expect(api.updateCaption).not.toHaveBeenCalled();
+    expect(panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open).toBe(true);
+    expect(panel.querySelector(".caption-card")?.textContent).toContain(firstCaption.content);
+
+    controller.setMeme(2);
+    await flush();
+    expect(panel.querySelector<HTMLDetailsElement>("[data-caption-lab]")!.open).toBe(false);
   });
 
   it("leaves the draft and saved list unchanged when AI rewrite fails", async () => {

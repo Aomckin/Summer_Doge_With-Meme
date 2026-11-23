@@ -92,6 +92,7 @@ export class CaptionLabController {
   private busy: "save" | "generate" | "rewrite" | "delete" | null = null;
   private error: string | null = null;
   private showAll = false;
+  private expanded = false;
   private epoch = 0;
   private requestController: AbortController | null = null;
   private readonly abortController = new AbortController();
@@ -152,6 +153,7 @@ export class CaptionLabController {
     this.requestController?.abort();
     this.requestController = null;
     this.memeId = memeId;
+    this.expanded = false;
     this.captions = [];
     this.candidates = [];
     this.draft = cloneDraft(EMPTY_DRAFT);
@@ -171,6 +173,7 @@ export class CaptionLabController {
     this.requestController?.abort();
     this.requestController = null;
     this.memeId = null;
+    this.expanded = false;
     this.captions = [];
     this.candidates = [];
     this.draft = cloneDraft(EMPTY_DRAFT);
@@ -186,6 +189,8 @@ export class CaptionLabController {
       "[data-caption-lab-host]",
     );
     if (!host || this.memeId === null) return;
+    const details = host.querySelector<HTMLDetailsElement>("[data-caption-lab]");
+    if (details?.dataset.captionLab === String(this.memeId)) this.expanded = details.open;
     this.render(host);
   }
 
@@ -265,13 +270,15 @@ export class CaptionLabController {
     if (
       !(details instanceof HTMLDetailsElement) ||
       !details.matches("[data-caption-lab]") ||
-      details.open ||
-      !this.hasUnsavedDraft()
+      !this.panel.contains(details)
     ) {
       return;
     }
+    this.expanded = details.open;
+    if (this.expanded || !this.hasUnsavedDraft()) return;
     if (!this.confirmDiscard("文案草稿尚未保存，确定折叠并放弃吗？")) {
       details.open = true;
+      this.expanded = true;
       return;
     }
     this.resetDraft();
@@ -318,6 +325,7 @@ export class CaptionLabController {
         this.initialDraft = cloneDraft(this.draft);
         this.error = null;
         this.mount();
+        this.panel.querySelector<HTMLTextAreaElement>("[data-caption-content]")?.focus();
       }
       return;
     }
@@ -535,7 +543,7 @@ export class CaptionLabController {
       : this.captions.slice(0, CARD_LIMIT);
     const disabled = this.busy ? "disabled" : "";
     host.innerHTML = `
-      <details class="caption-lab" data-caption-lab>
+      <details class="caption-lab" data-caption-lab="${this.memeId}" ${this.expanded ? "open" : ""}>
         <summary>
           <span><strong>文案实验室</strong><small>${this.captions.length} 条已保存</small></span>
           <span aria-hidden="true">⌄</span>

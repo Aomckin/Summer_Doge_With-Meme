@@ -327,6 +327,7 @@ def test_responses_client_generates_captions_with_context_and_ordered_images() -
     schema = payload["text"]["format"]["schema"]["properties"]["captions"]
     assert schema["minItems"] == 3
     assert schema["maxItems"] == 3
+    assert '"captions"' in payload["input"][0]["content"][0]["text"]
     content = payload["input"][1]["content"]
     assert all(
         value in content[0]["text"]
@@ -341,6 +342,40 @@ def test_responses_client_generates_captions_with_context_and_ordered_images() -
     assert result.captions == ("候选一", "候选二", "候选三")
 
 
+@pytest.mark.parametrize("aggregate", [False, True])
+def test_responses_caption_accepts_wrapped_json_from_compatible_provider(aggregate: bool) -> None:
+    first = '```json\n{"captions":["候选一",'
+    second = '"候选二","候选三"]}\n```'
+    payload = {"model": "relay-vision"}
+    if aggregate:
+        payload["output_text"] = first + second
+    else:
+        payload["output"] = [{"type": "reasoning"}, {"type": "message", "content": [
+            {"type": "output_text", "text": first}, {"type": "output_text", "text": second},
+        ]}]
+    with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))) as http_client:
+        result = OpenAIResponsesClient(api_key="secret", http_client=http_client).generate_captions(
+            images=[AIInputImage(b"test", "image/png", 0)], title="测试", description=None,
+            tags=[], template=None, scene=None, tone=None, length=None, count=3,
+        )
+    assert result.captions == ("候选一", "候选二", "候选三")
+
+
+@pytest.mark.parametrize(("payload", "reason"), [
+    ({"status": "incomplete", "output_text": '{"captions":["候选"]}'}, "不完整"),
+    ({"output": [{"type": "reasoning"}]}, "未返回文案正文"),
+    ({"output_text": '{"captions":[{"text":"不符合字符串结构"}]}'}, "格式无效"),
+])
+def test_responses_caption_reports_stage_of_invalid_output(payload: dict, reason: str) -> None:
+    with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))) as http_client:
+        client = OpenAIResponsesClient(api_key="secret", http_client=http_client)
+        with pytest.raises(AIInvalidResponseError, match=reason):
+            client.generate_captions(
+                images=[AIInputImage(b"test", "image/png", 0)], title="测试", description=None,
+                tags=[], template=None, scene=None, tone=None, length=None, count=3,
+            )
+
+
 def test_chat_client_rewrites_caption_without_mutating_upstream_state() -> None:
     captured: dict[str, object] = {}
 
@@ -353,10 +388,10 @@ def test_chat_client_rewrites_caption_without_mutating_upstream_state() -> None:
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(
+                            "content": "```json\n" + json.dumps(
                                 {"captions": ["润色结果"]},
                                 ensure_ascii=False,
-                            )
+                            ) + "\n```"
                         }
                     }
                 ],
